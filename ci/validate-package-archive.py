@@ -63,8 +63,15 @@ def main():
         if not is_allowed_package_file(name):
             failures.append(f"{name}: not in package allowlist")
 
-    required_toolkit_files = ("Editor/AI/Skills/orbiters-toolkit/SKILL.md", "Editor/AI/SkillInstaller.cs", "Editor/AI/ToolkitWindow.cs", "Editor/MCP/EditorWindowCapture.cs", "Editor/MCP/EditorWindowScreenshotTool.cs", "Editor/Orbiters.Toolkit.Editor.asmdef", "Editor/MCP/Orbiters.Toolkit.MCP.Editor.asmdef", "Editor/Posing/MirrorPoseService.cs")
-    for required_file in ROOT_FILES + required_toolkit_files:
+    required_myavatar_files = (
+        "Runtime/Orbiters.MyAvatar.asmdef", "Runtime/MyAvatar.cs",
+        "Editor/Orbiters.MyAvatar.Editor.asmdef", "Editor/MyAvatarEditor.cs",
+        "Editor/TextureImport.cs", "Editor/TextureMatching.cs", "Editor/TextureAi.cs",
+        "Editor/TextureChanges.cs", "Editor/MyAvatarResults.cs",
+        "Editor/UI/TextureDropElement.cs", "Editor/UI/MyAvatarLogo.svg.txt",
+        "Editor/UI/myavatar.uss",
+    )
+    for required_file in ROOT_FILES + required_myavatar_files:
         if required_file not in names:
             failures.append(f"{required_file}: required root file missing")
 
