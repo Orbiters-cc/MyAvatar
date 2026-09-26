@@ -1,0 +1,19 @@
+{
+  "name": "orbiters.myavatar",
+  "displayName": "My Avatar",
+  "version": "0.0.1",
+  "unity": "2022.3",
+  "description": "Apply texture sets to your avatar, resolve ambiguous matches, undo changes and save a Unit Git checkpoint.",
+  "author": {
+    "name": "Orbiters",
+    "url": "https://orbiters.cc"
+  },
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "vpmDependencies": {
+    "orbiters.toolkit": ">=0.2.1 <0.3.0",
+    "orbiters.unitgit": ">=0.1.1 <1.0.0",
+    "com.vrchat.avatars": ">=3.5.0 <4.0.0"
+  }
+}

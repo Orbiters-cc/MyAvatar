@@ -1,0 +1,13 @@
+{
+  "name": "Orbiters.MyAvatar.Editor",
+  "rootNamespace": "Orbiters.MyAvatar.Editor",
+  "references": [
+    "Orbiters.MyAvatar",
+    "Orbiters.Toolkit",
+    "orbiters.unitgit.Editor",
+    "Unity.Newtonsoft.Json"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Orbiters.MyAvatar",
+  "rootNamespace": "Orbiters.MyAvatar",
+  "references": [
+    "VRC.SDKBase"
+  ]
+}
