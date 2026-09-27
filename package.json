@@ -3,7 +3,7 @@
   "displayName": "My Avatar",
   "version": "0.2.0",
   "unity": "2022.3",
-  "description": "Apply texture sets to your avatar, resolve ambiguous matches and undo changes. Save also records a Unit Git checkpoint when Unit Git is installed.",
+  "description": "Apply texture sets to your avatar, create its VRChat thumbnail, resolve ambiguous matches and undo changes. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
     "name": "Orbiters",
     "url": "https://orbiters.cc"
@@ -12,7 +12,7 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.2.1 <0.3.0",
+    "orbiters.toolkit": ">=0.2.2 <0.3.0",
     "com.vrchat.avatars": ">=3.5.0 <4.0.0"
   }
 }

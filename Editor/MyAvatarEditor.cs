@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Orbiters.Toolkit.Editor.Photoshoot;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -18,13 +19,15 @@ namespace Orbiters.MyAvatar.Editor
         private TextureDropZone zone;
         private Button undo, save;
         private CancellationTokenSource operation, background;
+        private readonly PhotoshootState photoshoot = new PhotoshootState();
         private Func<Task> pendingAi;
-        private string note, backgroundStatus;
-        private bool noteWarning;
-        private int revision;
-        private bool busy;
+        // Transient UI state: Unity would otherwise serialize these across script reloads (turning null strings into "").
+        [NonSerialized] private string note, backgroundStatus;
+        [NonSerialized] private bool noteWarning;
+        [NonSerialized] private int revision;
+        [NonSerialized] private bool busy;
         private void OnEnable() { avatar = (MyAvatar)target; Undo.undoRedoPerformed += Reload; AssemblyReloadEvents.beforeAssemblyReload += Cancel; }
-        private void OnDisable() { Undo.undoRedoPerformed -= Reload; AssemblyReloadEvents.beforeAssemblyReload -= Cancel; Cancel(); }
+        private void OnDisable() { Undo.undoRedoPerformed -= Reload; AssemblyReloadEvents.beforeAssemblyReload -= Cancel; Cancel(); photoshoot.Dispose(); }
         private void Cancel() { operation?.Cancel(); background?.Cancel(); }
         // Any edit, Undo or Redo makes a pending AI answer stale: it must never overwrite a newer state.
         private void Edited() { revision++; background?.Cancel(); }
@@ -51,6 +54,7 @@ namespace Orbiters.MyAvatar.Editor
             save.AddToClassList("mcb-button--primary");
             zone = new TextureDropZone(paths => _ = Run(() => Import(paths)), undo, save); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
+            content.Add(new ThumbnailSection(avatar, photoshoot));
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
@@ -169,10 +173,11 @@ namespace Orbiters.MyAvatar.Editor
             results.Clear();
             undo.text = avatar.canRedo ? "Redo" : "Undo";
             undo.SetEnabled(avatar.undoMaterials.Count > 0 && !busy); save.SetEnabled(avatar.textures.Count > 0 && !busy);
-            if (busy && note == null) return;
-            if (avatar.textures.Count == 0) { zone.ShowIdle(note, noteWarning); return; }
+            if (busy && string.IsNullOrEmpty(note)) return;
+            if (avatar.textures.Count == 0) { zone.ShowIdle(string.IsNullOrEmpty(note) ? null : note, noteWarning); return; }
             bool pending = !avatar.canRedo && avatar.textures.GroupBy(t => t.fileName).Any(g => !g.Any(t => t.applied));
-            zone.ShowDone(note ?? StatusText(), note != null ? noteWarning : pending);
+            bool hasNote = !string.IsNullOrEmpty(note);
+            zone.ShowDone(hasNote ? note : StatusText(), hasNote ? noteWarning : pending);
             zone.SetBackground(backgroundStatus);
             if (!avatar.canRedo) MyAvatarResults.Populate(results, avatar, Edited, () => _ = Run(() => {
                 note = null;

@@ -26,6 +26,22 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
    paths and staged changes are excluded. Ignored checkpoint files must be
    unignored first. Nothing is pushed.
 
+## Thumbnail
+
+**Create thumbnail** opens the Orbiters photoshoot, the same one MCB uses for custom
+base media, set up for one 4:3 VRChat thumbnail (1200×900). Choose a light, pose,
+background and expression, frame the avatar with rotation, placement and zoom, then
+press **Set**. **Browse** uses an existing image instead and **Retry** returns to the
+live preview. The image is saved as
+`Assets/Orbiters/MyAvatar/Thumbnails/<avatar> <id>/<avatar> thumbnail.png`; a new
+capture replaces it.
+
+Whenever the VRChat SDK builder shows this avatar, My Avatar fills in this thumbnail
+through the SDK's own thumbnail selection, exactly as if you had chosen the file with
+**Select Image**. **Open in VRChat SDK** opens the panel on this avatar. The SDK then
+treats it as a pending change: review it, and upload or discard as usual. A thumbnail
+you choose in the SDK afterwards is left alone. Nothing is uploaded automatically.
+
 ## What changes
 
 Existing project textures are reused without copying or reimporting. For external
@@ -124,6 +140,6 @@ the canonical VPM listing current.
 Assemblies: `Orbiters.MyAvatar` contains the persistent component;
 `Orbiters.MyAvatar.Editor` contains import, matching, changes and Inspector UI.
 Toolkit owns account storage, API roots/transport, shared account controls,
-animated glow rendering and SVG logo drawing. Unit Git, when installed, owns Git
+animated glow rendering, SVG logo drawing and the photoshoot panel. Unit Git, when installed, owns Git
 execution and scoped index handling; the `MYAVATAR_UNITGIT` version define enables
 the commit step. My Avatar does not depend on MCB.

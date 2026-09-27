@@ -16,6 +16,7 @@ namespace Orbiters.MyAvatar
         [HideInInspector] public List<TextureEntry> textures = new List<TextureEntry>();
         [HideInInspector] public List<RendererSnapshot> undoMaterials = new List<RendererSnapshot>();
         [HideInInspector] public bool canRedo;
+        [HideInInspector] public Texture2D thumbnail;
     }
 
     [Serializable]

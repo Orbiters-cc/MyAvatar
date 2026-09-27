@@ -5,6 +5,9 @@
     "Orbiters.MyAvatar",
     "Orbiters.Toolkit",
     "orbiters.unitgit.Editor",
+    "Orbiters.Toolkit.Editor",
+    "VRC.SDKBase.Editor",
+    "VRC.SDK3A.Editor",
     "Unity.Newtonsoft.Json"
   ],
   "includePlatforms": [
