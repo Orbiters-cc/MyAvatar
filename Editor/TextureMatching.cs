@@ -71,29 +71,73 @@ namespace Orbiters.MyAvatar.Editor
                 .Where(w => w.Length > 2 && !new[] { "mat", "matt", "material", "myavatar", "map", "tex", "base", "color", "normal", "emission", "metallic", "png", "jpg", "dev", "ulti", "rex", "setup" }.Contains(w)));
         }
 
-        internal static void Match(List<TextureEntry> textures, List<TextureSlot> slots)
+        internal const string RememberedReason = "Remembered from your previous apply to this avatar.";
+
+        internal static void Match(List<TextureEntry> textures, List<TextureSlot> slots, Dictionary<Texture2D, TextureStats> stats, Dictionary<string, TextureMemory.Slot> memory)
         {
+            var context = slots.GroupBy(s => s.material).ToDictionary(g => g.Key,
+                g => Words(string.Join(" ", g.Select(s => s.existingName))));
+            var materialWords = context.Keys.ToDictionary(m => m, m => Words(m.name));
+            var existingWords = slots.ToDictionary(s => s, s => Words(s.existingName));
             foreach (var texture in textures)
             {
+                var remembered = TextureMemory.Find(memory, texture, slots);
+                if (remembered != null) { Assign(texture, remembered, 1f, RememberedReason); continue; }
                 var words = Words(texture.fileName);
                 var ranked = slots.Where(s => s.role == texture.role && texture.role != "unknown")
-                    .Select(s => new { slot = s, score = words.Intersect(Words(s.materialName)).Count() * 4 + words.Intersect(Words(s.existingName)).Count() * 2 })
+                    .Select(s => new { slot = s, evidence = words.Intersect(materialWords[s.material]).Count() * 4 +
+                        words.Intersect(existingWords[s]).Count() * 3 + words.Intersect(context[s.material]).Count() * 2 })
+                    .Where(s => s.evidence > 0)
+                    .Select(s => new { s.slot, score = s.evidence + SlotPreference(texture, s.slot) })
                     .Where(s => s.score > 0).OrderByDescending(s => s.score).ToList();
                 if (ranked.Count == 0) { texture.reason = "No clear material and texture-slot match. Choose a slot below."; continue; }
                 if (ranked.Count > 1 && ranked[0].score == ranked[1].score)
                 { texture.reason = "Several materials are equally likely. Choose the target below."; continue; }
                 var best = ranked[0].slot;
-                texture.material = best.material; texture.property = best.property; texture.confidence = .95f;
-                texture.reason = "Matched the material name and " + texture.role + " slot.";
+                Assign(texture, best, .95f, "Matched " + best.materialName + " / " + best.description + " using the material’s existing texture set.");
             }
+            SeparateEmission(textures, slots, stats);
             RejectConflicts(textures);
+        }
+
+        private static void Assign(TextureEntry texture, TextureSlot slot, float confidence, string reason)
+        {
+            texture.material = slot.material; texture.property = slot.property; texture.confidence = confidence;
+            texture.suggestedMaterialName = slot.materialName; texture.suggestedProperty = slot.property; texture.reason = reason;
+        }
+
+        // Two colour images aimed at one colour slot, where exactly one is mostly black with bright details and the
+        // material has a free emission slot: the dark one is the emission map (e.g. Eyes_BaseColor vs Eyes_BaseColor3).
+        private static void SeparateEmission(List<TextureEntry> textures, List<TextureSlot> slots, Dictionary<Texture2D, TextureStats> stats)
+        {
+            foreach (var group in textures.Where(t => t.material && !t.applied && t.role == "color").GroupBy(t => (t.material, t.property)).Where(g => g.Count() == 2).ToList())
+            {
+                var emissive = group.Where(t => stats.TryGetValue(t.texture, out var s) && s.LooksEmissive).ToList();
+                if (emissive.Count != 1) continue;
+                var other = group.First(t => t != emissive[0]);
+                if (!stats.TryGetValue(other.texture, out var otherStats) || otherStats.black > .3f) continue;
+                var target = slots.Where(s => s.material == group.Key.material && s.role == "emission" && !textures.Any(t => t.material == s.material && t.property == s.property))
+                    .OrderByDescending(s => SlotPreference(emissive[0], s)).FirstOrDefault();
+                if (target == null) continue;
+                Assign(emissive[0], target, .92f, "Mostly black with bright details: matched as " + target.materialName + " / " + target.description + ".");
+            }
+        }
+
+        private static int SlotPreference(TextureEntry entry, TextureSlot slot)
+        {
+            bool detailTexture = entry.fileName.IndexOf("detail", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool detailSlot = (slot.property + " " + slot.description).IndexOf("detail", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (detailTexture != detailSlot) return -8;
+            // A plain normal/albedo/emission map belongs in the primary slot, rather than an empty secondary layer.
+            if (slot.property == "_BumpMap" || slot.property == "_MainTex" || slot.property == "_BaseMap" || slot.property == "_EmissionMap") return 2;
+            return 0;
         }
 
         internal static void RejectConflicts(List<TextureEntry> textures)
         {
             foreach (var conflict in textures.Where(t => t.material && !t.applied).GroupBy(t => (t.material, t.property)).Where(g => g.Count() > 1))
                 foreach (var entry in conflict) { entry.material = null; entry.property = null; entry.confidence = 0;
-                    entry.reason = "Alternative textures compete for the same slot. Choose which one to use."; }
+                    entry.reason = "Filename matching points multiple images at " + entry.suggestedMaterialName + " / " + entry.suggestedProperty + ". Image analysis may distinguish their roles."; }
         }
     }
 }

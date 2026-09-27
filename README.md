@@ -26,10 +26,23 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
 
 ## What changes
 
-Each drop imports copies under `Assets/Orbiters/MyAvatar/<batch-id>/`. The tool
-creates material copies and assigns them only to renderers under this component.
-Original materials and external images are preserved. Normal maps get Unity's
-normal-map importer; named mask maps use linear color. Standard shader normal,
+Existing project textures are reused without copying or reimporting. For external
+files, a persistent cache keyed by source path, size and modification time checks
+only the files you dropped; unchanged files reuse their cached assets. New files are
+copied in parallel, without content hashing, to one folder per drop under
+`Assets/Orbiters/MyAvatar/Textures/`. No project-wide texture search or comparison
+runs. A normal map with an incompatible importer gets a separate correctly configured
+copy; the original asset's settings stay unchanged.
+
+File discovery and copying run in the background. Unity's asset import and material
+APIs still run on its main thread. Importer settings are written before the first
+import, so each new texture is imported exactly once, in one batch. There is no
+per-image forced synchronous import, per-image SaveAndReimport, or whole-project Refresh.
+
+The tool creates material copies under `Assets/Orbiters/MyAvatar/<batch-id>/`
+and assigns them only to renderers under this component.
+Original materials and external images are preserved. New normal maps get Unity's
+normal-map importer; new named mask maps use linear color. Standard shader normal,
 metallic, specular and emission keywords are enabled where appropriate.
 
 Only actual visible 2D texture properties on the current shader are considered.
@@ -37,10 +50,14 @@ Locked or baked shaders may need unlocking before their slots are editable.
 Custom shaders can require their own feature toggles. The tool does not convert
 roughness to smoothness, repack texture channels, change UVs or switch shaders.
 
+Undo becomes **Redo last apply** after restoring the previous materials. Redo
+restores the saved assignments immediately without importing or requesting AI.
 Undo preserves generated files so other references remain valid. It refuses to
-replace renderer assignments edited since the apply. A new apply replaces the
-component's previous persistent Undo snapshot; Unity's regular Undo is also
-recorded. Undo after a Git checkpoint creates a new local change, not a history
+replace renderer assignments edited since the apply. Each drop is one logical
+operation: later AI matches and **Apply selected matches** reuse that batch's
+materials and keep its snapshot, so Undo returns to the state before the drop.
+A new drop replaces the component's previous persistent Undo snapshot; Unity's
+regular Undo is also recorded, with AI matches as their own step. Undo after a Git checkpoint creates a new local change, not a history
 rewrite. Existing imported files also remain after cancellation.
 
 ## Optional account and AI
@@ -48,18 +65,29 @@ rewrite. Existing imported files also remain after cancellation.
 The account row uses the same Magic Sync account as MCB. Connecting
 is optional; local matching always works. Logging out affects the shared account.
 
-When an account is connected and AI is enabled in that account on the Orbiters
-website, My Avatar automatically sends texture filenames, relative imported paths, dimensions, approximate
-grayscale/normal-color measurements, current material/shader slot information and
-a small JPEG preview sheet to the Orbiters backend. Full-resolution images and
-absolute computer paths are not uploaded. The backend uses the configured AI
-provider and honors the account's AI preference. Source context and model output
-are excluded from Orbiters AI history; usage and status are retained. Provider
-processing follows that provider's configured data policy.
+Local matches are applied immediately. When textures remain unmatched, an account
+is connected and AI is enabled in that account on the Orbiters website, My Avatar
+then asks the Orbiters backend in the background. It sends texture filenames,
+dimensions, pixel statistics measured locally in Unity (grayscale, normal-color,
+black and bright coverage, mean brightness), current material/shader slot information
+and the provisional local matches. No image data and no computer paths are uploaded.
+The backend uses the configured AI provider and honors the account's AI preference;
+reasoning can be switched per feature in the website's AI administration. Source
+context and model output are excluded from Orbiters AI history; usage and status are
+retained. Provider processing follows that provider's configured data policy.
 
-Responses use validated texture/slot IDs. Local matches remain authoritative;
-low-confidence, conflicting and incompatible assignments stay unassigned. On a
-network or provider failure the Inspector shows the reason and uses local matches.
+Responses use validated texture/slot IDs; low-confidence and incompatible
+assignments are ignored. Confident answers fill unmatched textures or correct a
+local match. An answer is discarded if you drop again, edit a slot, or use Undo/Redo
+while it is pending. Choices remembered from an earlier apply are never overridden.
+On a network or provider failure the Inspector shows the reason and keeps the local matches.
+
+Local matching first reuses the slot each file was applied to on this avatar before
+(stored in `Library/OrbitersMyAvatar`), then compares the whole existing texture set
+on each material and prefers primary slots over detail layers. When two colour
+images collide on one slot and exactly one is mostly black with bright details, it
+goes to the material's emission slot. Unresolved cases retain a suggested target and
+offer **Use this on …**.
 
 ## Development and releases
 

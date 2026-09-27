@@ -15,6 +15,7 @@ namespace Orbiters.MyAvatar
         [HideInInspector] public string notice;
         [HideInInspector] public List<TextureEntry> textures = new List<TextureEntry>();
         [HideInInspector] public List<RendererSnapshot> undoMaterials = new List<RendererSnapshot>();
+        [HideInInspector] public bool canRedo;
     }
 
     [Serializable]
@@ -24,6 +25,8 @@ namespace Orbiters.MyAvatar
         public string fileName;
         public string role;
         public string reason;
+        public string suggestedMaterialName;
+        public string suggestedProperty;
         public Material material;
         public string property;
         public bool applied;

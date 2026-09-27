@@ -7,7 +7,7 @@ namespace Orbiters.MyAvatar.Editor
 {
     internal static class MyAvatarResults
     {
-        internal static void Populate(VisualElement root, MyAvatar avatar, System.Action apply)
+        internal static void Populate(VisualElement root, MyAvatar avatar, System.Action edited, System.Action apply)
         {
             if (avatar.textures.Count == 0) return;
             var slots = TextureMatching.Slots(avatar);
@@ -20,14 +20,26 @@ namespace Orbiters.MyAvatar.Editor
                 var image = new Image { image = entry.texture, scaleMode = ScaleMode.ScaleToFit }; image.AddToClassList("texture-preview"); heading.Add(image);
                 var filename = new Label(entry.fileName); filename.AddToClassList("filename"); heading.Add(filename);
                 var reason = new Label(entry.reason); reason.AddToClassList("muted"); card.Add(reason);
+                var suggested = slots.Where(s => s.materialName == entry.suggestedMaterialName && s.property == entry.suggestedProperty).ToArray();
+                if (!entry.material && suggested.Length == 1)
+                {
+                    var target = suggested[0];
+                    card.Add(MyAvatarEditor.Button("Use this on " + target.materialName + " / " + target.description, () => {
+                        edited(); Undo.RecordObject(avatar, "My Avatar: choose texture alternative");
+                        foreach (var other in avatar.textures.Where(t => !t.applied && t.material == target.material && t.property == target.property))
+                        { other.material = null; other.property = null; }
+                        entry.material = target.material; entry.property = target.property;
+                        TextureChanges.Dirty(avatar); apply();
+                    }));
+                }
                 var choose = MyAvatarEditor.Button(entry.material ? entry.material.name + " / " + entry.property : "Choose material slot…", () => {
                     var menu = new GenericMenu();
-                    menu.AddItem(new GUIContent("Leave unassigned"), !entry.material, () => { Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = null; entry.property = null; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,apply); });
+                    menu.AddItem(new GUIContent("Leave unassigned"), !entry.material, () => { edited(); Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = null; entry.property = null; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,edited,apply); });
                     foreach (var slot in slots.Where(s => entry.role == "unknown" || s.role == "unknown" || s.role == entry.role))
                     {
                         var selected = slot;
                         menu.AddItem(new GUIContent(selected.Label.Replace("/", " ∕ ")), entry.material == selected.material && entry.property == selected.property,
-                            () => { Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = selected.material; entry.property = selected.property; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,apply); });
+                            () => { edited(); Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = selected.material; entry.property = selected.property; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,edited,apply); });
                     }
                     menu.ShowAsContext();
                 });

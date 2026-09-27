@@ -12,6 +12,7 @@ namespace Orbiters.MyAvatar.Editor
     internal static class TextureImport
     {
         internal const int MaxFiles = 48;
+        private const string CacheFile = "texture-cache.json";
         internal static bool Supported(string path) => new[] { ".png", ".jpg", ".jpeg", ".tga" }.Contains(Path.GetExtension(path).ToLowerInvariant());
         internal static string[] Expand(IEnumerable<string> paths)
         {
@@ -31,51 +32,125 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static async Task<List<TextureEntry>> ImportAsync(string[] paths, string folder, Action<string> progress, CancellationToken token)
         {
-            var result = new List<TextureEntry>();
-            Directory.CreateDirectory(folder + "/Textures");
-            AssetDatabase.Refresh();
+            string root = Path.GetDirectoryName(Application.dataPath).Replace('\\', '/') + "/";
+            var resolved = new string[paths.Length];
             for (int i = 0; i < paths.Length; i++)
             {
-                token.ThrowIfCancellationRequested();
-                progress($"Importing {i + 1} / {paths.Length} · {Path.GetFileName(paths[i])}");
-                string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/Textures/" + Path.GetFileName(paths[i]));
-                string source = paths[i];
-                await Task.Run(() => File.Copy(source, path, false), token);
-                token.ThrowIfCancellationRequested();
-                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
-                var importer = AssetImporter.GetAtPath(path) as TextureImporter;
-                string role = TextureMatching.Role(Path.GetFileNameWithoutExtension(source));
-                if (importer != null)
+                string full = paths[i].Replace('\\', '/');
+                if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+                string asset = full.Substring(root.Length);
+                if ((asset.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) || asset.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase)) && AssetDatabase.LoadAssetAtPath<Texture2D>(asset))
                 {
-                    importer.textureType = role == "normal" ? TextureImporterType.NormalMap : TextureImporterType.Default;
-                    importer.sRGBTexture = role == "color" || role == "emission" || role == "unknown";
-                    importer.isReadable = false;
-                    importer.SaveAndReimport();
+                    var importer = AssetImporter.GetAtPath(asset) as TextureImporter;
+                    if (TextureMatching.Role(Path.GetFileNameWithoutExtension(paths[i])) != "normal" || importer != null && importer.textureType == TextureImporterType.NormalMap) resolved[i] = asset;
                 }
-                var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-                if (!texture) throw new InvalidOperationException("Unity could not import " + Path.GetFileName(source));
-                result.Add(new TextureEntry { texture = texture, fileName = Path.GetFileName(source), role = role });
-                await Task.Yield();
             }
-            return result;
-        }
-
-        internal static Texture2D Preview(Texture source, int size = 128)
-        {
-            int w = Math.Max(1, Math.Min(size, source.width));
-            int h = Math.Max(1, Mathf.RoundToInt(source.height * (w / (float)source.width)));
-            if (h > size) { w = Math.Max(1, Mathf.RoundToInt(w * (size / (float)h))); h = size; }
-            var previous = RenderTexture.active;
-            var rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
-            Texture2D copy = null;
+            var cache = await Task.Run(() => LibraryStore.Read<Dictionary<string, CachedFile>>(CacheFile), token);
+            var pending = new List<PendingFile>();
+            string staging = Path.Combine(LibraryStore.Folder, Guid.NewGuid().ToString("N"));
+            // One owned folder per drop; the source path, size and time identify repeat drops, so no content hash is needed.
+            string textures = "Assets/Orbiters/MyAvatar/Textures/" + Path.GetFileName(folder);
             try
             {
-                Graphics.Blit(source, rt); RenderTexture.active = rt;
-                copy = new Texture2D(w, h, TextureFormat.RGB24, false);
-                copy.ReadPixels(new Rect(0, 0, w, h), 0, 0); copy.Apply(); return copy;
+                for (int i = 0; i < paths.Length; i++)
+                {
+                    if (resolved[i] != null) continue;
+                    var source = new FileInfo(paths[i]);
+                    if (cache.TryGetValue(source.FullName, out var cached) && Valid(cached, source, root)) { resolved[i] = cached.asset; continue; }
+                    string name = Path.GetFileName(paths[i]), destination = textures + "/" + name;
+                    for (int n = 1; pending.Any(p => string.Equals(p.asset, destination, StringComparison.OrdinalIgnoreCase)); n++)
+                        destination = textures + "/" + Path.GetFileNameWithoutExtension(name) + " " + n + Path.GetExtension(name);
+                    pending.Add(new PendingFile { source = source.FullName, length = source.Length, modified = source.LastWriteTimeUtc.Ticks,
+                        asset = destination, staged = Path.Combine(staging, pending.Count.ToString()) });
+                    resolved[i] = destination;
+                }
+                if (pending.Count > 0)
+                {
+                    progress($"Copying {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}…");
+                    Directory.CreateDirectory(staging);
+                    // Copies are I/O-bound; a few in parallel keeps the disk busy without oversubscribing it.
+                    await Task.Run(() => Parallel.ForEach(pending, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = token }, file => {
+                        File.Copy(file.source, file.staged);
+                        var source = new FileInfo(file.source);
+                        if (source.Length != file.length || source.LastWriteTimeUtc.Ticks != file.modified)
+                            throw new IOException("A texture changed while being copied. Drop the set again.");
+                    }), token);
+                    token.ThrowIfCancellationRequested();
+                    progress($"Importing {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}…");
+                    await Task.Yield();
+                    token.ThrowIfCancellationRequested();
+                    EnsureFolder(textures);
+                    // Targeted imports rather than a project Refresh, which could also start unrelated imports or script compilation.
+                    AssetDatabase.StartAssetEditing();
+                    try
+                    {
+                        foreach (var file in pending)
+                        {
+                            File.Move(file.staged, Path.Combine(root, file.asset));
+                            // Settings are written before the first import, so each texture is imported exactly once.
+                            File.WriteAllText(Path.Combine(root, file.asset) + ".meta", Meta(TextureMatching.Role(Path.GetFileNameWithoutExtension(file.asset))));
+                            AssetDatabase.ImportAsset(file.asset);
+                        }
+                    }
+                    finally { AssetDatabase.StopAssetEditing(); }
+                }
+                var result = new List<TextureEntry>();
+                for (int i = 0; i < paths.Length; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(resolved[i]);
+                    if (!texture) throw new InvalidOperationException("Unity could not load " + Path.GetFileName(paths[i]));
+                    result.Add(new TextureEntry { texture = texture, fileName = Path.GetFileName(paths[i]), role = TextureMatching.Role(Path.GetFileNameWithoutExtension(paths[i])) });
+                }
+                foreach (var file in pending) cache[file.source] = new CachedFile { asset = file.asset, length = file.length, modified = file.modified };
+                var written = pending.Select(p => p.asset).ToArray();
+                await Task.Run(() => {
+                    foreach (var pair in cache.Where(p => p.Value != null && written.Contains(p.Value.asset)))
+                    {
+                        string asset = Path.Combine(root, pair.Value.asset);
+                        pair.Value.assetModified = File.GetLastWriteTimeUtc(asset).Ticks; pair.Value.metaModified = File.GetLastWriteTimeUtc(asset + ".meta").Ticks;
+                    }
+                    LibraryStore.Write(CacheFile, cache.Skip(Math.Max(0, cache.Count - 2048)).ToDictionary(p => p.Key, p => p.Value));
+                });
+                progress($"Reused {paths.Length - pending.Count} textures · imported {pending.Count} new textures.");
+                return result;
             }
-            catch { if (copy) UnityEngine.Object.DestroyImmediate(copy); throw; }
-            finally { RenderTexture.active = previous; RenderTexture.ReleaseTemporary(rt); }
+            finally
+            {
+                // Only this operation's staging directory; never remove project assets on cancellation.
+                if (Directory.Exists(staging)) await Task.Run(() => Directory.Delete(staging, true));
+            }
+        }
+
+        private static bool Valid(CachedFile cached, FileInfo source, string root)
+        {
+            if (cached == null || string.IsNullOrEmpty(cached.asset) || cached.length != source.Length || cached.modified != source.LastWriteTimeUtc.Ticks ||
+                !cached.asset.StartsWith("Assets/Orbiters/MyAvatar/Textures/", StringComparison.Ordinal) || cached.asset.Split('/').Contains("..")) return false;
+            string asset = Path.Combine(root, cached.asset);
+            return File.Exists(asset) && cached.assetModified == File.GetLastWriteTimeUtc(asset).Ticks && cached.metaModified == File.GetLastWriteTimeUtc(asset + ".meta").Ticks;
+        }
+
+        // Unity fills omitted importer fields with its defaults; only the settings My Avatar owns are specified.
+        private static string Meta(string role)
+        {
+            bool normal = role == "normal", srgb = role == "color" || role == "emission" || role == "unknown";
+            return "fileFormatVersion: 2\nguid: " + Guid.NewGuid().ToString("N") + "\nTextureImporter:\n  serializedVersion: 12\n  mipmaps:\n    sRGBTexture: " +
+                (srgb ? 1 : 0) + "\n  isReadable: 0\n  textureType: " + (normal ? 1 : 0) + "\n";
+        }
+
+        private sealed class PendingFile { internal string source, asset, staged; internal long length, modified; }
+        private sealed class CachedFile
+        {
+            public string asset;
+            public long length, modified, assetModified, metaModified;
+        }
+
+        internal static void EnsureFolder(string path)
+        {
+            if (AssetDatabase.IsValidFolder(path)) return;
+            string parent = Path.GetDirectoryName(path).Replace('\\', '/');
+            EnsureFolder(parent);
+            AssetDatabase.CreateFolder(parent, Path.GetFileName(path));
         }
     }
 }
