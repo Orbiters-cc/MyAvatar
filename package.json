@@ -13,7 +13,7 @@
   },
   "vpmDependencies": {
     "orbiters.toolkit": ">=0.2.5 <0.3.0",
-    "orbiters.xraygizmos": ">=0.2.1 <0.3.0",
+    "orbiters.xraygizmos": ">=0.2.2 <0.3.0",
     "com.vrchat.avatars": ">=3.5.0 <4.0.0"
   }
 }

@@ -72,12 +72,13 @@ following bones together.
 
 Hair, tail and toe PhysBones are recognised by name (`Hair_Front`, `Ponytail`,
 `Tail1`, `Toe_L`, toe beans...), from the bone they start at or the object holding
-them. Each part gets a card:
+them. Each part gets its own card, flowing into as many columns as the Inspector is
+wide:
 
-- **Grab** and **Pose**: Nobody, Only me or Everyone, written to the PhysBones'
+- **Grab** and **Pose**: Nobody, Only me or Everyone icon buttons, written to the PhysBones'
   grab and pose permissions. VRChat has no friends-only setting. Posing is limited to
   who can grab.
-- **Stretch**: how much longer the chain gets when pulled (PhysBone Max Stretch), up
+- **Stretch**: a slider for how much longer the chain gets when pulled (PhysBone Max Stretch), up
   to three times its length.
 
 A choice applies to every PhysBone of the part and can be undone. Bones of the
@@ -92,6 +93,12 @@ has built it, estimated without building: the avatar's own expression parameters
 what VRCFury toggles, sliders and full controllers add, and what is left. The count
 updates as the hierarchy changes. **Compress parameters** adds or removes VRCFury's
 Parameter Compressor on the avatar and shows how many bits it saves or would save.
+
+## Toolbar
+
+The bottom toolbar opens **Settings** (the Orbiters server: production by default, or a
+local development server, each with its own login) and **Blendshape Links**, which
+still ships with MCB and is available when MCB is installed.
 
 ## What changes
 

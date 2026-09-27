@@ -7,8 +7,9 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Hair, tail and toes: who can grab and pose them in VRChat and how far they stretch, set on their PhysBones.
-    // Chains named like these parts that have no PhysBone can get one in a click.
+    // Hair, tail and toes, one card each: who can grab and pose them in VRChat and how far they stretch, set on their
+    // PhysBones. Chains named like these parts that have no PhysBone can get one in a click. The cards flow into as many
+    // columns as the Inspector is wide.
     internal sealed class PhysicsSection : AvatarSection
     {
         private static readonly SegmentedControl.Option[] Choices =
@@ -20,9 +21,11 @@ namespace Orbiters.MyAvatar.Editor
         private readonly MyAvatar avatar;
         private IVisualElementScheduledItem pending;
 
-        internal PhysicsSection(MyAvatar avatar) : base("Hair, tail & toes", card: false)
+        internal PhysicsSection(MyAvatar avatar) : base(null, card: false)
         {
             this.avatar = avatar;
+            Body.AddToClassList("physics-grid");
+            Body.RegisterCallback<GeometryChangedEvent>(_ => LayoutColumns());
             EditorApplication.hierarchyChanged += Schedule;
             Undo.undoRedoPerformed += Schedule;
             RegisterCallback<DetachFromPanelEvent>(_ => { EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; });
@@ -38,25 +41,32 @@ namespace Orbiters.MyAvatar.Editor
         private void Refresh()
         {
             if (!avatar) return;
-            var parts = PhysBoneParts.Scan(avatar.transform);
             Body.Clear();
-            if (parts.Count == 0)
-            {
-                var card = new VisualElement(); card.AddToClassList("avatar-card");
-                var empty = new Label("No hair, tail or toe bones found on this avatar. They are recognised by name, like “Hair_Front”, “Tail1” or “Toe_L”.");
-                empty.AddToClassList("avatar-caption");
-                card.Add(empty);
-                Body.Add(card);
-                return;
-            }
-            foreach (var part in parts) Body.Add(Card(part));
+            // Nothing to show when the avatar has no hair, tail or toe bones: the section simply stays out of the way.
+            foreach (var part in PhysBoneParts.Scan(avatar.transform)) Body.Add(Card(part));
+            style.display = Body.childCount == 0 ? DisplayStyle.None : DisplayStyle.Flex;
+            LayoutColumns();
+        }
+
+        // As many equal columns as fit, like a gallery: a card alone on the last row keeps the width of the others.
+        // Each card has Gap / 2 margins and the grid a negative Gap / 2 margin, so a column takes cardWidth + Gap.
+        private const float MinCardWidth = 240f, Gap = 10f;
+
+        private void LayoutColumns()
+        {
+            float width = Body.contentRect.width;
+            if (float.IsNaN(width) || width <= 0f) return;
+            int columns = Mathf.Max(1, Mathf.Min(Body.childCount, Mathf.FloorToInt(width / (MinCardWidth + Gap))));
+            float cardWidth = Mathf.Floor((width - Gap * columns) / columns);
+            foreach (var card in Body.Children())
+                if (!Mathf.Approximately(card.resolvedStyle.width, cardWidth)) card.style.width = cardWidth;
         }
 
         private VisualElement Card(PhysBonePartInfo info)
         {
             var card = new VisualElement(); card.AddToClassList("avatar-card"); card.AddToClassList("physics-card");
             var header = new VisualElement(); header.AddToClassList("avatar-card__header"); card.Add(header);
-            var title = new Label(PhysBoneParts.Label(info.Part)); title.AddToClassList("avatar-card__title"); header.Add(title);
+            var title = new Label(PhysBoneParts.Label(info.Part)); title.AddToClassList("physics-card__title"); header.Add(title);
             if (info.PhysBones.Count > 0)
             {
                 var hosts = info.PhysBones.Select(p => (Object)p.gameObject).Distinct().ToArray();
@@ -67,8 +77,8 @@ namespace Orbiters.MyAvatar.Editor
 
                 var physBones = info.PhysBones;
                 SegmentedControl posable = null;
-                ScrubDial stretch = null;
-                var grab = Row(card, "Grab", "Who can grab it in VRChat.", new SegmentedControl(Choices, index =>
+                Slider stretch = null;
+                var grab = Choice(card, "Grab", "Who can grab it in VRChat.", new SegmentedControl(Choices, index =>
                 {
                     var access = (PhysBoneAccess)index;
                     PhysBoneParts.SetGrabbing(physBones, access);
@@ -77,7 +87,7 @@ namespace Orbiters.MyAvatar.Editor
                     Limit(posable, stretch, access);
                 }));
                 grab.SetIndex(info.Grabbing.HasValue ? (int)info.Grabbing.Value : -1);
-                posable = Row(card, "Pose", "Who can leave it in a new pose after grabbing it.", new SegmentedControl(Choices, index => PhysBoneParts.SetPosing(physBones, (PhysBoneAccess)index)));
+                posable = Choice(card, "Pose", "Who can leave it in a new pose after grabbing it.", new SegmentedControl(Choices, index => PhysBoneParts.SetPosing(physBones, (PhysBoneAccess)index)));
                 posable.SetIndex(info.Posing.HasValue ? (int)info.Posing.Value : -1);
                 stretch = Stretch(card, info);
                 Limit(posable, stretch, info.Grabbing ?? PhysBoneAccess.Everyone);
@@ -93,48 +103,51 @@ namespace Orbiters.MyAvatar.Editor
             return card;
         }
 
-        private static void Limit(SegmentedControl posable, ScrubDial stretch, PhysBoneAccess grab)
+        private static void Limit(SegmentedControl posable, Slider stretch, PhysBoneAccess grab)
         {
             for (int i = 0; i < Choices.Length; i++)
             {
                 posable.SetOptionEnabled(i, i <= (int)grab);
                 posable.SetOptionTooltip(i, i <= (int)grab ? null : "Allow grabbing for them first.");
             }
-            stretch.SetEnabled(grab != PhysBoneAccess.Nobody);
+            stretch.parent.SetEnabled(grab != PhysBoneAccess.Nobody);
         }
 
-        // Labels line up with the stretch dial's, like Turn and Zoom in the thumbnail studio.
-        private static T Row<T>(VisualElement card, string label, string tooltip, T control) where T : VisualElement
+        private static SegmentedControl Choice(VisualElement card, string label, string tooltip, SegmentedControl control)
         {
-            var row = new VisualElement(); row.AddToClassList("physics-row"); row.tooltip = tooltip;
-            var text = new Label(label); text.AddToClassList("physics-row__label"); row.Add(text);
-            control.AddToClassList("physics-row__control"); row.Add(control);
-            card.Add(row);
+            var text = new Label(label); text.AddToClassList("physics-card__label"); text.tooltip = tooltip; card.Add(text);
+            control.AddToClassList("orb-segmented--tiles");
+            control.tooltip = tooltip;
+            card.Add(control);
             return control;
         }
 
-        private ScrubDial Stretch(VisualElement card, PhysBonePartInfo info)
+        private static Slider Stretch(VisualElement card, PhysBonePartInfo info)
         {
             var physBones = info.PhysBones;
-            bool mixed = !info.MaxStretch.HasValue;
+            var row = new VisualElement(); row.AddToClassList("physics-stretch");
+            row.tooltip = "How much longer it gets when someone pulls it, relative to its length.";
+            var label = new Label("Stretch"); label.AddToClassList("physics-card__label"); label.AddToClassList("physics-stretch__label"); row.Add(label);
+            var slider = new Slider(0f, PhysBoneParts.MaxStretchLimit); row.Add(slider);
+            var value = new Label(); value.AddToClassList("physics-stretch__value"); row.Add(value);
+            float current = info.MaxStretch ?? physBones.Average(p => p.maxStretch);
+            slider.SetValueWithoutNotify(Mathf.Min(current, PhysBoneParts.MaxStretchLimit));
+            value.text = StretchText(info.MaxStretch.HasValue ? current : (float?)null);
             IVisualElementScheduledItem apply = null;
-            ScrubDial dial = null;
-            dial = new ScrubDial("Stretch", 0f, PhysBoneParts.MaxStretchLimit, 0f, 0.05f, 5, 90f, 0.03f,
-                value => mixed ? "Mixed" : value < 0.025f ? "Off" : $"+{Mathf.RoundToInt(value * 100f)}%",
-                value =>
-                {
-                    float stretch = Mathf.Round(value * 20f) / 20f;
-                    if (mixed) { mixed = false; dial.SetValueWithoutNotify(value); }
-                    // The readout follows the dial at once; the PhysBones are written once it rests.
-                    apply?.Pause();
-                    apply = dial.schedule.Execute(() => PhysBoneParts.SetMaxStretch(physBones, stretch)).StartingIn(150);
-                });
-            dial.SetValueWithoutNotify(Mathf.Min(info.MaxStretch ?? physBones.Average(p => p.maxStretch), PhysBoneParts.MaxStretchLimit));
-            dial.tooltip = "How much longer it gets when someone pulls it. Drag the ruler; double-click for off.";
-            dial.AddToClassList("physics-stretch");
-            card.Add(dial);
-            return dial;
+            slider.RegisterValueChangedCallback(evt =>
+            {
+                // The number follows the handle at once; the PhysBones are written once the handle rests.
+                float stretch = Mathf.Round(evt.newValue * 20f) / 20f;
+                value.text = StretchText(stretch);
+                apply?.Pause();
+                apply = slider.schedule.Execute(() => PhysBoneParts.SetMaxStretch(physBones, stretch)).StartingIn(150);
+            });
+            card.Add(row);
+            return slider;
         }
+
+        private static string StretchText(float? stretch) =>
+            !stretch.HasValue ? "Mixed" : stretch.Value < 0.025f ? "Off" : $"+{Mathf.RoundToInt(stretch.Value * 100f)}%";
 
         private VisualElement Missing(PhysBonePartInfo info)
         {

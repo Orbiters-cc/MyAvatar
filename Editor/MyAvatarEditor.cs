@@ -69,6 +69,7 @@ namespace Orbiters.MyAvatar.Editor
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
             var credit = new Orbiters.Toolkit.Editor.SupportCredit(); credit.AddToClassList("myavatar-credit"); root.Add(credit);
+            var toolbar = new IMGUIContainer(DrawToolbar); toolbar.AddToClassList("myavatar-toolbar"); root.Add(toolbar);
             return root;
         }
 
@@ -195,6 +196,27 @@ namespace Orbiters.MyAvatar.Editor
                 TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);
                 TextureMemory.Record(avatar, avatar.textures); TextureChanges.Dirty(avatar); return Task.CompletedTask;
             }));
+        }
+
+        // Blendshape Links still ships with MCB; the button opens it when MCB is installed.
+        private const string BlendShapeLinksMenu = "Tools/My Custom Base (MCB)/blendshape links debug";
+        private static readonly bool BlendShapeLinksInstalled = Type.GetType("BlendShapeLinksDebugWindow, mcb.Editor") != null;
+
+        // Bottom toolbar in Unity's own style, like MCB's.
+        private static void DrawToolbar()
+        {
+            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+            if (GUILayout.Button(new GUIContent("Settings", "Orbiters settings: production (default) or development server."), EditorStyles.toolbarButton, GUILayout.Width(126f)))
+                Orbiters.Toolkit.Editor.OrbitersSettingsWindow.Open();
+            using (new EditorGUI.DisabledScope(!BlendShapeLinksInstalled))
+            {
+                var links = new GUIContent("Blendshape Links", BlendShapeLinksInstalled
+                    ? "Open the Blendshape Links tool."
+                    : "Blendshape Links comes with MCB for now: install My Custom Base to use it.");
+                if (GUILayout.Button(links, EditorStyles.toolbarButton, GUILayout.Width(126f))) EditorApplication.ExecuteMenuItem(BlendShapeLinksMenu);
+            }
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
         }
 
         // The robot has already flipped on the drop zone; save the account preference and flip it back if that fails.
