@@ -46,8 +46,7 @@ namespace Orbiters.MyAvatar.Editor
                 var slot = slots.FirstOrDefault(s => s.id == match.slotId);
                 var entry = textures[index];
                 if (slot == null) continue;
-                bool colorOrEmission = (entry.role == "color" || entry.role == "emission") && (slot.role == "color" || slot.role == "emission");
-                if (!colorOrEmission && entry.role != "unknown" && slot.role != "unknown" && entry.role != slot.role) continue;
+                if (!TextureMatching.Compatible(entry.role, slot.role)) continue;
                 result.changes.Add(new TextureChanges.Change { entry = entry, slot = slot, confidence = match.confidence, reason = match.reason });
             }
             return result;

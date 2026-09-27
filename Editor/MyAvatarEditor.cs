@@ -47,9 +47,10 @@ namespace Orbiters.MyAvatar.Editor
             results = new VisualElement(); content.Add(results);
             var actions = new VisualElement(); actions.AddToClassList("actions");
             undo = Button("Undo last apply", () => _ = Run(() => { TextureChanges.UndoLast(avatar); RefreshResults(); return Task.CompletedTask; }));
-            save = Button("Save · Unit Git", () => _ = Run(async () => { string saved = await TextureChanges.SaveAsync(avatar); Show(saved, HelpBoxMessageType.Info); }, false));
+            save = Button(TextureChanges.Commits ? "Save · Unit Git" : "Save", () => _ = Run(async () => { string saved = await TextureChanges.SaveAsync(avatar); Show(saved, HelpBoxMessageType.Info); }, false));
             save.AddToClassList("mcb-button--primary"); actions.Add(undo); actions.Add(save); content.Add(actions);
-            var hint = new Label("Save records “texture change” with generated assets and this scene’s current changes. It does not push."); hint.AddToClassList("muted"); content.Add(hint);
+            var hint = new Label(TextureChanges.Commits ? "Save stores the scene and records “texture change” with generated assets and this scene’s current changes in Unit Git. It does not push."
+                : "Save stores the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint."); hint.AddToClassList("muted"); content.Add(hint);
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
@@ -72,10 +73,13 @@ namespace Orbiters.MyAvatar.Editor
             string token = AuthenticationService.GetAuth()?.token;
             // Only unresolved textures are sent: measured on DeepSeek, adding resolved ones never produced a
             // useful correction and made fast (non-reasoning) answers less accurate.
-            var unmatched = entries.Where(e => !e.material).ToList();
+            // A texture whose set already has a home that lacks the slot needs a shader change, not a guess elsewhere.
+            var unmatched = entries.Where(e => !e.material && !(e.reason ?? "").StartsWith(TextureMatching.MissingSlotReason, StringComparison.Ordinal)).ToList();
             int unresolved = unmatched.Count;
-            // Slots filled by this drop's local matches are left out, so an answer cannot displace them.
-            var open = slots.Where(s => !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
+            // Slots filled by this drop's local matches are left out, so an answer cannot displace them. Effect renderers
+            // (particles, trails) and secondary layers (detail, matcap, rim...) stay available in the manual slot menu only.
+            var open = slots.Where(s => !s.secondary && s.rendererKind != "effect" && unmatched.Any(e => TextureMatching.Compatible(e.role, s.role)) &&
+                !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
             bool ask = unresolved > 0 && open.Count > 0 && !string.IsNullOrEmpty(token);
             object payload = ask ? TextureAi.Payload(unmatched, open, stats) : null;
             Undo.RecordObject(avatar, "My Avatar: texture set");

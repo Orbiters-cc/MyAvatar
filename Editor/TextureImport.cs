@@ -42,7 +42,7 @@ namespace Orbiters.MyAvatar.Editor
                 if ((asset.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) || asset.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase)) && AssetDatabase.LoadAssetAtPath<Texture2D>(asset))
                 {
                     var importer = AssetImporter.GetAtPath(asset) as TextureImporter;
-                    if (TextureMatching.Role(Path.GetFileNameWithoutExtension(paths[i])) != "normal" || importer != null && importer.textureType == TextureImporterType.NormalMap) resolved[i] = asset;
+                    if (TextureMatching.FileRole(Path.GetFileName(paths[i])) != "normal" || importer != null && importer.textureType == TextureImporterType.NormalMap) resolved[i] = asset;
                 }
             }
             var cache = await Task.Run(() => LibraryStore.Read<Dictionary<string, CachedFile>>(CacheFile), token);
@@ -88,7 +88,7 @@ namespace Orbiters.MyAvatar.Editor
                         {
                             File.Move(file.staged, Path.Combine(root, file.asset));
                             // Settings are written before the first import, so each texture is imported exactly once.
-                            File.WriteAllText(Path.Combine(root, file.asset) + ".meta", Meta(TextureMatching.Role(Path.GetFileNameWithoutExtension(file.asset))));
+                            File.WriteAllText(Path.Combine(root, file.asset) + ".meta", Meta(TextureMatching.FileRole(Path.GetFileName(file.asset))));
                             AssetDatabase.ImportAsset(file.asset);
                         }
                     }
@@ -100,7 +100,7 @@ namespace Orbiters.MyAvatar.Editor
                     token.ThrowIfCancellationRequested();
                     var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(resolved[i]);
                     if (!texture) throw new InvalidOperationException("Unity could not load " + Path.GetFileName(paths[i]));
-                    result.Add(new TextureEntry { texture = texture, fileName = Path.GetFileName(paths[i]), role = TextureMatching.Role(Path.GetFileNameWithoutExtension(paths[i])) });
+                    result.Add(new TextureEntry { texture = texture, fileName = Path.GetFileName(paths[i]), role = TextureMatching.FileRole(Path.GetFileName(paths[i])) });
                 }
                 foreach (var file in pending) cache[file.source] = new CachedFile { asset = file.asset, length = file.length, modified = file.modified };
                 var written = pending.Select(p => p.asset).ToArray();

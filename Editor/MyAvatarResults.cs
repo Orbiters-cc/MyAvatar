@@ -28,18 +28,18 @@ namespace Orbiters.MyAvatar.Editor
                         edited(); Undo.RecordObject(avatar, "My Avatar: choose texture alternative");
                         foreach (var other in avatar.textures.Where(t => !t.applied && t.material == target.material && t.property == target.property))
                         { other.material = null; other.property = null; }
-                        entry.material = target.material; entry.property = target.property;
+                        entry.material = target.material; entry.property = target.property; entry.reason = TextureMatching.ChosenReason;
                         TextureChanges.Dirty(avatar); apply();
                     }));
                 }
                 var choose = MyAvatarEditor.Button(entry.material ? entry.material.name + " / " + entry.property : "Choose material slot…", () => {
                     var menu = new GenericMenu();
                     menu.AddItem(new GUIContent("Leave unassigned"), !entry.material, () => { edited(); Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = null; entry.property = null; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,edited,apply); });
-                    foreach (var slot in slots.Where(s => entry.role == "unknown" || s.role == "unknown" || s.role == entry.role))
+                    foreach (var slot in slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s.role)))
                     {
                         var selected = slot;
                         menu.AddItem(new GUIContent(selected.Label.Replace("/", " ∕ ")), entry.material == selected.material && entry.property == selected.property,
-                            () => { edited(); Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = selected.material; entry.property = selected.property; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,edited,apply); });
+                            () => { edited(); Undo.RecordObject(avatar,"My Avatar: choose slot"); entry.material = selected.material; entry.property = selected.property; entry.reason = TextureMatching.ChosenReason; TextureChanges.Dirty(avatar); root.Clear(); Populate(root,avatar,edited,apply); });
                     }
                     menu.ShowAsContext();
                 });

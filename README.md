@@ -4,8 +4,8 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
 
 ## Get started
 
-1. Install **My Avatar** from the Orbiters VPM repository. Toolkit and Unit Git
-   are required dependencies; the VRChat avatar SDK removes this editor-only
+1. Install **My Avatar** from the Orbiters VPM repository. Toolkit is a required
+   dependency; Unit Git is optional. The VRChat avatar SDK removes this editor-only
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
@@ -17,9 +17,10 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
    **Apply selected matches**. Competing variants are left for you to choose.
 5. **Undo last apply** restores the preceding renderer material assignments,
    including after a scene reload. Save your scene to retain the component data.
-6. **Save · Unit Git** saves the current avatar scene and creates a local commit
-   named `texture change`. Initialize the project's Git repository in Unit Git
-   first. The checkpoint includes the current scene (including its other pending
+6. **Save** saves the current avatar scene and generated assets. When Unit Git is
+   installed the button reads **Save · Unit Git** and also creates a local commit
+   named `texture change` once the project's Git repository is initialized in Unit
+   Git. The checkpoint includes the current scene (including its other pending
    changes), generated textures/materials and their metadata. Unrelated project
    paths and staged changes are excluded. Ignored checkpoint files must be
    unignored first. Nothing is pushed.
@@ -45,8 +46,11 @@ Original materials and external images are preserved. New normal maps get Unity'
 normal-map importer; new named mask maps use linear color. Standard shader normal,
 metallic, specular and emission keywords are enabled where appropriate.
 
-Only actual visible 2D texture properties on the current shader are considered.
-Locked or baked shaders may need unlocking before their slots are editable.
+Only actual visible 2D texture properties on the current shader are considered,
+including locked/optimized shaders such as Poiyomi's `Hidden/Locked/...` shaders.
+A locked shader only keeps the features that were enabled when it was locked: if a
+texture set member needs a slot the material lacks (for example emission), the
+Inspector says so; enable the feature (unlocking if needed) and drop again.
 Custom shaders can require their own feature toggles. The tool does not convert
 roughness to smoothness, repack texture channels, change UVs or switch shaders.
 
@@ -57,8 +61,8 @@ replace renderer assignments edited since the apply. Each drop is one logical
 operation: later AI matches and **Apply selected matches** reuse that batch's
 materials and keep its snapshot, so Undo returns to the state before the drop.
 A new drop replaces the component's previous persistent Undo snapshot; Unity's
-regular Undo is also recorded, with AI matches as their own step. Undo after a Git checkpoint creates a new local change, not a history
-rewrite. Existing imported files also remain after cancellation.
+regular Undo is also recorded, with AI matches as their own step. Undo after a Git
+checkpoint creates a new local change, not a history rewrite. Existing imported files also remain after cancellation.
 
 ## Optional account and AI
 
@@ -82,12 +86,29 @@ local match. An answer is discarded if you drop again, edit a slot, or use Undo/
 while it is pending. Choices remembered from an earlier apply are never overridden.
 On a network or provider failure the Inspector shows the reason and keeps the local matches.
 
-Local matching first reuses the slot each file was applied to on this avatar before
-(stored in `Library/OrbitersMyAvatar`), then compares the whole existing texture set
-on each material and prefers primary slots over detail layers. When two colour
-images collide on one slot and exactly one is mostly black with bright details, it
-goes to the material's emission slot. Unresolved cases retain a suggested target and
-offer **Use this on …**.
+Local matching works with any naming convention and avatar layout:
+
+- Slots you chose by hand for a file on this avatar are reused (stored in
+  `Library/OrbitersMyAvatar/slot-choices.json`). Automatic matches are not stored,
+  so a wrong guess never becomes permanent.
+- Filenames are split into words (camelCase, separators, digits) and compared with
+  the name of the texture currently in each slot, the material name, mesh names
+  (for meshes with one or two materials) and the material's other textures. Role
+  words (`BaseColor`, `Normal`, `_N`, `Emissive`...) set the slot type and are not
+  used as names. A word shared by many materials, like a base or author name, counts
+  little; words shared by most dropped files, like an export prefix, are ignored.
+  Plurals, prefixes (`BodyMatt` ~ `Body`) and a few avatar part synonyms (hair and
+  feathers, eye and iris, body and skin) are recognised.
+- Primary slots are preferred over detail, matcap, rim and other effect layers;
+  particle, trail and line materials are ranked last.
+- A match needs clear evidence and a margin over the next candidate. Files of one
+  set follow the material their siblings matched. A new texture also replaces the
+  old one in the same kind of slot on other materials that used it.
+- When two colour images collide on one slot and exactly one is mostly black with
+  bright details, it goes to the material's emission slot.
+
+Unresolved cases retain a suggested target and offer **Use this on …**. Only those
+go to AI, with the free primary slots of avatar meshes.
 
 ## Development and releases
 
@@ -102,5 +123,6 @@ the canonical VPM listing current.
 Assemblies: `Orbiters.MyAvatar` contains the persistent component;
 `Orbiters.MyAvatar.Editor` contains import, matching, changes and Inspector UI.
 Toolkit owns account storage, API roots/transport, shared account controls,
-animated glow rendering and SVG logo drawing. Unit Git owns Git execution and
-scoped index handling. My Avatar does not depend on MCB.
+animated glow rendering and SVG logo drawing. Unit Git, when installed, owns Git
+execution and scoped index handling; the `MYAVATAR_UNITGIT` version define enables
+the commit step. My Avatar does not depend on MCB.

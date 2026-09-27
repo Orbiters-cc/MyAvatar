@@ -9,5 +9,12 @@
   ],
   "includePlatforms": [
     "Editor"
+  ],
+  "versionDefines": [
+    {
+      "name": "orbiters.unitgit",
+      "expression": "0.1.1",
+      "define": "MYAVATAR_UNITGIT"
+    }
   ]
 }

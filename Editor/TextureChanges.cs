@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+#if MYAVATAR_UNITGIT
 using Orbiters.UnitGit.Editor;
+#endif
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -202,15 +204,33 @@ namespace Orbiters.MyAvatar.Editor
             avatar.notice = redo ? "Last apply restored." : "Last apply undone. Click Redo to restore it without importing or matching again."; Dirty(avatar);
         }
 
-        internal static async Task<string> SaveAsync(MyAvatar avatar)
+        // Unit Git is optional: without it Save stores the scene and generated assets; with it, Save also records a local commit.
+#if MYAVATAR_UNITGIT
+        internal const bool Commits = true;
+#else
+        internal const bool Commits = false;
+#endif
+
+        internal static Task<string> SaveAsync(MyAvatar avatar)
         {
             var scene = avatar.gameObject.scene;
             if (string.IsNullOrEmpty(scene.path)) throw new InvalidOperationException("Save this scene in Assets first, then click Save.");
-            string root = Path.GetDirectoryName(Application.dataPath);
-            if (!File.Exists(Path.Combine(root, ".git")) && !Directory.Exists(Path.Combine(root, ".git")))
-                throw new InvalidOperationException("Initialize the Unity project's Git repository in Unit Git first, then click Save again.");
             AssetDatabase.SaveAssets();
             if (!EditorSceneManager.SaveScene(scene)) throw new InvalidOperationException("The avatar scene could not be saved.");
+#if MYAVATAR_UNITGIT
+            string root = Path.GetDirectoryName(Application.dataPath);
+            if (!File.Exists(Path.Combine(root, ".git")) && !Directory.Exists(Path.Combine(root, ".git")))
+                return Task.FromResult("Saved. Initialize the project's Git repository in Unit Git to also record a checkpoint.");
+            return CommitAsync(avatar, root);
+#else
+            return Task.FromResult("Saved.");
+#endif
+        }
+
+#if MYAVATAR_UNITGIT
+        private static async Task<string> CommitAsync(MyAvatar avatar, string root)
+        {
+            var scene = avatar.gameObject.scene;
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scene.path, scene.path + ".meta" };
             foreach (var entry in avatar.textures.Where(t => t.texture))
             {
@@ -233,6 +253,7 @@ namespace Orbiters.MyAvatar.Editor
             if (!result.Success) throw new InvalidOperationException(result.Message);
             return "Saved · commit " + result.CommitHash.Substring(0, Math.Min(8, result.CommitHash.Length));
         }
+#endif
 
         internal static void Dirty(MyAvatar avatar)
         { EditorUtility.SetDirty(avatar); PrefabUtility.RecordPrefabInstancePropertyModifications(avatar); EditorSceneManager.MarkSceneDirty(avatar.gameObject.scene); }
