@@ -30,7 +30,7 @@ namespace Orbiters.MyAvatar.Editor
             return unique;
         }
 
-        internal static async Task<List<TextureEntry>> ImportAsync(string[] paths, string folder, Action<string> progress, CancellationToken token)
+        internal static async Task<List<TextureEntry>> ImportAsync(string[] paths, string folder, Action<float, string> progress, CancellationToken token)
         {
             string root = Path.GetDirectoryName(Application.dataPath).Replace('\\', '/') + "/";
             var resolved = new string[paths.Length];
@@ -66,7 +66,7 @@ namespace Orbiters.MyAvatar.Editor
                 }
                 if (pending.Count > 0)
                 {
-                    progress($"Copying {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}…");
+                    progress(.15f, $"Copying {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}…");
                     Directory.CreateDirectory(staging);
                     // Copies are I/O-bound; a few in parallel keeps the disk busy without oversubscribing it.
                     await Task.Run(() => Parallel.ForEach(pending, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = token }, file => {
@@ -76,7 +76,7 @@ namespace Orbiters.MyAvatar.Editor
                             throw new IOException("A texture changed while being copied. Drop the set again.");
                     }), token);
                     token.ThrowIfCancellationRequested();
-                    progress($"Importing {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}…");
+                    progress(.35f, $"Importing {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}…");
                     await Task.Yield();
                     token.ThrowIfCancellationRequested();
                     EnsureFolder(textures);
@@ -112,7 +112,7 @@ namespace Orbiters.MyAvatar.Editor
                     }
                     LibraryStore.Write(CacheFile, cache.Skip(Math.Max(0, cache.Count - 2048)).ToDictionary(p => p.Key, p => p.Value));
                 });
-                progress($"Reused {paths.Length - pending.Count} textures · imported {pending.Count} new textures.");
+                progress(.7f, pending.Count > 0 ? $"Imported {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}" : "Textures ready");
                 return result;
             }
             finally

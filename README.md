@@ -9,18 +9,19 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
-3. Drop PNG, JPG or TGA files (or their containing folder) into the Inspector.
+3. Drop PNG, JPG or TGA files (or their containing folder) into the drop field.
    Folder import includes immediate files, not nested folders. Up to 48 files,
-   256 MB per file and 1 GB per batch are supported.
-4. Clear material-name and shader-slot matches apply automatically. Review the
-   inline cards for alternatives or missing matches. Choose a slot and click
-   **Apply selected matches**. Competing variants are left for you to choose.
-5. **Undo last apply** restores the preceding renderer material assignments,
+   256 MB per file and 1 GB per batch are supported. The field turns into a
+   progress bar, then shows the result with **Undo** and **Save**; drop another
+   set on it at any time.
+4. Clear matches apply automatically. A texture that still needs a slot appears as
+   one row below the field: **Use on …** accepts the suggestion, **Choose slot…**
+   picks another. Either applies immediately.
+5. **Undo** restores the materials from before the set (then reads **Redo**),
    including after a scene reload. Save your scene to retain the component data.
 6. **Save** saves the current avatar scene and generated assets. When Unit Git is
-   installed the button reads **Save · Unit Git** and also creates a local commit
-   named `texture change` once the project's Git repository is initialized in Unit
-   Git. The checkpoint includes the current scene (including its other pending
+   installed it also creates a local commit named `texture change` once the
+   project's Git repository is initialized in Unit Git. The checkpoint includes the current scene (including its other pending
    changes), generated textures/materials and their metadata. Unrelated project
    paths and staged changes are excluded. Ignored checkpoint files must be
    unignored first. Nothing is pushed.
@@ -54,11 +55,11 @@ Inspector says so; enable the feature (unlocking if needed) and drop again.
 Custom shaders can require their own feature toggles. The tool does not convert
 roughness to smoothness, repack texture channels, change UVs or switch shaders.
 
-Undo becomes **Redo last apply** after restoring the previous materials. Redo
+Undo becomes **Redo** after restoring the previous materials. Redo
 restores the saved assignments immediately without importing or requesting AI.
 Undo preserves generated files so other references remain valid. It refuses to
 replace renderer assignments edited since the apply. Each drop is one logical
-operation: later AI matches and **Apply selected matches** reuse that batch's
+operation: later AI matches and slots you choose reuse that batch's
 materials and keep its snapshot, so Undo returns to the state before the drop.
 A new drop replaces the component's previous persistent Undo snapshot; Unity's
 regular Undo is also recorded, with AI matches as their own step. Undo after a Git
@@ -107,7 +108,7 @@ Local matching works with any naming convention and avatar layout:
 - When two colour images collide on one slot and exactly one is mostly black with
   bright details, it goes to the material's emission slot.
 
-Unresolved cases retain a suggested target and offer **Use this on …**. Only those
+Unresolved cases retain a suggested target and offer **Use on …**. Only those
 go to AI, with the free primary slots of avatar meshes.
 
 ## Development and releases

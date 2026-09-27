@@ -16,7 +16,9 @@ namespace Orbiters.MyAvatar.Editor
         public Material material;
         public Texture existing;
         public List<string> renderers = new List<string>();
-        public bool secondary;
+        // Renderer and material index (= submesh) pairs that draw this material, for UV layout comparison.
+        public List<(Renderer renderer, int index)> parts = new List<(Renderer, int)>();
+        public bool secondary, active;
         public string Label => materialName + " / " + description + " (" + property + ") · " + rendererPath;
     }
 
@@ -35,13 +37,21 @@ namespace Orbiters.MyAvatar.Editor
                 if ((renderer.hideFlags & HideFlags.DontSave) != 0 || (renderer.gameObject.hideFlags & HideFlags.DontSave) != 0) continue;
                 string kind = renderer is SkinnedMeshRenderer ? "skinned" : renderer is MeshRenderer ? "mesh" :
                     renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer ? "effect" : "other";
-                foreach (var material in renderer.sharedMaterials)
+                bool visible = renderer.enabled && renderer.gameObject.activeInHierarchy;
+                var materials = renderer.sharedMaterials;
+                for (int index = 0; index < materials.Length; index++)
                 {
+                    var material = materials[index];
                     // Locked/optimized shaders (e.g. Poiyomi's Hidden/Locked/...) are the norm on avatars and keep their texture slots.
                     if (!material || !material.shader || material.shader.name == "Hidden/InternalErrorShader") continue;
                     if (byMaterial.TryGetValue(material, out var known))
                     {
-                        foreach (var slot in known) { if (!slot.renderers.Contains(renderer.name)) slot.renderers.Add(renderer.name); if (slot.rendererKind == "effect" && kind != "effect") slot.rendererKind = kind; }
+                        foreach (var slot in known)
+                        {
+                            if (!slot.renderers.Contains(renderer.name)) slot.renderers.Add(renderer.name);
+                            if (slot.rendererKind == "effect" && kind != "effect") slot.rendererKind = kind;
+                            slot.active |= visible; slot.parts.Add((renderer, index));
+                        }
                         continue;
                     }
                     var slots = byMaterial[material] = new List<TextureSlot>();
@@ -57,8 +67,8 @@ namespace Orbiters.MyAvatar.Editor
                             shader = shaderName, property = property, description = description, role = SlotRole(property, description),
                             secondary = Secondary(property, description), existing = texture, existingName = texture ? texture.name : "",
                             existingPath = texture ? AssetDatabase.GetAssetPath(texture) : "", existingWidth = texture ? texture.width : 0, existingHeight = texture ? texture.height : 0,
-                            rendererPath = AnimationUtility.CalculateTransformPath(renderer.transform, avatar.transform), rendererKind = kind };
-                        slot.renderers.Add(renderer.name);
+                            rendererPath = AnimationUtility.CalculateTransformPath(renderer.transform, avatar.transform), rendererKind = kind, active = visible };
+                        slot.renderers.Add(renderer.name); slot.parts.Add((renderer, index));
                         slots.Add(slot); result.Add(slot);
                     }
                 }
@@ -208,7 +218,11 @@ namespace Orbiters.MyAvatar.Editor
             var materialsPerRenderer = slots.SelectMany(s => s.renderers.Select(r => (r, s.material))).Distinct().GroupBy(p => p.r).ToDictionary(g => g.Key, g => g.Count());
             var nameBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(Identity(g.Key.name)
                 .Concat(g.First().renderers.Where(r => materialsPerRenderer[r] <= 2).SelectMany(Identity))));
+            // Every mesh name still adds a little evidence: shared by all of a mesh's materials, it only separates meshes.
+            var meshBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.First().renderers.SelectMany(Identity)));
             var contextBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.SelectMany(s => Identity(s.existingName))));
+            // Hidden objects (disabled variants, toggled outfits) neither receive a set first nor dilute evidence for visible ones.
+            var visible = materials.Where(g => g.Any(s => s.active)).Select(g => g.Key).ToList();
             var slotBag = slots.ToDictionary(s => s, s => Identity(s.existingName));
             // Tokens shared by most of the dropped files (a common export prefix) do not tell files apart.
             var identities = textures.ToDictionary(t => t, t => Identity(t.fileName));
@@ -217,6 +231,8 @@ namespace Orbiters.MyAvatar.Editor
                     foreach (var identity in identities.Values) identity.Remove(common);
 
             var linked = new List<TextureEntry>();
+            var grouped = new List<TextureEntry>();
+            var layout = new UvLayouts();
             foreach (var texture in textures)
             {
                 var remembered = TextureMemory.Find(memory, texture, slots);
@@ -229,7 +245,9 @@ namespace Orbiters.MyAvatar.Editor
                 var identity = identities[texture];
                 // A token that appears on many materials (a base or author name) is weak evidence for any one of them.
                 var weight = identity.ToDictionary(w => w, w => {
-                    int count = materials.Count(g => Best(w, nameBag[g.Key]) > 0 || Best(w, contextBag[g.Key]) > 0);
+                    bool Mentions(Material m) => Best(w, nameBag[m]) > 0 || Best(w, contextBag[m]) > 0;
+                    int count = visible.Count(Mentions);
+                    if (count == 0) count = materials.Count(g => Mentions(g.Key));
                     return count == 0 ? 0 : 1.0 / count; });
                 double Evidence(IEnumerable<string> bag) => identity.Sum(w => weight[w] * Best(w, bag));
                 string plainName = System.IO.Path.GetFileNameWithoutExtension(texture.fileName).ToLowerInvariant();
@@ -238,18 +256,23 @@ namespace Orbiters.MyAvatar.Editor
                 {
                     double fit = RoleFit(texture.role, slot.role);
                     if (double.IsNaN(fit)) continue;
-                    double evidence = Evidence(slotBag[slot]) * 3 + Evidence(nameBag[slot.material]) * 3 + Evidence(contextBag[slot.material]) * 1.5;
+                    double evidence = Evidence(slotBag[slot]) * 3 + Evidence(nameBag[slot.material]) * 3 + Evidence(contextBag[slot.material]) * 1.5 + Evidence(meshBag[slot.material]);
                     if (slot.existingName.ToLowerInvariant() == plainName) evidence += 10;
                     ranked.Add(new Candidate { slot = slot, evidence = evidence, score = evidence + fit + Preference(texture, slot) });
                 }
                 ranked = ranked.OrderByDescending(c => c.score).ToList();
                 var best = ranked.FirstOrDefault();
                 if (best == null || best.evidence < 1) { texture.reason = "No clear material and texture-slot match. Choose a slot below."; if (best != null) Suggest(texture, best.slot); continue; }
-                // Slots currently showing the same texture are one target: replacing it everywhere is expected.
-                var rival = ranked.Skip(1).FirstOrDefault(c => !(best.slot.existing && c.slot.existing == best.slot.existing));
+                // Parts of one mesh that share a UV layout (colour variants of the same strands, for example) are one target:
+                // a single texture set covers all of them.
+                var group = ranked.Skip(1).Where(c => best.score - c.score < .5 && c.slot.property == best.slot.property && c.slot.material != best.slot.material &&
+                    layout.Siblings(best.slot, c.slot)).ToList();
+                // Slots currently showing the same texture are one target too: replacing it everywhere is expected.
+                var rival = ranked.Skip(1).FirstOrDefault(c => !group.Contains(c) && !(best.slot.existing && c.slot.existing == best.slot.existing));
                 if (rival != null && best.score - rival.score < .5)
                 { texture.reason = "Several slots are about equally likely. Choose the target below."; Suggest(texture, best.slot); continue; }
                 Assign(texture, best.slot, (float)Math.Min(.99, .9 + best.evidence / 100), "Matched " + best.slot.materialName + " / " + best.slot.description + " by name.");
+                foreach (var member in group) grouped.Add(Link(texture, member.slot, "Shares its mesh and UV layout with " + best.slot.materialName + "."));
             }
             SeparateEmission(textures, slots, stats);
             RejectConflicts(textures);
@@ -257,21 +280,33 @@ namespace Orbiters.MyAvatar.Editor
             // the material its siblings matched, when that material has a free compatible slot.
             foreach (var texture in textures.Where(t => !t.material && identities[t].Count > 0).ToList())
             {
-                var siblings = textures.Where(t => t != texture && t.material && identities[t].SetEquals(identities[texture])).Select(t => t.material).Distinct().ToList();
-                if (siblings.Count != 1) continue;
-                var target = slots.Where(s => s.material == siblings[0] && Compatible(texture.role, s.role) && !textures.Any(t => t.material == s.material && t.property == s.property))
-                    .OrderByDescending(s => RoleFit(texture.role, s.role) + Preference(texture, s)).FirstOrDefault();
-                if (target != null && RoleFit(texture.role, target.role) + Preference(texture, target) > -1)
-                    Assign(texture, target, .93f, "Same texture set as the other " + string.Join(" ", identities[texture]) + " files on " + target.materialName + ".");
+                bool SameSet(TextureEntry other) => other != texture && identities[other].SetEquals(identities[texture]);
+                var siblings = textures.Where(t => t.material && SameSet(t)).Select(t => t.material)
+                    .Concat(grouped.Where(g => textures.Any(t => t.texture == g.texture && SameSet(t))).Select(g => g.material)).Distinct().ToList();
+                if (siblings.Count == 0) continue;
+                // Siblings on several materials must be one layout group (see above); otherwise the set's home is unclear.
+                var home = slots.First(s => s.material == siblings[0]);
+                if (siblings.Skip(1).Any(m => !layout.Siblings(home, slots.First(s => s.material == m)))) continue;
+                var targets = siblings.Select(m => slots.Where(s => s.material == m && Compatible(texture.role, s.role) && !textures.Concat(grouped).Any(t => t.material == s.material && t.property == s.property))
+                    .OrderByDescending(s => RoleFit(texture.role, s.role) + Preference(texture, s)).FirstOrDefault())
+                    .Where(t => t != null && RoleFit(texture.role, t.role) + Preference(texture, t) > -1).ToList();
+                if (targets.Count > 0)
+                {
+                    Assign(texture, targets[0], .93f, "Same texture set as the other " + string.Join(" ", identities[texture]) + " files on " + targets[0].materialName + ".");
+                    foreach (var extra in targets.Skip(1)) grouped.Add(Link(texture, extra, "Same texture set, and shares its mesh and UV layout with " + targets[0].materialName + "."));
+                }
                 else
                 {
                     // Locked/optimized shaders only keep the features that were enabled, so the slot may simply not exist yet.
                     texture.suggestedMaterialName = siblings[0].name; texture.suggestedProperty = null;
-                    texture.reason = MissingSlotReason + siblings[0].name + ", which has no free " + texture.role + " slot. Enable that feature on the material (unlock its shader if it is locked), then drop again, or choose a slot below.";
+                    texture.reason = MissingSlotReason + string.Join(", ", siblings.Select(m => m.name)) + ", which has no free " + texture.role + " slot. Enable that feature on the material (unlock its shader if it is locked), then drop again, or choose a slot below.";
                 }
             }
+            // Layout-group members only fill slots nothing else targets.
+            foreach (var member in grouped)
+                if (!textures.Concat(linked).Any(t => t.material == member.material && t.property == member.property)) linked.Add(member);
             // Propagate each confident match to other slots of the same kind that currently use the texture being replaced.
-            foreach (var texture in textures.Where(t => t.material && !t.applied).ToList())
+            foreach (var texture in textures.Concat(linked).Where(t => t.material && !t.applied).ToList())
             {
                 var slot = slots.FirstOrDefault(s => s.material == texture.material && s.property == texture.property);
                 if (slot?.existing == null) continue;
@@ -290,7 +325,48 @@ namespace Orbiters.MyAvatar.Editor
             else if (Primary.Contains(slot.property)) value += .5;
             if (slot.existing) value += .3;
             if (slot.rendererKind == "effect") value -= 1.5;
+            if (!slot.active) value -= 3;
             return value;
+        }
+
+        // Coarse UV occupancy per mesh submesh; two submeshes of one mesh with nearly the same occupancy share a layout.
+        private sealed class UvLayouts
+        {
+            private const int Size = 32;
+            private readonly Dictionary<(Mesh, int), bool[]> cache = new Dictionary<(Mesh, int), bool[]>();
+
+            internal bool Siblings(TextureSlot a, TextureSlot b)
+            {
+                foreach (var (renderer, indexA) in a.parts)
+                foreach (var (other, indexB) in b.parts)
+                {
+                    if (renderer != other) continue;
+                    var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.GetComponent<MeshFilter>()?.sharedMesh;
+                    if (!mesh || indexA >= mesh.subMeshCount || indexB >= mesh.subMeshCount) continue;
+                    bool[] first = Grid(mesh, indexA), second = Grid(mesh, indexB);
+                    int both = 0, countA = 0, countB = 0;
+                    for (int i = 0; i < first.Length; i++) { if (first[i]) countA++; if (second[i]) countB++; if (first[i] && second[i]) both++; }
+                    if (Math.Min(countA, countB) > 0 && both >= .8 * Math.Max(countA, countB)) return true;
+                }
+                return false;
+            }
+
+            private bool[] Grid(Mesh mesh, int submesh)
+            {
+                if (cache.TryGetValue((mesh, submesh), out var grid)) return grid;
+                grid = new bool[Size * Size];
+                var uv = new List<Vector2>();
+                mesh.GetUVs(0, uv);
+                if (uv.Count > 0)
+                    foreach (int index in mesh.GetIndices(submesh))
+                    {
+                        if (index >= uv.Count) continue;
+                        var p = uv[index];
+                        int x = Mathf.Clamp((int)(Mathf.Repeat(p.x, 1f) * Size), 0, Size - 1), y = Mathf.Clamp((int)(Mathf.Repeat(p.y, 1f) * Size), 0, Size - 1);
+                        grid[y * Size + x] = true;
+                    }
+                return cache[(mesh, submesh)] = grid;
+            }
         }
 
         private static TextureEntry Link(TextureEntry source, TextureSlot slot, string reason)

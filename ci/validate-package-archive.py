@@ -68,7 +68,7 @@ def main():
         "Editor/Orbiters.MyAvatar.Editor.asmdef", "Editor/MyAvatarEditor.cs",
         "Editor/TextureImport.cs", "Editor/TextureMatching.cs", "Editor/TextureAi.cs",
         "Editor/TextureChanges.cs", "Editor/MyAvatarResults.cs",
-        "Editor/UI/TextureDropElement.cs", "Editor/UI/MyAvatarLogo.svg.txt",
+        "Editor/UI/TextureDropZone.cs", "Editor/UI/MyAvatarLogo.svg.txt",
         "Editor/UI/myavatar.uss",
     )
     for required_file in ROOT_FILES + required_myavatar_files:
