@@ -48,12 +48,29 @@
 
 /* Thumbnail: summary row, then the shared photoshoot studio when open. */
 .thumbnail-section { margin-top: 18px; }
-.thumbnail-summary { flex-direction: row; align-items: center; background-color: #212121; border-radius: 16px; padding: 10px; }
-.thumbnail-frame { width: 112px; height: 84px; flex-shrink: 0; border-radius: 10px; overflow: hidden; background-color: #2e2e2e; margin-right: 12px; }
-.thumbnail-frame.empty { background-color: #2a2a2a; border-width: 1px; border-color: #3a3a3a; }
-.thumbnail-image { width: 100%; height: 100%; }
-.thumbnail-side { flex-grow: 1; flex-shrink: 1; min-width: 0; }
-.thumbnail-status { color: #c8c8c8; font-size: 11px; white-space: normal; margin-bottom: 8px; }
-.thumbnail-actions { flex-direction: row; flex-wrap: wrap; }
-.thumbnail-actions .mcb-button { height: 30px; min-height: 30px; margin: 0 8px 4px 0; }
+.thumbnail-actions { flex-direction: row; margin-top: 12px; }
+.thumbnail-actions .mcb-button { height: 34px; min-height: 34px; margin: 0; }
+.thumbnail-actions .thumbnail-actions__sdk { flex-grow: 1; flex-basis: 0; margin-right: 10px; }
+.thumbnail-actions .thumbnail-actions__main { flex-grow: 2; flex-basis: 0; }
+.thumbnail-status { margin-top: 8px; color: #ff8c59; font-size: 11px; white-space: normal; }
 .thumbnail-studio { margin-top: 12px; }
+/* VRChat in-game avatar card, measured on the game at 1:1: 228x234, 4px frame, 220x127 image, text centred in the body. */
+.vrc-stage { height: 270px; flex-shrink: 0; border-radius: 16px; overflow: hidden; background-color: #0c0e14; border-width: 1px; border-color: rgba(255,255,255,0.05); justify-content: center; }
+.vrc-stage__row { flex-direction: row; justify-content: center; align-items: center; }
+.vrc-card { width: 228px; height: 234px; flex-shrink: 0; margin: 0 8px; padding: 4px 4px 0 4px; border-radius: 10px; overflow: hidden; background-color: #2e323e; }
+.vrc-card--placeholder { opacity: 0.32; }
+.vrc-card__media { position: relative; height: 127px; flex-shrink: 0; border-top-left-radius: 7px; border-top-right-radius: 7px; overflow: hidden; background-color: #1a1a1a; }
+.vrc-card--placeholder .vrc-card__media { background-color: #242833; }
+.vrc-card__image { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.vrc-card__empty { position: absolute; left: 0; top: 0; right: 0; bottom: 0; -unity-text-align: middle-center; color: #6f7883; font-size: 11px; }
+.vrc-card__live { position: absolute; left: 6px; top: 5px; height: 18px; padding: 0 7px; border-radius: 9px; background-color: rgba(10,12,16,0.7); color: #00DA6D; font-size: 9px; -unity-font-style: bold; -unity-text-align: middle-center; letter-spacing: 0.6px; }
+.vrc-card__badges { position: absolute; right: 6px; top: 2px; flex-direction: row; }
+.vrc-card__badge { width: 25px; height: 25px; margin-left: 2px; }
+.vrc-card__body { flex-grow: 1; justify-content: center; padding: 0 10px 5px 9px; -unity-background-scale-mode: stretch-to-fill; }
+.vrc-card__title { min-height: 39px; }
+.vrc-card__title-line { margin: 0; padding: 0; font-size: 19px; -unity-font-style: bold; color: #bababa; -unity-text-align: middle-left; white-space: nowrap; overflow: hidden; }
+.vrc-card__author { margin: 7px 0 0 0; padding: 0; height: 20px; font-size: 15px; -unity-font-style: bold; color: #55828a; -unity-text-align: middle-left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vrc-card__bar { height: 12px; width: 132px; margin: 7px 0; border-radius: 6px; background-color: #4a4f5c; }
+.vrc-card__bar--author { width: 84px; height: 10px; margin: 9px 0 2px 0; background-color: #3c5a60; }
+.vrc-card__flash { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background-color: #ffffff; opacity: 0; transition-property: opacity; transition-duration: 0.45s; transition-timing-function: ease-out; }
+.vrc-card__flash--on { opacity: 0.85; transition-duration: 0s; }

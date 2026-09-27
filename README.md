@@ -28,11 +28,18 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
 
 ## Thumbnail
 
-**Create thumbnail** opens the Orbiters photoshoot, the same one MCB uses for custom
-base media, set up for one 4:3 VRChat thumbnail (1200×900). Choose a light, pose,
-background and expression, frame the avatar with rotation, placement and zoom, then
-press **Set**. **Browse** uses an existing image instead and **Retry** returns to the
-live preview. The image is saved as
+The thumbnail is shown on a copy of VRChat's in-game avatar card, measured on the game
+at 1:1 and set between faint neighbouring cards: the wide crop VRChat shows, the
+platform badges, the warning badge of a Poor or Very Poor performance rank (the SDK's
+own rating for the build target), the avatar name on up to two lines and your VRChat
+name once the SDK is signed in. The editor font stands in for VRChat's. While the
+studio follows the live preview, drag, scroll and Shift-drag right on the card image
+to frame the avatar. **Create thumbnail** opens the Orbiters photoshoot, the same one MCB uses for
+custom base media, set up for one 4:3 VRChat thumbnail (1200×900); the card then
+shows the live preview. Choose a pose, light, background and expression, frame the
+avatar, then press **Capture**: the thumbnail is saved at once and the card flashes,
+while the studio keeps showing the live camera so you can capture again. **Browse**
+uses an existing image instead and closes the studio. The image is saved as
 `Assets/Orbiters/MyAvatar/Thumbnails/<avatar> <id>/<avatar> thumbnail.png`; a new
 capture replaces it.
 

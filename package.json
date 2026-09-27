@@ -1,7 +1,7 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "unity": "2022.3",
   "description": "Apply texture sets to your avatar, create its VRChat thumbnail, resolve ambiguous matches and undo changes. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {

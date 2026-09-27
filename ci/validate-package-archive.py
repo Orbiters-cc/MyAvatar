@@ -69,7 +69,8 @@ def main():
         "Editor/TextureImport.cs", "Editor/TextureMatching.cs", "Editor/TextureAi.cs",
         "Editor/TextureChanges.cs", "Editor/MyAvatarResults.cs",
         "Editor/UI/TextureDropZone.cs", "Editor/UI/MyAvatarLogo.svg.txt",
-        "Editor/UI/myavatar.uss",
+        "Editor/UI/myavatar.uss", "Editor/AvatarThumbnail.cs", "Editor/VrcSdkThumbnail.cs",
+        "Editor/UI/ThumbnailSection.cs", "Editor/UI/VrcAvatarCard.cs",
     )
     for required_file in ROOT_FILES + required_myavatar_files:
         if required_file not in names:
