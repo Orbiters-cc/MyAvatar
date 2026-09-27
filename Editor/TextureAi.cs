@@ -35,6 +35,16 @@ namespace Orbiters.MyAvatar.Editor
 
         private static double Round(float value) => Math.Round(Mathf.Clamp01(value), 3);
 
+        [Serializable] private sealed class Preference { public bool enabled; }
+
+        /// <summary>Turns AI help on or off for the account (the same switch as on the Orbiters account page).</summary>
+        internal static async Task<bool> SetEnabledAsync(string token, bool enabled, CancellationToken cancellation = default)
+        {
+            var preference = await OrbitersApi.SendAsync<Preference>(OrbitersEnvironment.ApiUrl("myavatar/ai-preferences"), token,
+                new { enabled }, cancellation, System.Net.Http.HttpMethod.Put);
+            return preference?.enabled ?? enabled;
+        }
+
         internal static async Task<Result> RequestAsync(string token, object payload, List<TextureEntry> textures, List<TextureSlot> slots, CancellationToken cancellation)
         {
             // The backend enforces the account's AI preference; a separate connection check would only add a round trip.

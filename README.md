@@ -4,8 +4,8 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
 
 ## Get started
 
-1. Install **My Avatar** from the Orbiters VPM repository. Toolkit is a required
-   dependency; Unit Git is optional. The VRChat avatar SDK removes this editor-only
+1. Install **My Avatar** from the Orbiters VPM repository. Toolkit and XRay Gizmos
+   are required dependencies; Unit Git is optional. The VRChat avatar SDK removes this editor-only
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
@@ -49,6 +49,50 @@ through the SDK's own thumbnail selection, exactly as if you had chosen the file
 treats it as a pending change: review it, and upload or discard as usual. A thumbnail
 you choose in the SDK afterwards is left alone. Nothing is uploaded automatically.
 
+## Posing
+
+Three switches for posing the avatar in the Scene view (hover one for a short
+explanation):
+
+- **Bones** draws the avatar's bones with XRay Gizmos; click one to select it, then
+  rotate it with the Rotate tool.
+- **Symmetry** mirrors each rotation or move of a left or right bone onto its partner.
+  It is a mode: it stays on while nothing can be mirrored and starts mirroring as soon
+  as a bone or avatar is selected. Bones under an unevenly scaled parent are skipped.
+- **Clothing** keeps clothing and accessories that are not merged yet (their own
+  armature, merged at build by VRCFury Armature Link or similar) in the avatar's pose.
+  Each clothing bone keeps its rest offset from the matching avatar bone, found by
+  name, humanoid role or a contained avatar bone name. The list below shows each
+  accessory and how many of its bones matched; click one to select it.
+
+Pose edits stay regular Unity edits: Undo reverts the avatar and the mirrored or
+following bones together.
+
+## Hair, tail & toes
+
+Hair, tail and toe PhysBones are recognised by name (`Hair_Front`, `Ponytail`,
+`Tail1`, `Toe_L`, toe beans...), from the bone they start at or the object holding
+them. Each part gets a card:
+
+- **Grab** and **Pose**: Nobody, Only me or Everyone, written to the PhysBones'
+  grab and pose permissions. VRChat has no friends-only setting. Posing is limited to
+  who can grab.
+- **Stretch**: how much longer the chain gets when pulled (PhysBone Max Stretch), up
+  to three times its length.
+
+A choice applies to every PhysBone of the part and can be undone. Bones of the
+avatar's own armature named like a part but driven by no PhysBone are offered under
+**Add physics**, which adds a PhysBone per chain under `PhysBones/<Part>` on the
+avatar, with settings suited to the part and the part's current permissions.
+
+## Parameters
+
+How many of VRChat's 256 bits of synced parameters the avatar will use once VRCFury
+has built it, estimated without building: the avatar's own expression parameters,
+what VRCFury toggles, sliders and full controllers add, and what is left. The count
+updates as the hierarchy changes. **Compress parameters** adds or removes VRCFury's
+Parameter Compressor on the avatar and shows how many bits it saves or would save.
+
 ## What changes
 
 Existing project textures are reused without copying or reimporting. For external
@@ -90,11 +134,18 @@ checkpoint creates a new local change, not a history rewrite. Existing imported 
 
 ## Optional account and AI
 
-The account row uses the same Magic Sync account as MCB. Connecting
-is optional; local matching always works. Logging out affects the shared account.
+Connecting an account is optional; local matching always works. **Login with
+Discord** or **Login with Telegram** opens your browser on that login; Orbiters then
+asks you to confirm the connection once, showing the same four-letter code as Unity,
+and My Avatar is connected. The link works once and expires after ten minutes. The
+account is shared with the other Orbiters tools; logging out affects all of them.
+
+The robot in the corner of the drop field shows whether AI help is available: crossed
+out while you are not connected or AI is off. Once connected, click it to turn AI help
+on or off; this is the same setting as on your Orbiters account page.
 
 Local matches are applied immediately. When textures remain unmatched, an account
-is connected and AI is enabled in that account on the Orbiters website, My Avatar
+is connected and AI help is on, My Avatar
 then asks the Orbiters backend in the background. It sends texture filenames,
 dimensions, pixel statistics measured locally in Unity (grayscale, normal-color,
 black and bright coverage, mean brightness), current material/shader slot information
@@ -146,7 +197,10 @@ the canonical VPM listing current.
 
 Assemblies: `Orbiters.MyAvatar` contains the persistent component;
 `Orbiters.MyAvatar.Editor` contains import, matching, changes and Inspector UI.
-Toolkit owns account storage, API roots/transport, shared account controls,
-animated glow rendering, SVG logo drawing and the photoshoot panel. Unit Git, when installed, owns Git
+Toolkit owns account storage, browser login, API roots/transport, shared account
+controls, animated glow rendering, SVG logo drawing, the photoshoot panel, the
+shared controls (segmented control, scrub dial, icons, switch, support footer),
+symmetry and accessory posing, the parameter estimate and hair/tail/toe PhysBone
+editing. XRay Gizmos draws and picks bones. Unit Git, when installed, owns Git
 execution and scoped index handling; the `MYAVATAR_UNITGIT` version define enables
 the commit step. My Avatar does not depend on MCB.

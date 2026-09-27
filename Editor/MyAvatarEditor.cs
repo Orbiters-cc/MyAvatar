@@ -25,7 +25,7 @@ namespace Orbiters.MyAvatar.Editor
         [NonSerialized] private string note, backgroundStatus;
         [NonSerialized] private bool noteWarning;
         [NonSerialized] private int revision;
-        [NonSerialized] private bool busy;
+        [NonSerialized] private bool busy, aiConnected, aiEnabled;
         private void OnEnable() { avatar = (MyAvatar)target; Undo.undoRedoPerformed += Reload; AssemblyReloadEvents.beforeAssemblyReload += Cancel; }
         private void OnDisable() { Undo.undoRedoPerformed -= Reload; AssemblyReloadEvents.beforeAssemblyReload -= Cancel; Cancel(); photoshoot.Dispose(); }
         private void Cancel() { operation?.Cancel(); background?.Cancel(); }
@@ -39,10 +39,16 @@ namespace Orbiters.MyAvatar.Editor
             root.styleSheets.Add(AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.myavatar/Editor/UI/myavatar.uss"));
             var asset = AssetDatabase.LoadAssetAtPath<TextAsset>("Packages/orbiters.myavatar/Editor/UI/MyAvatarLogo.svg.txt");
             if (asset) { var logo = new OrbitersVectorLogo(asset.text, new Vector2(309,258)); logo.AddToClassList("avatar-logo"); shell.Banner.Add(logo); }
-            shell.Account.Add(new OrbitersAccountElement("myavatar/connection", null));
+            // The account only matters for AI texture matching; the corner robot on the drop zone shows whether it is on.
+            shell.Account.Add(new OrbitersAccountElement("myavatar/connection", ai =>
+                {
+                    aiConnected = !string.IsNullOrEmpty(AuthenticationService.GetAuth()?.token);
+                    aiEnabled = ai;
+                    zone?.SetAi(aiConnected, aiEnabled);
+                },
+                "Allow My Avatar to use AI when it can’t find where to put a texture (you can turn it off in your Orbiters settings)."));
             content = new VisualElement(); content.AddToClassList("content"); root.Add(content);
             var section = new Label("Textures"); section.AddToClassList("section-title"); content.Add(section);
-            content.Add(new Label("Drop a texture set to match it to this avatar’s materials.") { name = "intro" });
             undo = Button("Undo", () => _ = Run(() => { note = null; TextureChanges.UndoLast(avatar); RefreshResults(); return Task.CompletedTask; }));
             undo.tooltip = "Restore the materials from before this texture set. Click again to redo.";
             save = Button("Save", () => _ = Run(async () => {
@@ -52,12 +58,17 @@ namespace Orbiters.MyAvatar.Editor
             save.tooltip = TextureChanges.Commits ? "Save the scene and generated assets, and record a “texture change” checkpoint in Unit Git. Nothing is pushed."
                 : "Save the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint.";
             save.AddToClassList("mcb-button--primary");
-            zone = new TextureDropZone(paths => _ = Run(() => Import(paths)), undo, save); content.Add(zone);
+            zone = new TextureDropZone(paths => _ = Run(() => Import(paths)), undo, save, enabled => _ = SetAiAsync(enabled));
+            zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
             content.Add(new ThumbnailSection(avatar, photoshoot));
+            content.Add(new PosingSection(avatar));
+            content.Add(new PhysicsSection(avatar));
+            content.Add(new ParametersSection(avatar));
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
+            var credit = new Orbiters.Toolkit.Editor.SupportCredit(); credit.AddToClassList("myavatar-credit"); root.Add(credit);
             return root;
         }
 
@@ -86,7 +97,7 @@ namespace Orbiters.MyAvatar.Editor
             // (particles, trails) and secondary layers (detail, matcap, rim...) stay available in the manual slot menu only.
             var open = slots.Where(s => !s.secondary && s.rendererKind != "effect" && unmatched.Any(e => TextureMatching.Compatible(e.role, s.role)) &&
                 !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
-            bool ask = unmatched.Count > 0 && open.Count > 0 && !string.IsNullOrEmpty(token);
+            bool ask = unmatched.Count > 0 && open.Count > 0 && !string.IsNullOrEmpty(token) && aiEnabled;
             object payload = ask ? TextureAi.Payload(unmatched, open, stats) : null;
             zone.ShowProgress(.9f, "Applying to " + entries.Where(e => e.material).Select(e => e.material).Distinct().Count() + " materials…");
             await Task.Yield();
@@ -184,6 +195,16 @@ namespace Orbiters.MyAvatar.Editor
                 TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);
                 TextureMemory.Record(avatar, avatar.textures); TextureChanges.Dirty(avatar); return Task.CompletedTask;
             }));
+        }
+
+        // The robot has already flipped on the drop zone; save the account preference and flip it back if that fails.
+        private async Task SetAiAsync(bool enabled)
+        {
+            aiEnabled = enabled;
+            string token = AuthenticationService.GetAuth()?.token;
+            try { aiEnabled = await TextureAi.SetEnabledAsync(token, enabled); }
+            catch (Exception) { aiEnabled = !enabled; SetNote("Could not change the AI setting. Check your connection and try again.", true); }
+            zone?.SetAi(aiConnected, aiEnabled);
         }
 
         internal static Button Button(string text, Action action)

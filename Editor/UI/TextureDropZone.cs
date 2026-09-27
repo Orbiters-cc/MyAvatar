@@ -19,19 +19,24 @@ namespace Orbiters.MyAvatar.Editor
         private readonly Label progressLabel, statusLabel, backgroundLabel, idleMessage;
         private State state = State.Idle;
         private VisualElement outgoing;
+        private readonly Action<bool> aiToggled;
+        private readonly VisualElement aiButton;
+        private readonly Orbiters.Toolkit.Editor.VectorIcon aiIcon;
+        private bool aiConnected, aiEnabled;
         private float height = -1, velocity, target, fade = 1, displayedProgress, targetProgress, border = 1, shimmerPhase;
         private double lastTick;
         private IVisualElementScheduledItem ticker;
 
-        internal TextureDropZone(Action<string[]> dropped, Button undo, Button save)
+        internal TextureDropZone(Action<string[]> dropped, Button undo, Button save, Action<bool> aiToggled)
         {
             this.dropped = dropped;
+            this.aiToggled = aiToggled;
             AddToClassList("drop-zone"); focusable = true;
 
             idle = Layer("drop-zone__idle");
             var icon = new Image { image = EditorGUIUtility.IconContent("TextAsset Icon").image, scaleMode = ScaleMode.ScaleToFit };
             icon.AddToClassList("drop-icon"); idle.Add(icon);
-            idle.Add(new Label("Drop your texture set") { name = "drop-title" });
+            idle.Add(new Label("Drop all your textures here !") { name = "drop-title" });
             idle.Add(new Label("PNG, JPG or TGA · multiple files or a folder") { name = "drop-hint" });
             idle.Add(Browse("Choose folder…", "mcb-button"));
             idleMessage = new Label(); idleMessage.AddToClassList("drop-zone__message"); idle.Add(idleMessage);
@@ -56,6 +61,17 @@ namespace Orbiters.MyAvatar.Editor
             again.Add(new Label("Drop another set to replace it, or") { name = "drop-again" });
             again.Add(Browse("choose a folder", "drop-zone__link"));
             SetBackground(null);
+            // AI switch in the corner: a crossed robot while AI matching is off or the account is not connected. Once
+            // connected, a press flips it at once; the account preference is saved behind it.
+            aiButton = new VisualElement { focusable = true };
+            aiButton.AddToClassList("drop-zone__ai");
+            aiIcon = new Orbiters.Toolkit.Editor.VectorIcon(Orbiters.Toolkit.Editor.IconGlyph.RobotOff);
+            aiIcon.AddToClassList("drop-zone__ai-icon");
+            aiButton.Add(aiIcon);
+            aiButton.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) { ToggleAi(); e.StopPropagation(); } });
+            aiButton.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Space || e.keyCode == KeyCode.Return) ToggleAi(); });
+            Add(aiButton);
+            SetAi(false, false);
 
             foreach (var layer in new[] { idle, working, done }) layer.RegisterCallback<GeometryChangedEvent>(_ => Retarget());
             generateVisualContent += DrawBorder;
@@ -101,6 +117,27 @@ namespace Orbiters.MyAvatar.Editor
         {
             backgroundLabel.text = text ?? "";
             backgroundLabel.parent.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        internal void SetAi(bool connected, bool enabled)
+        {
+            aiConnected = connected;
+            aiEnabled = connected && enabled;
+            aiIcon.Glyph = aiEnabled ? Orbiters.Toolkit.Editor.IconGlyph.Robot : Orbiters.Toolkit.Editor.IconGlyph.RobotOff;
+            aiButton.EnableInClassList("drop-zone__ai--on", aiEnabled);
+            aiButton.EnableInClassList("drop-zone__ai--available", connected);
+            aiButton.tooltip = !connected
+                ? "AI help is off.\nWhen My Avatar can’t tell where a texture goes from its name, AI can place it for you. Log in at the top of this panel to use it."
+                : aiEnabled
+                    ? "AI help is on.\nTextures My Avatar can’t place from their names are sent (names, sizes and colour stats, never the images) to Orbiters’ AI to find their slot.\nClick to turn it off."
+                    : "AI help is off.\nTextures My Avatar can’t place from their names are left for you to choose.\nClick to let AI place them.";
+        }
+
+        private void ToggleAi()
+        {
+            if (!aiConnected || !enabledInHierarchy) return;
+            SetAi(true, !aiEnabled);
+            aiToggled?.Invoke(aiEnabled);
         }
 
         private VisualElement Layer(string className)

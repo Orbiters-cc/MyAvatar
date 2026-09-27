@@ -6,6 +6,9 @@
     "Orbiters.Toolkit",
     "orbiters.unitgit.Editor",
     "Orbiters.Toolkit.Editor",
+    "Orbiters.Toolkit.Editor.VRChat",
+    "orbiters.xraygizmos",
+    "orbiters.xraygizmos.Editor",
     "VRC.SDKBase.Editor",
     "VRC.SDK3A.Editor",
     "Unity.Newtonsoft.Json"
