@@ -171,6 +171,8 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var other in new[] { idle, working, done }) if (other != layer && other != outgoing) other.style.display = DisplayStyle.None;
             layer.style.display = DisplayStyle.Flex;
             layer.BringToFront();
+            // The AI switch stays above every layer, or the shown layer would take its clicks.
+            aiButton.BringToFront();
             fade = instant ? 1 : 0;
             ApplyFade();
             Retarget();
