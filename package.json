@@ -1,7 +1,7 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "unity": "2022.3",
   "description": "Apply texture sets to your avatar, create its VRChat thumbnail, pose it with symmetry and unmerged clothing, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {

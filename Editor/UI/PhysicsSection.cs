@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.VRChat.PhysBones;
@@ -7,9 +9,10 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Hair, tail and toes, one card each: who can grab and pose them in VRChat and how far they stretch, set on their
+    // Hair, ears, tail and toes, one card each: who can grab and pose them in VRChat and how far they stretch, set on their
     // PhysBones. Chains named like these parts that have no PhysBone can get one in a click. The cards flow into as many
-    // columns as the Inspector is wide.
+    // columns as the Inspector is wide. Cards are rebuilt only when the PhysBones or chains themselves change; any other
+    // edit (a component added elsewhere, an Undo of a choice) updates the cards in place so nothing jumps.
     internal sealed class PhysicsSection : AvatarSection
     {
         private static readonly SegmentedControl.Option[] Choices =
@@ -20,6 +23,8 @@ namespace Orbiters.MyAvatar.Editor
         };
         private readonly MyAvatar avatar;
         private IVisualElementScheduledItem pending;
+        private string structure;
+        private readonly List<Action<PhysBonePartInfo>> updates = new List<Action<PhysBonePartInfo>>();
 
         internal PhysicsSection(MyAvatar avatar) : base(null, card: false)
         {
@@ -41,12 +46,24 @@ namespace Orbiters.MyAvatar.Editor
         private void Refresh()
         {
             if (!avatar) return;
-            Body.Clear();
-            // Nothing to show when the avatar has no hair, tail or toe bones: the section simply stays out of the way.
-            foreach (var part in PhysBoneParts.Scan(avatar.transform)) Body.Add(Card(part));
+            var parts = PhysBoneParts.Scan(avatar.transform);
+            string current = Structure(parts);
+            if (current == structure)
+            {
+                for (int i = 0; i < parts.Count; i++) updates[i](parts[i]);
+                return;
+            }
+            structure = current;
+            Body.Clear(); updates.Clear();
+            // Nothing to show when the avatar has no hair, ear, tail or toe bones: the section simply stays out of the way.
+            foreach (var part in parts) Body.Add(Card(part));
             style.display = Body.childCount == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             LayoutColumns();
         }
+
+        // Which parts, PhysBones and chains without physics there are; the values shown on the cards are left out.
+        private static string Structure(List<PhysBonePartInfo> parts) => string.Join("|", parts.Select(p =>
+            p.Part + ":" + string.Join(",", p.PhysBones.Select(b => b.GetInstanceID())) + ":" + string.Join(",", p.Unphysicked.Select(t => t.GetInstanceID()))));
 
         // As many equal columns as fit, like a gallery: a card alone on the last row keeps the width of the others.
         // Each card has Gap / 2 margins and the grid a negative Gap / 2 margin, so a column takes cardWidth + Gap.
@@ -69,7 +86,7 @@ namespace Orbiters.MyAvatar.Editor
             var title = new Label(PhysBoneParts.Label(info.Part)); title.AddToClassList("physics-card__title"); header.Add(title);
             if (info.PhysBones.Count > 0)
             {
-                var hosts = info.PhysBones.Select(p => (Object)p.gameObject).Distinct().ToArray();
+                var hosts = info.PhysBones.Select(p => (UnityEngine.Object)p.gameObject).Distinct().ToArray();
                 var count = MyAvatarEditor.Button($"{info.PhysBones.Count} PhysBone{(info.PhysBones.Count == 1 ? "" : "s")}", () => { Selection.objects = hosts; EditorGUIUtility.PingObject(hosts[0]); });
                 count.AddToClassList("avatar-link");
                 count.tooltip = "Select these PhysBones.";
@@ -86,19 +103,26 @@ namespace Orbiters.MyAvatar.Editor
                     if (posable.Index > index) posable.SetIndex(index);
                     Limit(posable, stretch, access);
                 }));
-                grab.SetIndex(info.Grabbing.HasValue ? (int)info.Grabbing.Value : -1);
                 posable = Choice(card, "Pose", "Who can leave it in a new pose after grabbing it.", new SegmentedControl(Choices, index => PhysBoneParts.SetPosing(physBones, (PhysBoneAccess)index)));
-                posable.SetIndex(info.Posing.HasValue ? (int)info.Posing.Value : -1);
-                stretch = Stretch(card, info);
-                Limit(posable, stretch, info.Grabbing ?? PhysBoneAccess.Everyone);
-                if (!info.Grabbing.HasValue || !info.Posing.HasValue || !info.MaxStretch.HasValue)
+                stretch = Stretch(card, info, out var showStretch);
+                var mixed = new Label("These PhysBones don’t all match; a new choice applies to all of them.");
+                mixed.AddToClassList("avatar-caption");
+                mixed.AddToClassList("physics-card__hint");
+                card.Add(mixed);
+                void Show(PhysBonePartInfo current)
                 {
-                    var mixed = new Label("These PhysBones don’t all match; a new choice applies to all of them.");
-                    mixed.AddToClassList("avatar-caption");
-                    mixed.AddToClassList("physics-card__hint");
-                    card.Add(mixed);
+                    // Same index: the highlight stays put, so only what really changed moves.
+                    int grabIndex = current.Grabbing.HasValue ? (int)current.Grabbing.Value : -1, poseIndex = current.Posing.HasValue ? (int)current.Posing.Value : -1;
+                    if (grab.Index != grabIndex) grab.SetIndex(grabIndex);
+                    if (posable.Index != poseIndex) posable.SetIndex(poseIndex);
+                    showStretch(current);
+                    Limit(posable, stretch, current.Grabbing ?? PhysBoneAccess.Everyone);
+                    mixed.style.display = !current.Grabbing.HasValue || !current.Posing.HasValue || !current.MaxStretch.HasValue ? DisplayStyle.Flex : DisplayStyle.None;
                 }
+                Show(info);
+                updates.Add(Show);
             }
+            else updates.Add(_ => { });
             if (info.Unphysicked.Count > 0) card.Add(Missing(info));
             return card;
         }
@@ -122,7 +146,7 @@ namespace Orbiters.MyAvatar.Editor
             return control;
         }
 
-        private static Slider Stretch(VisualElement card, PhysBonePartInfo info)
+        private static Slider Stretch(VisualElement card, PhysBonePartInfo info, out Action<PhysBonePartInfo> show)
         {
             var physBones = info.PhysBones;
             var row = new VisualElement(); row.AddToClassList("physics-stretch");
@@ -130,10 +154,15 @@ namespace Orbiters.MyAvatar.Editor
             var label = new Label("Stretch"); label.AddToClassList("physics-card__label"); label.AddToClassList("physics-stretch__label"); row.Add(label);
             var slider = new Slider(0f, PhysBoneParts.MaxStretchLimit); row.Add(slider);
             var value = new Label(); value.AddToClassList("physics-stretch__value"); row.Add(value);
-            float current = info.MaxStretch ?? physBones.Average(p => p.maxStretch);
-            slider.SetValueWithoutNotify(Mathf.Min(current, PhysBoneParts.MaxStretchLimit));
-            value.text = StretchText(info.MaxStretch.HasValue ? current : (float?)null);
             IVisualElementScheduledItem apply = null;
+            show = current =>
+            {
+                // Leave the handle alone while it is being dragged or its value is about to be written.
+                if (apply != null && apply.isActive) return;
+                float stretch = current.MaxStretch ?? current.PhysBones.Average(p => p.maxStretch);
+                slider.SetValueWithoutNotify(Mathf.Min(stretch, PhysBoneParts.MaxStretchLimit));
+                value.text = StretchText(current.MaxStretch.HasValue ? stretch : (float?)null);
+            };
             slider.RegisterValueChangedCallback(evt =>
             {
                 // The number follows the handle at once; the PhysBones are written once the handle rests.
@@ -152,7 +181,7 @@ namespace Orbiters.MyAvatar.Editor
         private VisualElement Missing(PhysBonePartInfo info)
         {
             var row = new VisualElement(); row.AddToClassList("physics-missing");
-            string noun = info.Part == PhysBonePart.Hair ? "hair" : info.Part == PhysBonePart.Tail ? "tail" : "toe";
+            string noun = PhysBoneParts.Noun(info.Part);
             int n = info.Unphysicked.Count;
             var text = new Label(info.PhysBones.Count == 0
                 ? $"{n} {noun} chain{(n == 1 ? " doesn’t" : "s don’t")} move yet."

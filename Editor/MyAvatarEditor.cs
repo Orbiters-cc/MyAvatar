@@ -39,6 +39,9 @@ namespace Orbiters.MyAvatar.Editor
             root.styleSheets.Add(AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.myavatar/Editor/UI/myavatar.uss"));
             var asset = AssetDatabase.LoadAssetAtPath<TextAsset>("Packages/orbiters.myavatar/Editor/UI/MyAvatarLogo.svg.txt");
             if (asset) { var logo = new OrbitersVectorLogo(asset.text, new Vector2(309,258)); logo.AddToClassList("avatar-logo"); shell.Banner.Add(logo); }
+            shell.Header.Add(new Orbiters.Toolkit.Editor.InspectorLockButton(
+                "Lock this Inspector on the avatar: pick textures in the Project window, then drag them onto the drop zone.",
+                "Locked on this avatar. Click to follow the selection again."));
             // The account only matters for AI texture matching; the corner robot on the drop zone shows whether it is on.
             shell.Account.Add(new OrbitersAccountElement("myavatar/connection", ai =>
                 {
@@ -46,7 +49,7 @@ namespace Orbiters.MyAvatar.Editor
                     aiEnabled = ai;
                     zone?.SetAi(aiConnected, aiEnabled);
                 },
-                "Allow My Avatar to use AI when it can’t find where to put a texture (you can turn it off in your Orbiters settings)."));
+                "Allow My Avatar to use AI when it can’t find where to put a texture (you can turn it off easily here)."));
             content = new VisualElement(); content.AddToClassList("content"); root.Add(content);
             var section = new Label("Textures"); section.AddToClassList("section-title"); content.Add(section);
             undo = Button("Undo", () => _ = Run(() => { note = null; TextureChanges.UndoLast(avatar); RefreshResults(); return Task.CompletedTask; }));
@@ -65,6 +68,9 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new PosingSection(avatar));
             content.Add(new PhysicsSection(avatar));
             content.Add(new ParametersSection(avatar));
+#if MYAVATAR_UNITGIT
+            content.Add(new VersioningSection());
+#endif
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
@@ -199,7 +205,7 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Blendshape Links still ships with MCB; the button opens it when MCB is installed.
-        private const string BlendShapeLinksMenu = "Tools/My Custom Base (MCB)/blendshape links debug";
+        private const string BlendShapeLinksMenu = "Tools/My Custom Base (MCB)/Blendshape Links";
         private static readonly bool BlendShapeLinksInstalled = Type.GetType("BlendShapeLinksDebugWindow, mcb.Editor") != null;
 
         // Bottom toolbar in Unity's own style, like MCB's.
