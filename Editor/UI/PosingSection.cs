@@ -1,6 +1,7 @@
 using System.Linq;
 using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.Posing;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.XRayGizmos;
 using Orbiters.XRayGizmos.Editor;
 using UnityEditor;
@@ -24,7 +25,9 @@ namespace Orbiters.MyAvatar.Editor
             var row = new VisualElement(); row.AddToClassList("posing-toggles"); Body.Add(row);
             bones = Tile(row, IconGlyph.Bones, "Bones", "Show bones: draw the avatar's bones in the Scene view. Click a bone to select it, then rotate it.", ToggleBones);
             symmetry = Tile(row, IconGlyph.Mirror, "Symmetry", "Symmetry: rotating or moving a bone on one side does the same on the other side.", ToggleSymmetry);
-            accessories = Tile(row, IconGlyph.Clothes, "Clothing", "Sync accessories: clothing and accessories that are not merged yet follow the avatar's pose.", ToggleAccessories);
+            accessories = Tile(row, IconGlyph.Clothes, "Clothing", "Preview clothing and accessories as they will be attached once built: they follow the avatar's pose " +
+                "(VRCFury Armature Links, My Avatar attachments, or matching bone names). Switch it off to put them back where they were.", ToggleAccessories);
+            var beta = new StageBadge(FeatureStage.Beta); beta.AddToClassList("posing-toggle__badge"); accessories.Add(beta);
             status = new Label(); status.AddToClassList("avatar-section__note"); Body.Add(status);
             list = new VisualElement(); list.AddToClassList("posing-list"); Body.Add(list);
 
@@ -79,7 +82,7 @@ namespace Orbiters.MyAvatar.Editor
         {
             bool on = !AccessoriesOn;
             accessories.SetOn(on);
-            if (on) AccessoryPoseSync.Enable(avatar.transform, BodyRenderer);
+            if (on) AccessoryPoseSync.Enable(avatar.transform);
             else AccessoryPoseSync.Disable();
             Refresh();
         }
@@ -97,16 +100,16 @@ namespace Orbiters.MyAvatar.Editor
                 : AccessoryPoseSync.LastStatus != "Off" ? AccessoryPoseSync.LastStatus
                 : "Turn on what you need while posing in the Scene view. Hover a button to see what it does.";
             list.Clear();
-            var found = AccessoriesOn ? AccessoryPoseSync.Accessories.ToList() : AccessoryPoseSync.Find(avatar.transform, BodyRenderer);
+            var found = AccessoriesOn ? AccessoryPoseSync.Accessories.ToList() : AccessoryPoseSync.Find(avatar.transform);
             foreach (var accessory in found)
             {
                 var item = new VisualElement(); item.AddToClassList("posing-item");
-                var dot = new VisualElement(); dot.AddToClassList("posing-item__dot"); dot.EnableInClassList("partial", accessory.MatchedBones < accessory.TotalBones / 2); item.Add(dot);
+                var dot = new VisualElement(); dot.AddToClassList("posing-item__dot"); dot.EnableInClassList("partial", accessory.Reason != null || accessory.Following < accessory.Total / 2); item.Add(dot);
                 var name = new Label(accessory.Name); name.AddToClassList("posing-item__name"); item.Add(name);
-                var count = new Label($"{accessory.MatchedBones}/{accessory.TotalBones} bones"); count.AddToClassList("posing-item__count"); item.Add(count);
+                var count = new Label(accessory.Total <= 1 ? accessory.Rule : $"{accessory.Rule} · {accessory.Following}/{accessory.Total} bones"); count.AddToClassList("posing-item__count"); item.Add(count);
                 var target = accessory.Root;
                 item.RegisterCallback<PointerDownEvent>(_ => { Selection.activeTransform = target; EditorGUIUtility.PingObject(target); });
-                item.tooltip = "Select this accessory's armature.";
+                item.tooltip = (accessory.Reason != null ? accessory.Reason + "\n" : "") + "Click to select this accessory.";
                 list.Add(item);
             }
         }

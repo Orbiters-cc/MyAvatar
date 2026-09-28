@@ -1,9 +1,9 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "unity": "2022.3",
-  "description": "Apply texture sets to your avatar, create its VRChat thumbnail, pose it with symmetry and unmerged clothing, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
+  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages (alpha), create its VRChat thumbnail, pose it with symmetry and a clothing preview, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
     "name": "Orbiters",
     "url": "https://orbiters.cc",
@@ -13,9 +13,45 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.2.6 <0.3.0",
-    "orbiters.xraygizmos": ">=0.2.2 <0.3.0",
+    "orbiters.toolkit": ">=0.3.0 <0.4.0",
+    "orbiters.xraygizmos": ">=0.2.3 <0.3.0",
     "com.vrchat.avatars": ">=3.5.0 <4.0.0"
   },
-  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.5.1/MyAvatar-0.5.1.zip"
+  "orbiters": {
+    "repositories": [
+      {
+        "url": "https://vcc.vrcfury.com/",
+        "packages": [
+          "com.vrcfury.vrcfury"
+        ]
+      },
+      {
+        "url": "https://vpm.nadena.dev/vpm.json",
+        "packages": [
+          "nadena.dev.modular-avatar"
+        ]
+      },
+      {
+        "url": "https://d4rkc0d3r.github.io/vpm-repos/main.json",
+        "packages": [
+          "d4rkpl4y3r.d4rkavataroptimizer"
+        ]
+      }
+    ],
+    "optionalVpmDependencies": {
+      "com.vrcfury.vrcfury": {
+        "displayName": "VRCFury",
+        "reason": "Accessories set up for VRCFury are installed with its Armature Link and merge their toggles and animations at build time."
+      },
+      "nadena.dev.modular-avatar": {
+        "displayName": "Modular Avatar",
+        "reason": "Accessories made for Modular Avatar keep their Merge Armature and menu setup when you add them to your avatar."
+      },
+      "d4rkpl4y3r.d4rkavataroptimizer": {
+        "displayName": "d4rkAvatarOptimizer",
+        "reason": "Merges meshes and materials and removes unused blendshapes and bones at build time, for a better performance rank without touching your avatar."
+      }
+    }
+  },
+  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.6.0/MyAvatar-0.6.0.zip"
 }

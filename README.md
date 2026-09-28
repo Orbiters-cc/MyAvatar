@@ -1,6 +1,6 @@
 # My Avatar
 
-Unity 2022.3 avatar texture setup, with an optional Orbiters account.
+Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing and physics, with an optional Orbiters account.
 
 ## Get started
 
@@ -25,6 +25,83 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
    changes), generated textures/materials and their metadata. Unrelated project
    paths and staged changes are excluded. Ignored checkpoint files must be
    unignored first. Saving unchanged files succeeds without making an empty commit. Nothing is pushed.
+
+## Clothes and accessories (alpha)
+
+Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. A second drop field
+takes what clothing and accessory creators deliver: a `.unitypackage`, a `.zip` (also
+one holding a package, like `…_UnzipMe.zip`), a prefab or an FBX, with their textures
+and `.txt` readmes, or their folder. My Avatar imports what is not in the project yet,
+picks what to put on, places it under the avatar root and attaches it. It never changes
+the avatar or moves bones into its armature: what attaches is applied to the build copy.
+
+- **Already set up** with VRCFury or Modular Avatar: placed on the avatar root, as its
+  creator intended, with nothing added but a menu toggle when it has none.
+- **Clothing with its own armature**: bone names that match the avatar's exactly get
+  one VRCFury Armature Link. Other names (`upper_arm.L`, `J_Bip_L_UpperArm`, `Left arm`…)
+  are matched by humanoid role and linked by My Avatar; at build each linked bone moves
+  under its avatar bone, keeping its rest offset. Extra bones (hood strings, physics
+  chains) follow their parent.
+- **Props** (hats, hair, glasses, bracelets…) follow one bone, chosen from their name or
+  position. Modelled far from it, they are placed on it; **Bone ▾** changes it.
+- Empty constraints named after avatar bones (`Head`, `Left wrist`) are wired to them
+  and become VRChat constraints.
+- A saved VRCFury toggle under **Accessories/<name>** is added when the accessory has no
+  toggle or controller of its own; the list shows the parameter bits used. Body
+  blendshapes also drive the same-named shapes of the accessory at build, without a
+  VRCFury component per shape.
+- Images of the drop go to the accessory's materials, as in the texture field.
+
+Variants are chosen for you: VRCFury over manual setups, PC over Quest (Quest on an
+Android build target), with late-join sync over without. The only question is the
+hand, when a package ships one per hand (**Left hand**, **Right hand**, **Both**); a
+drop holding several different items lists them to pick from. Dropping something
+already on the avatar offers **Replace** and **Add another**.
+
+What My Avatar can't do for you is listed under the field with **Select**: a name that
+asks for a manual step ("Put me in armature"), a script of another tool (VRCLens has its
+own installer), a missing script, a bone matching nothing of the avatar. A package made
+for Modular Avatar, and VRCFury itself, can be installed from there. `.blend`, `.max` and
+`.stl` sources are refused with a note; setup scenes are not supported yet.
+
+Each accessory is one Undo step; **Remove** in the list deletes it. Packages with scripts
+make Unity recompile: the drop continues after it, even without the Inspector open.
+
+With AI help on (the robot of this field, the same account setting), what the rules
+could not decide is asked in the background: which of two items to use, the bone a prop
+goes to when only its position suggests one, clothing bones nothing matched, and manual
+steps its readme mentions. It receives object and bone names and paths inside the
+accessory and the avatar, component types and up to 12,000 characters of the drop's
+`.txt` and `.md` files (next to a dropped prefab too); no images, no computer paths.
+
+## Quick optimization
+
+Once a drop has placed an image that can be compressed, a **Quick optimization** row
+appears below the drop field with the estimated texture memory before and after.
+**Optimize** caps every texture the avatar's materials show at 512 px (never upscaling)
+and sets its PC (Standalone) import settings for the best quality per byte of VRAM:
+BC1 for colour whose alpha is unused (measured on the pixels, not taken from the
+importer), BC7 when alpha is used, BC5 for normal maps; mipmaps and mipmap streaming
+on, crunch off (crunch only shrinks the download, not memory), best compression
+quality. sRGB, alpha-is-transparency and every other setting stay as they are. Ramps,
+lookup tables, gradients, SDF maps, very thin strips, HDR images, render textures and
+textures that are not plain imported images are left alone. Mobile settings come later.
+
+Import settings change in place, all in one import pass. A texture also used by
+another avatar in the open scenes, or inside a package, is copied under
+`Assets/Orbiters/MyAvatar/<batch-id>/` instead, and this avatar gets copies of the
+materials that show it, assigned only to renderers under this component. The row then
+shows the estimated texture memory (VRAM, as VRChat ranks it, not download size) and
+how many textures changed. **Undo** restores the import settings and materials,
+including after a restart: the component stores what it changed, so save your scene.
+Unity's Undo and Redo work too. Import settings or material slots you changed since
+are kept; copies stay on disk. Undo the optimization before undoing its texture set.
+
+Once optimized, the row points to [d4rkAvatarOptimizer](https://github.com/d4rkc0d3r/d4rkAvatarOptimizer)
+for merging meshes and materials and removing unused bones and blendshapes, offers
+**Add to avatar** when it is installed but not on the avatar, or notes that it is
+disabled. It optimizes at upload; with VRCFury or Modular Avatar its author
+recommends that over **Create Optimized Copy**.
 
 ## Thumbnail
 
@@ -59,14 +136,17 @@ explanation):
 - **Symmetry** mirrors each rotation or move of a left or right bone onto its partner.
   It is a mode: it stays on while nothing can be mirrored and starts mirroring as soon
   as a bone or avatar is selected. Bones under an unevenly scaled parent are skipped.
-- **Clothing** keeps clothing and accessories that are not merged yet (their own
-  armature, merged at build by VRCFury Armature Link or similar) in the avatar's pose.
-  Each clothing bone keeps its rest offset from the matching avatar bone, found by
-  name, humanoid role or a contained avatar bone name. The list below shows each
-  accessory and how many of its bones matched; click one to select it.
+- **Clothing** (beta) previews clothing and accessories as they will be attached once
+  built: they follow the avatar's pose. It reads VRCFury Armature Links (merged bones,
+  and props linked to one bone), My Avatar attachments, and for clothing that nothing
+  links yet, matching bone names. Each follower keeps its rest offset from its avatar
+  bone, taken from both meshes' bind poses. Bones driven by constraints are left to
+  them. The list below shows each accessory, how it follows and how many of its bones
+  do; click one to select it. It is only a preview: switching it off (or saving the
+  scene, entering Play Mode, a script reload) puts the accessories back where they were.
 
-Pose edits stay regular Unity edits: Undo reverts the avatar and the mirrored or
-following bones together.
+Pose edits of the avatar stay regular Unity edits: Undo reverts the avatar and its
+mirrored bones together.
 
 ## Hair, tail & toes
 
@@ -206,7 +286,8 @@ Assemblies: `Orbiters.MyAvatar` contains the persistent component;
 `Orbiters.MyAvatar.Editor` contains import, matching, changes and Inspector UI.
 Toolkit owns account storage, browser login, API roots/transport, shared account
 controls, animated glow rendering, SVG logo drawing, the photoshoot panel, the
-shared controls (segmented control, scrub dial, icons, switch, support footer),
+shared controls (segmented control, scrub dial, icons, switch, stage badge, support footer),
+feature flags, VPM dependency prompts, bone matching, accessory attachment and its build step,
 symmetry and accessory posing, the parameter estimate and hair/tail/toe PhysBone
 editing. XRay Gizmos draws and picks bones. Unit Git, when installed, owns Git
 execution and scoped index handling; the `MYAVATAR_UNITGIT` version define enables

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -6,12 +7,33 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // The texture input: an empty drop field, a progress bar while a set is applied, then the result with Undo and Save.
-    // The field morphs between states with a slightly bouncy height spring and crossfaded contents; it keeps accepting
-    // drops in the empty and result states.
-    internal sealed class TextureDropZone : VisualElement
+    // A file input: an empty drop field, a progress bar while a drop is applied, then the result with its actions (Undo and
+    // Save for textures). The field morphs between states with a slightly bouncy height spring and crossfaded contents; it
+    // keeps accepting drops in the empty and result states.
+    internal sealed class DropZone : VisualElement
     {
         private enum State { Idle, Working, Done }
+
+        internal sealed class Texts
+        {
+            public string Title, Hint, Browse, Again, AgainLink, AiOn, AiOff, AiDisconnected;
+            /// <summary>Opens a file or folder picker; null when cancelled.</summary>
+            public Func<string[]> Pick;
+        }
+
+        internal static readonly Texts Textures = new Texts
+        {
+            Title = "Drop all your textures here !", Hint = "PNG, JPG or TGA · multiple files or a folder",
+            Browse = "Choose folder…", Again = "Drop another set to replace it, or", AgainLink = "choose a folder",
+            AiOn = "AI help is on.\nTextures My Avatar can’t place from their names are sent (names, sizes and colour stats, never the images) to Orbiters’ AI to find their slot.\nClick to turn it off.",
+            AiOff = "AI help is off.\nTextures My Avatar can’t place from their names are left for you to choose.\nClick to let AI place them.",
+            AiDisconnected = "AI help is off.\nWhen My Avatar can’t tell where a texture goes from its name, AI can place it for you. Log in at the top of this panel to use it.",
+            Pick = () =>
+            {
+                string path = EditorUtility.OpenFolderPanel("Choose a texture folder", "", "");
+                return string.IsNullOrEmpty(path) ? null : new[] { path };
+            },
+        };
 
         private static readonly Color Green = new Color(0f, .855f, .427f), Amber = new Color(1f, .69f, .13f), Dash = new Color(.48f, .48f, .48f);
         private readonly Action<string[]> dropped;
@@ -23,12 +45,14 @@ namespace Orbiters.MyAvatar.Editor
         private readonly VisualElement aiButton;
         private readonly Orbiters.Toolkit.Editor.VectorIcon aiIcon;
         private bool aiConnected, aiEnabled;
+        private readonly Texts texts;
         private float height = -1, velocity, target, fade = 1, displayedProgress, targetProgress, border = 1, shimmerPhase;
         private double lastTick;
         private IVisualElementScheduledItem ticker;
 
-        internal TextureDropZone(Action<string[]> dropped, Button undo, Button save, Action<bool> aiToggled)
+        internal DropZone(Texts texts, Action<string[]> dropped, IEnumerable<VisualElement> doneActions, Action<bool> aiToggled)
         {
+            this.texts = texts;
             this.dropped = dropped;
             this.aiToggled = aiToggled;
             AddToClassList("drop-zone"); focusable = true;
@@ -36,9 +60,9 @@ namespace Orbiters.MyAvatar.Editor
             idle = Layer("drop-zone__idle");
             var icon = new Image { image = EditorGUIUtility.IconContent("TextAsset Icon").image, scaleMode = ScaleMode.ScaleToFit };
             icon.AddToClassList("drop-icon"); idle.Add(icon);
-            idle.Add(new Label("Drop all your textures here !") { name = "drop-title" });
-            idle.Add(new Label("PNG, JPG or TGA · multiple files or a folder") { name = "drop-hint" });
-            idle.Add(Browse("Choose folder…", "mcb-button"));
+            idle.Add(new Label(texts.Title) { name = "drop-title" });
+            idle.Add(new Label(texts.Hint) { name = "drop-hint" });
+            idle.Add(Browse(texts.Browse, "mcb-button"));
             idleMessage = new Label(); idleMessage.AddToClassList("drop-zone__message"); idle.Add(idleMessage);
 
             working = Layer("drop-zone__working");
@@ -55,11 +79,11 @@ namespace Orbiters.MyAvatar.Editor
             backgroundDot = new VisualElement(); backgroundDot.AddToClassList("drop-zone__dot"); background.Add(backgroundDot);
             backgroundLabel = new Label(); backgroundLabel.AddToClassList("drop-zone__background-label"); background.Add(backgroundLabel);
             var actions = new VisualElement(); actions.AddToClassList("drop-zone__actions"); done.Add(actions);
-            undo.AddToClassList("drop-zone__undo"); save.AddToClassList("drop-zone__save");
-            actions.Add(undo); actions.Add(save);
+            foreach (var action in doneActions) actions.Add(action);
+            if (actions.childCount == 0) actions.style.display = DisplayStyle.None;
             var again = new VisualElement(); again.AddToClassList("drop-zone__again"); done.Add(again);
-            again.Add(new Label("Drop another set to replace it, or") { name = "drop-again" });
-            again.Add(Browse("choose a folder", "drop-zone__link"));
+            again.Add(new Label(texts.Again) { name = "drop-again" });
+            again.Add(Browse(texts.AgainLink, "drop-zone__link"));
             SetBackground(null);
             // AI switch in the corner: a crossed robot while AI matching is off or the account is not connected. Once
             // connected, a press flips it at once; the account preference is saved behind it.
@@ -126,11 +150,7 @@ namespace Orbiters.MyAvatar.Editor
             aiIcon.Glyph = aiEnabled ? Orbiters.Toolkit.Editor.IconGlyph.Robot : Orbiters.Toolkit.Editor.IconGlyph.RobotOff;
             aiButton.EnableInClassList("drop-zone__ai--on", aiEnabled);
             aiButton.EnableInClassList("drop-zone__ai--available", connected);
-            aiButton.tooltip = !connected
-                ? "AI help is off.\nWhen My Avatar can’t tell where a texture goes from its name, AI can place it for you. Log in at the top of this panel to use it."
-                : aiEnabled
-                    ? "AI help is on.\nTextures My Avatar can’t place from their names are sent (names, sizes and colour stats, never the images) to Orbiters’ AI to find their slot.\nClick to turn it off."
-                    : "AI help is off.\nTextures My Avatar can’t place from their names are left for you to choose.\nClick to let AI place them.";
+            aiButton.tooltip = !connected ? texts.AiDisconnected : aiEnabled ? texts.AiOn : texts.AiOff;
         }
 
         private void ToggleAi()
@@ -149,8 +169,8 @@ namespace Orbiters.MyAvatar.Editor
         private Button Browse(string text, string className)
         {
             var button = new Button(() => {
-                string path = EditorUtility.OpenFolderPanel("Choose a texture folder", "", "");
-                if (!string.IsNullOrEmpty(path)) dropped(new[] { path });
+                var paths = texts.Pick();
+                if (paths != null && paths.Length > 0) dropped(paths);
             }) { text = text };
             button.AddToClassList(className);
             return button;

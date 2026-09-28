@@ -6,7 +6,9 @@
     "Orbiters.Toolkit",
     "orbiters.unitgit.Editor",
     "Orbiters.Toolkit.Editor",
+    "Orbiters.Toolkit.VRChat",
     "Orbiters.Toolkit.Editor.VRChat",
+    "Orbiters.Toolkit.Editor.Vpm",
     "orbiters.xraygizmos",
     "orbiters.xraygizmos.Editor",
     "VRC.SDKBase.Editor",
@@ -21,6 +23,11 @@
       "name": "orbiters.unitgit",
       "expression": "0.1.3",
       "define": "MYAVATAR_UNITGIT"
+    },
+    {
+      "name": "com.vrchat.core.vpm-resolver",
+      "expression": "0.1.0",
+      "define": "MYAVATAR_VPM"
     }
   ]
 }

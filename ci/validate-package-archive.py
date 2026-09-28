@@ -68,7 +68,7 @@ def main():
         "Editor/Orbiters.MyAvatar.Editor.asmdef", "Editor/MyAvatarEditor.cs",
         "Editor/TextureImport.cs", "Editor/TextureMatching.cs", "Editor/TextureAi.cs",
         "Editor/TextureChanges.cs", "Editor/MyAvatarResults.cs",
-        "Editor/UI/TextureDropZone.cs", "Editor/UI/MyAvatarLogo.svg.txt",
+        "Editor/UI/DropZone.cs", "Editor/UI/AccessoriesSection.cs", "Editor/AccessoryService.cs", "Editor/TextureOptimization.cs", "Editor/UI/MyAvatarLogo.svg.txt",
         "Editor/UI/myavatar.uss", "Editor/AvatarThumbnail.cs", "Editor/VrcSdkThumbnail.cs",
         "Editor/UI/ThumbnailSection.cs", "Editor/UI/VrcAvatarCard.cs",
     )

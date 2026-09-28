@@ -16,7 +16,8 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly HashSet<int> Running = new HashSet<int>();
         private MyAvatar avatar;
         private VisualElement root, content, results;
-        private TextureDropZone zone;
+        private DropZone zone;
+        private AccessoriesSection accessories;
         private Button undo, save;
         private CancellationTokenSource operation, background;
         private readonly PhotoshootState photoshoot = new PhotoshootState();
@@ -49,6 +50,7 @@ namespace Orbiters.MyAvatar.Editor
             if (aiEnabled != enabled || !enabled) Edited();
             aiEnabled = enabled;
             zone?.SetAi(aiConnected, aiEnabled);
+            accessories?.Zone.SetAi(aiConnected, aiEnabled);
         }
         private void AccountChanged() { localAiChoice = false; ApplyAiEnabled(false); }
         private void PreferenceChanged(string token, bool enabled)
@@ -88,9 +90,19 @@ namespace Orbiters.MyAvatar.Editor
             save.tooltip = TextureChanges.Commits ? "Save the scene and generated assets, and record a “texture change” checkpoint in Unit Git. Nothing is pushed."
                 : "Save the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint.";
             save.AddToClassList("mcb-button--primary");
-            zone = new TextureDropZone(paths => _ = Run(() => Import(paths)), undo, save, enabled => _ = SetAiAsync(enabled));
+            undo.AddToClassList("drop-zone__undo"); save.AddToClassList("drop-zone__save");
+            zone = new DropZone(DropZone.Textures, paths => _ = Run(() => Import(paths)), new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
             zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
+            accessories = new AccessoriesSection(avatar, new AccessoriesSection.Host
+            {
+                Run = work => Run(work),
+                AiOn = () => aiConnected && aiEnabled,
+                SetAi = enabled => _ = SetAiAsync(enabled),
+                ApplyTextures = (images, scope) => Import(images, scope),
+                Background = status => accessories.Zone.SetBackground(status),
+            });
+            accessories.Zone.SetAi(aiConnected, aiEnabled); content.Add(accessories);
             content.Add(new ThumbnailSection(avatar, photoshoot));
             content.Add(new PosingSection(avatar));
             content.Add(new PhysicsSection(avatar));
@@ -106,7 +118,8 @@ namespace Orbiters.MyAvatar.Editor
             return root;
         }
 
-        private async Task Import(string[] paths)
+        // Scope: only the materials of these objects (the accessories an accessory drop just added).
+        private async Task Import(string[] paths, Transform[] scope = null)
         {
             var cancellation = operation.Token;
             int started = revision;
@@ -115,6 +128,7 @@ namespace Orbiters.MyAvatar.Editor
             var files = await Task.Run(() => TextureImport.Expand(paths), cancellation);
             cancellation.ThrowIfCancellationRequested();
             var slots = TextureMatching.Slots(avatar);
+            if (scope != null) slots = slots.Where(s => s.parts.Any(p => p.renderer && scope.Any(r => r && p.renderer.transform.IsChildOf(r)))).ToList();
             if (slots.Count == 0) throw new InvalidOperationException("No editable texture slots were found below this avatar.");
             if (slots.Count > 512) throw new InvalidOperationException("This avatar has more than 512 texture slots. Place My Avatar on a smaller avatar root.");
             string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
@@ -242,6 +256,18 @@ namespace Orbiters.MyAvatar.Editor
                 TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);
                 TextureMemory.Record(avatar, avatar.textures); TextureChanges.Dirty(avatar); return Task.CompletedTask;
             }));
+            OptimizationCard.Populate(results, avatar, () => _ = Run(Optimize), () => _ = Run(() => {
+                note = TextureOptimization.Revert(avatar); noteWarning = note != null; return Task.CompletedTask;
+            }), RefreshResults);
+        }
+
+        // Import settings change on the main thread; the drop zone shows the progress first, like a texture drop.
+        private async Task Optimize()
+        {
+            var cancellation = operation.Token;
+            note = null; results.Clear();
+            await TextureOptimization.OptimizeAsync(avatar, (value, text) => { if (active) zone.ShowProgress(value, text); }, cancellation);
+            await Task.Delay(260, cancellation);
         }
 
         // Blendshape Links still ships with MCB; the button opens it when MCB is installed.

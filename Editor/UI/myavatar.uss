@@ -45,6 +45,24 @@
 .reason { white-space: normal; color: #8c8c8c; font-size: 10px; margin-top: 2px; max-height: 26px; overflow: hidden; }
 .texture-choose { flex-shrink: 0; max-width: 150px; }
 
+/* Quick optimization: the offer or the result, then the d4rkAvatarOptimizer suggestion. */
+.optimize-card { background-color: #212121; border-radius: 10px; padding: 10px 10px 10px 14px; margin-bottom: 6px; }
+.optimize-card__row { flex-direction: row; align-items: center; }
+.optimize-card__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 8px; }
+.optimize-card__heading { flex-direction: row; align-items: center; }
+.optimize-card__title { margin: 0; padding: 0; color: #ffffff; -unity-font-style: bold; font-size: 12px; }
+.optimize-card__chip { margin: 0 0 0 6px; padding: 1px 7px; border-radius: 9px; font-size: 10px; -unity-font-style: bold; color: #00DA6D; background-color: rgba(0, 218, 109, 0.12); }
+.optimize-card__text { margin: 3px 0 0 0; padding: 0; white-space: normal; color: #8c8c8c; font-size: 10px; }
+.optimize-card__buttons { flex-direction: row; flex-shrink: 0; }
+.mcb-button.optimize-card__button { height: 28px; min-height: 28px; margin: 0 0 0 6px; padding: 0 12px; border-radius: 14px; font-size: 11px; }
+.optimize-suggestion { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 10px; padding-top: 8px; border-top-width: 1px; border-color: #2e2e2e; }
+.optimize-suggestion__text { flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 160px; margin: 0 6px 0 0; padding: 0; font-size: 11px; color: #bdbdbd; white-space: normal; }
+.optimize-suggestion__prompt { flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 200px; margin: 0 6px 0 0; }
+/* A suggestion here, not a missing requirement: the shared prompt without its warning frame. */
+.optimize-suggestion .optimize-suggestion__prompt { margin: 0 6px 0 0; padding: 0; background-color: rgba(0, 0, 0, 0); border-width: 0; }
+.optimize-suggestion .orb-dependency__title { font-size: 11px; -unity-font-style: normal; color: #bdbdbd; }
+.mcb-button.optimize-suggestion__button { height: 24px; min-height: 24px; margin: 0; padding: 0 10px; border-radius: 12px; font-size: 11px; flex-shrink: 0; }
+
 /* Thumbnail: summary row, then the shared photoshoot studio when open. */
 .thumbnail-section { margin-top: 18px; }
 .thumbnail-actions { flex-direction: row; margin-top: 12px; }
@@ -164,3 +182,24 @@
 .git-link { flex-wrap: nowrap; }
 .git-link__field { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 6px 0 0; }
 .git-link__field > .unity-text-field__input { min-height: 24px; border-radius: 8px; background-color: #1a1a1a; border-color: #333333; }
+.posing-toggle__badge { position: absolute; top: 2px; right: 2px; margin: 0; }
+.accessory-choice { padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background-color: #2a2a2a; }
+.accessory-choice__title { font-size: 12px; color: #ffffff; margin-bottom: 8px; white-space: normal; }
+.accessory-choice__row { flex-direction: row; }
+.accessory-choice__row > .mcb-button { flex-grow: 1; margin: 0 3px; }
+.accessory-note { flex-direction: row; align-items: center; min-height: 26px; padding: 3px 10px; margin-top: 4px; border-radius: 10px; background-color: #262626; }
+.accessory-note__dot { width: 8px; height: 8px; border-radius: 4px; margin-right: 8px; flex-shrink: 0; background-color: #6f6f6f; }
+.accessory-note__dot.warning { background-color: #ffb020; }
+.accessory-note__text { flex-grow: 1; flex-shrink: 1; font-size: 11px; color: #d0d0d0; white-space: normal; }
+.accessory-list { margin-top: 6px; }
+.accessory-list__title { font-size: 11px; color: #9a9a9a; margin: 6px 2px 2px 2px; }
+.accessory-list__cost { font-size: 10px; color: #7a7a7a; margin: 6px 2px 0 2px; white-space: normal; }
+.accessory-entry { margin-top: 4px; border-radius: 10px; background-color: #2a2a2a; }
+.accessory-item { flex-direction: row; align-items: center; min-height: 30px; padding: 0 6px 0 10px; }
+.accessory-entry__notes { padding: 0 6px 6px 6px; }
+.accessory-entry__notes > .accessory-note { margin-top: 2px; background-color: #232323; }
+.accessory-item__name { font-size: 12px; color: #ffffff; flex-shrink: 1; }
+.accessory-item__how { flex-grow: 1; flex-shrink: 1; font-size: 11px; color: #9a9a9a; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; }
+.accessory-button { height: 22px; min-width: 0; padding: 0 8px; margin: 0 0 0 4px; font-size: 11px; flex-shrink: 0; }
+.accessory-choice__row--wrap { flex-wrap: wrap; }
+.accessory-choice__row--wrap > .mcb-button { flex-grow: 0; margin: 3px; }

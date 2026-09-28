@@ -8,6 +8,8 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed class TextureStats
     {
         public float grayscale, normalColor, black, bright, mean;
+        // Share of samples that are not fully opaque. Samples come from the mip chain, so small cut-outs still lower them.
+        public float transparent;
         // A mostly black image with small bright areas: typical of an emission map exported beside a full albedo.
         public bool LooksEmissive => black >= .7f && bright > .002f && bright <= .35f;
     }
@@ -49,9 +51,9 @@ namespace Orbiters.MyAvatar.Editor
             return result;
         }
 
-        private static TextureStats Compute(Color32[] pixels)
+        internal static TextureStats Compute(Color32[] pixels)
         {
-            int gray = 0, normal = 0, black = 0, bright = 0; double brightness = 0;
+            int gray = 0, normal = 0, black = 0, bright = 0, transparent = 0; double brightness = 0;
             foreach (var p in pixels)
             {
                 if (Math.Abs(p.r - p.g) < 15 && Math.Abs(p.g - p.b) < 15) gray++;
@@ -59,10 +61,12 @@ namespace Orbiters.MyAvatar.Editor
                 int peak = Math.Max(p.r, Math.Max(p.g, p.b));
                 if (peak <= 20) black++;
                 if (peak >= 128) bright++;
+                if (p.a < 250) transparent++;
                 brightness += (p.r + p.g + p.b) / (3 * 255.0);
             }
             float count = pixels.Length;
-            return new TextureStats { grayscale = gray / count, normalColor = normal / count, black = black / count, bright = bright / count, mean = (float)(brightness / count) };
+            return new TextureStats { grayscale = gray / count, normalColor = normal / count, black = black / count, bright = bright / count, mean = (float)(brightness / count),
+                transparent = transparent / count };
         }
     }
 }
