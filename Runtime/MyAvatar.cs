@@ -66,6 +66,8 @@ namespace Orbiters.MyAvatar
     public sealed class TextureOptimizationRecord
     {
         public string folder;
+        /// <summary>The texture drop this optimization followed: a newer drop offers optimizing again.</summary>
+        public string batch;
         public long bytesBefore, bytesAfter;
         public List<OptimizedTexture> textures = new List<OptimizedTexture>();
         public List<Texture2D> duplicates = new List<Texture2D>();

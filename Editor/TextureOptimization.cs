@@ -165,12 +165,11 @@ namespace Orbiters.MyAvatar.Editor
             var plan = new Plan();
             var candidates = new List<(Texture2D texture, TextureImporter importer)>();
             var slots = TextureMatching.Slots(avatar);
-            var body = Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(AvatarRoot(avatar).transform);
-            var bodyTextures = new HashSet<Texture>(slots.Where(s => s.existing && s.parts.Any(p => p.renderer == body)).Select(s => s.existing));
+            var bodyTextures = BodyTextures(avatar, slots);
             foreach (var group in slots.Where(s => s.existing).GroupBy(s => s.existing))
             {
                 var texture = group.Key;
-                long bytes = Bytes(texture);
+                long bytes = BuildBytes(texture);
                 plan.before += bytes; plan.after += bytes;
                 if (!Compressible(texture, out var importer) ||
                     group.Any(s => Exclusion(importer.assetPath, texture.name, s.property + " " + s.description, texture.width, texture.height) != null)) continue;
@@ -184,15 +183,48 @@ namespace Orbiters.MyAvatar.Editor
                 var standalone = importer.GetPlatformTextureSettings(Platform);
                 int cap = bodyTextures.Contains(texture) ? BodyMaxSize : MaxSize;
                 var size = Capped(texture.width, texture.height, cap);
-                long before = Bytes(texture), after = Bytes(size.x, size.y, BitsPerPixel(Runtime(format)), true);
-                bool change = size.x != texture.width || size.y != texture.height || texture.format != Runtime(format) || !importer.mipmapEnabled || !importer.streamingMipmaps;
+                int maxSize = Mathf.Min(cap, standalone.overridden ? standalone.maxTextureSize : importer.maxTextureSize);
+                long before = BuildBytes(texture), after = Bytes(size.x, size.y, BitsPerPixel(Runtime(format)), true);
+                // Compared with the import settings, not the loaded texture: with "Compress textures on import" off, the editor
+                // keeps textures uncompressed until the build.
+                bool change = size.x != texture.width || size.y != texture.height || !Same(Read(importer), Target(format, maxSize));
                 // Turning mipmaps on can outweigh the saving on an already small texture; never grow a texture.
                 if (!change || after > before) continue;
-                plan.changes.Add(new TexturePlan { texture = texture, path = importer.assetPath, format = format, before = before, after = after,
-                    maxSize = Mathf.Min(cap, standalone.overridden ? standalone.maxTextureSize : importer.maxTextureSize) });
+                plan.changes.Add(new TexturePlan { texture = texture, path = importer.assetPath, format = format, before = before, after = after, maxSize = maxSize });
                 plan.after += after - before;
             }
             return plan;
+        }
+
+        // The body material's textures: the largest submesh of the avatar's body mesh (eyes, hair and extras often share the
+        // mesh as smaller submeshes).
+        private static HashSet<Texture> BodyTextures(MyAvatar avatar, List<TextureSlot> slots)
+        {
+            var body = Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(AvatarRoot(avatar).transform);
+            var result = new HashSet<Texture>();
+            if (body == null || body.sharedMesh == null) return result;
+            var mesh = body.sharedMesh;
+            int largest = Enumerable.Range(0, Mathf.Min(mesh.subMeshCount, body.sharedMaterials.Length)).OrderByDescending(i => mesh.GetSubMesh(i).indexCount).DefaultIfEmpty(-1).First();
+            if (largest < 0) return result;
+            var material = body.sharedMaterials[largest];
+            result.UnionWith(slots.Where(s => s.existing && s.material == material).Select(s => s.existing));
+            return result;
+        }
+
+        // Memory in the PC build: an explicit PC format decides it, whatever the editor currently holds.
+        private static long BuildBytes(Texture texture)
+        {
+            if (texture is Texture2D && AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) is TextureImporter importer)
+            {
+                var standalone = importer.GetPlatformTextureSettings(Platform);
+                if (standalone.overridden && standalone.format != TextureImporterFormat.Automatic)
+                    {
+                    // Importer formats share their values with the runtime texture formats they produce.
+                    var format = Enum.IsDefined(typeof(TextureFormat), (int)standalone.format) ? (TextureFormat)(int)standalone.format : Runtime(standalone.format);
+                    return Bytes(texture.width, texture.height, BitsPerPixel(format), importer.mipmapEnabled);
+                }
+            }
+            return Bytes(texture);
         }
 
         // Textures that other avatars' materials in the open scenes use; a descriptor around or inside this avatar is this avatar.
@@ -280,6 +312,7 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var (entry, _, _) in entries) entry.applied = true;
             record.duplicates.AddRange(duplicates.Values);
             if (duplicates.Count > 0) record.folder = folder;
+            record.batch = avatar.batchFolder;
             record.bytesBefore = merge ? record.bytesBefore + plan.before - record.bytesAfter : plan.before;
             record.bytesAfter = plan.after;
             TextureChanges.Dirty(avatar);

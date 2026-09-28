@@ -22,7 +22,8 @@ namespace Orbiters.MyAvatar.Editor
             // Offered once a drop placed an image that compression applies to, then as long as something is left to optimize.
             bool dropped = avatar.textures.Any(e => e.applied && e.texture && TextureOptimization.Compressible(e.texture, out _));
             var plan = dropped ? TextureOptimization.Build(avatar) : null;
-            bool offer = plan != null && plan.changes.Count > 0;
+            // Once optimized, the offer waits for a new texture drop or an Undo: the result stays on screen as the answer.
+            bool offer = plan != null && plan.changes.Count > 0 && (!applied || record.batch != avatar.batchFolder);
             if (!applied && !offer) return;
 
             var card = new VisualElement(); card.AddToClassList("optimize-card"); root.Add(card);
@@ -38,7 +39,7 @@ namespace Orbiters.MyAvatar.Editor
                 var chip = new Label("−" + Mathf.RoundToInt(100f * (before - after) / before) + "%"); chip.AddToClassList("optimize-card__chip"); heading.Add(chip);
             }
             string estimate = $"{Megabytes(before)} → {Megabytes(after)} texture memory (estimated VRAM on PC)";
-            var text = new Label(applied ? estimate + (offer ? $" · {plan.changes.Count} more can be optimized" : "")
+            var text = new Label(applied ? estimate + (offer ? $" · {plan.changes.Count} more from the new textures" : "")
                 : $"Cap {plan.changes.Count} texture{(plan.changes.Count == 1 ? "" : "s")} (body {TextureOptimization.BodyMaxSize} px, the rest {TextureOptimization.MaxSize} px) and compress for PC · {estimate}");
             text.AddToClassList("optimize-card__text"); texts.Add(text);
             text.tooltip = "Estimated from each texture's format, size and mipmaps, the way VRChat ranks texture memory. Download size is not estimated.";

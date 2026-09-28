@@ -78,7 +78,7 @@ accessory and the avatar, component types and up to 12,000 characters of the dro
 
 Once a drop has placed an image that can be compressed, a **Quick optimization** row
 appears below the drop field with the estimated texture memory before and after.
-**Optimize** caps the textures of the avatar's body mesh at 2048 px and every other
+**Optimize** caps the body material's textures (the largest part of the avatar's body mesh) at 2048 px and every other
 texture the avatar's materials show at 512 px (never upscaling), and sets their PC (Standalone) import settings for the best quality per byte of VRAM:
 BC1 for colour whose alpha is unused (measured on the pixels, not taken from the
 importer), BC7 when alpha is used, BC5 for normal maps; mipmaps and mipmap streaming
@@ -92,7 +92,9 @@ another avatar in the open scenes, or inside a package, is copied under
 `Assets/Orbiters/MyAvatar/<batch-id>/` instead, and this avatar gets copies of the
 materials that show it, assigned only to renderers under this component. The row then
 shows the estimated texture memory (VRAM, as VRChat ranks it, not download size) and
-how many textures changed. **Undo** restores the import settings and materials,
+how many textures changed; **Optimize** comes back after a new texture drop or an Undo.
+The estimate reads the PC import settings, so it is right even when the editor keeps
+textures uncompressed ("Compress Textures on Import" off). **Undo** restores the import settings and materials,
 including after a restart: the component stores what it changed, so save your scene.
 Unity's Undo and Redo work too. Import settings or material slots you changed since
 are kept; copies stay on disk. Undo the optimization before undoing its texture set.
