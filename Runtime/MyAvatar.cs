@@ -22,6 +22,7 @@ namespace Orbiters.MyAvatar
     [Serializable]
     public sealed class TextureEntry
     {
+        public string sourceKey;
         public Texture2D texture;
         public string fileName;
         public string role;

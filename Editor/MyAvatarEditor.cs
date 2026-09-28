@@ -25,16 +25,43 @@ namespace Orbiters.MyAvatar.Editor
         [NonSerialized] private string note, backgroundStatus;
         [NonSerialized] private bool noteWarning;
         [NonSerialized] private int revision;
-        [NonSerialized] private bool busy, aiConnected, aiEnabled;
-        private void OnEnable() { avatar = (MyAvatar)target; Undo.undoRedoPerformed += Reload; AssemblyReloadEvents.beforeAssemblyReload += Cancel; }
-        private void OnDisable() { Undo.undoRedoPerformed -= Reload; AssemblyReloadEvents.beforeAssemblyReload -= Cancel; Cancel(); photoshoot.Dispose(); }
-        private void Cancel() { operation?.Cancel(); background?.Cancel(); }
+        [NonSerialized] private bool busy, aiConnected, aiEnabled, active, localAiChoice;
+        internal Func<string, object, List<TextureEntry>, List<TextureSlot>, CancellationToken, Task<TextureAi.Result>> RequestAi = TextureAi.RequestAsync;
+        private void OnEnable()
+        {
+            avatar = (MyAvatar)target; active = true;
+            Undo.undoRedoPerformed += Reload; AssemblyReloadEvents.beforeAssemblyReload += Cancel;
+            TextureAi.Preferences.Changed += PreferenceChanged;
+            AuthenticationService.Changed += AccountChanged; OrbitersEnvironment.Changed += AccountChanged;
+        }
+        private void OnDisable()
+        {
+            Undo.undoRedoPerformed -= Reload; AssemblyReloadEvents.beforeAssemblyReload -= Cancel;
+            TextureAi.Preferences.Changed -= PreferenceChanged;
+            AuthenticationService.Changed -= AccountChanged; OrbitersEnvironment.Changed -= AccountChanged;
+            Cancel(); photoshoot.Dispose();
+        }
+        private void Cancel() { active = false; Edited(); operation?.Cancel(); }
         // Any edit, Undo or Redo makes a pending AI answer stale: it must never overwrite a newer state.
-        private void Edited() { revision++; background?.Cancel(); }
+        private void Edited() { revision++; pendingAi = null; background?.Cancel(); if (active) SetBackground(null); }
+        private void ApplyAiEnabled(bool enabled)
+        {
+            if (aiEnabled != enabled || !enabled) Edited();
+            aiEnabled = enabled;
+            zone?.SetAi(aiConnected, aiEnabled);
+        }
+        private void AccountChanged() { localAiChoice = false; ApplyAiEnabled(false); }
+        private void PreferenceChanged(string token, bool enabled)
+        {
+            if (!active || token != AuthenticationService.GetAuth()?.token) return;
+            localAiChoice = true; ApplyAiEnabled(enabled);
+        }
         private void Reload() { Edited(); if (avatar && root != null) RefreshResults(); }
 
         public override VisualElement CreateInspectorGUI()
         {
+            if (TextureAi.Preferences.TryGetPendingChoice(AuthenticationService.GetAuth()?.token, out bool choice))
+            { localAiChoice = true; ApplyAiEnabled(choice); }
             var shell = new OrbitersInspectorShell(); root = shell; root.AddToClassList("myavatar");
             root.styleSheets.Add(AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/orbiters.myavatar/Editor/UI/myavatar.uss"));
             var asset = AssetDatabase.LoadAssetAtPath<TextAsset>("Packages/orbiters.myavatar/Editor/UI/MyAvatarLogo.svg.txt");
@@ -46,8 +73,8 @@ namespace Orbiters.MyAvatar.Editor
             shell.Account.Add(new OrbitersAccountElement("myavatar/connection", ai =>
                 {
                     aiConnected = !string.IsNullOrEmpty(AuthenticationService.GetAuth()?.token);
-                    aiEnabled = ai;
-                    zone?.SetAi(aiConnected, aiEnabled);
+                    if (!active) return;
+                    if (!aiConnected || !localAiChoice) ApplyAiEnabled(aiConnected && ai);
                 },
                 "Allow My Avatar to use AI when it can’t find where to put a texture (you can turn it off easily here)."));
             content = new VisualElement(); content.AddToClassList("content"); root.Add(content);
@@ -81,18 +108,22 @@ namespace Orbiters.MyAvatar.Editor
 
         private async Task Import(string[] paths)
         {
+            var cancellation = operation.Token;
+            int started = revision;
             note = null; results.Clear();
             zone.ShowProgress(.04f, "Finding textures…");
-            var files = await Task.Run(() => TextureImport.Expand(paths), operation.Token);
+            var files = await Task.Run(() => TextureImport.Expand(paths), cancellation);
+            cancellation.ThrowIfCancellationRequested();
             var slots = TextureMatching.Slots(avatar);
             if (slots.Count == 0) throw new InvalidOperationException("No editable texture slots were found below this avatar.");
             if (slots.Count > 512) throw new InvalidOperationException("This avatar has more than 512 texture slots. Place My Avatar on a smaller avatar root.");
             string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
-            var entries = await TextureImport.ImportAsync(files, folder, (value, text) => zone.ShowProgress(value, text), operation.Token);
-            operation.Token.ThrowIfCancellationRequested();
+            var entries = await TextureImport.ImportAsync(files, folder, (value, text) => { if (active) zone.ShowProgress(value, text); }, cancellation);
+            cancellation.ThrowIfCancellationRequested();
             if (!avatar) return;
             zone.ShowProgress(.78f, "Matching " + entries.Count + " textures…");
             await Task.Yield();
+            cancellation.ThrowIfCancellationRequested();
             var stats = TextureAnalysis.Measure(entries.Select(e => e.texture));
             TextureMatching.Match(entries, slots, stats, TextureMemory.Load(avatar));
             string token = AuthenticationService.GetAuth()?.token;
@@ -108,6 +139,7 @@ namespace Orbiters.MyAvatar.Editor
             object payload = ask ? TextureAi.Payload(unmatched, open, stats) : null;
             zone.ShowProgress(.9f, "Applying to " + entries.Where(e => e.material).Select(e => e.material).Distinct().Count() + " materials…");
             await Task.Yield();
+            cancellation.ThrowIfCancellationRequested();
             Undo.RecordObject(avatar, "My Avatar: texture set");
             int count = TextureChanges.Apply(avatar, entries, folder);
             if (count == 0) { avatar.undoMaterials.Clear(); avatar.canRedo = false; }
@@ -115,34 +147,42 @@ namespace Orbiters.MyAvatar.Editor
             TextureMemory.Record(avatar, entries);
             TextureChanges.Dirty(avatar);
             zone.ShowProgress(1f, "Done");
-            await Task.Delay(260);
-            if (ask) pendingAi = () => ResolveAsync(token, payload, entries, unmatched, open, folder);
+            await FinishImportAsync(ask ? () => ResolveAsync(token, payload, entries, unmatched, open, folder) : (Func<Task>)null,
+                cancellation, started);
+        }
+
+        private async Task FinishImportAsync(Func<Task> next, CancellationToken cancellation, int started)
+        {
+            await Task.Delay(260, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            if (active && avatar && aiEnabled && started == revision) pendingAi = next;
         }
 
         // Runs after the local apply has released the UI; merges confident answers into the same batch.
         private async Task ResolveAsync(string token, object payload, List<TextureEntry> entries, List<TextureEntry> sent, List<TextureSlot> slots, string folder)
         {
+            if (!active || !avatar || !aiEnabled) return;
             background?.Cancel();
             var source = background = new CancellationTokenSource();
             int started = revision;
             SetBackground($"Orbiters AI is placing {sent.Count} more texture{(sent.Count == 1 ? "" : "s")}…");
             try
             {
-                var result = await TextureAi.RequestAsync(token, payload, sent, slots, source.Token);
-                while (busy && !source.IsCancellationRequested) await Task.Delay(50);
+                var result = await RequestAi(token, payload, sent, slots, source.Token);
+                while (busy && !source.IsCancellationRequested) await Task.Delay(50, source.Token);
                 source.Token.ThrowIfCancellationRequested();
-                if (!avatar || started != revision) return;
+                if (!active || !avatar || !aiEnabled || started != revision) return;
                 TextureChanges.Revise(avatar, entries, folder, result.changes);
                 TextureMemory.Record(avatar, entries);
             }
             catch (OperationCanceledException) { return; }
-            catch (Exception ex) { if (avatar && started == revision) { note = null; SetNote(StatusText() + " · Orbiters AI unavailable: " + ex.Message, true); } return; }
+            catch (Exception ex) { if (active && avatar && aiEnabled && started == revision) { note = null; SetNote(StatusText() + " · Orbiters AI unavailable: " + ex.Message, true); } return; }
             finally
             {
-                if (background == source) { background = null; SetBackground(null); }
+                if (background == source) { background = null; if (active) SetBackground(null); }
                 source.Dispose();
             }
-            if (!avatar || started != revision) return;
+            if (!active || !avatar || !aiEnabled || started != revision) return;
             TextureChanges.Dirty(avatar); RefreshResults();
         }
 
@@ -160,26 +200,26 @@ namespace Orbiters.MyAvatar.Editor
 
         private async Task Run(Func<Task> work, bool edits = true)
         {
-            if (!avatar || busy || !Running.Add(avatar.GetInstanceID())) return;
+            if (!active || !avatar || busy || !Running.Add(avatar.GetInstanceID())) return;
             if (edits) Edited();
             int id = avatar.GetInstanceID(); busy = true; operation = new CancellationTokenSource();
             content.Query<Button>().ForEach(b => b.SetEnabled(false));
             try { await work(); }
-            catch (OperationCanceledException) { note = "Cancelled. Nothing was applied."; noteWarning = false; }
+            catch (OperationCanceledException) { note = "Cancelled."; noteWarning = false; }
             catch (Exception ex) { note = ex.Message; noteWarning = true; }
             finally
             {
                 Running.Remove(id); busy = false; operation?.Dispose(); operation = null;
-                if (root != null) { content.Query<Button>().ForEach(b => b.SetEnabled(true)); RefreshResults(); }
+                if (active && root != null) { content.Query<Button>().ForEach(b => b.SetEnabled(true)); RefreshResults(); }
                 var next = pendingAi; pendingAi = null;
-                if (next != null && avatar) _ = next();
+                if (next != null && active && aiEnabled && avatar) _ = next();
             }
         }
 
         // One line that summarises the current set: counts per dropped file, not per material it was applied to.
         private string StatusText()
         {
-            var files = avatar.textures.GroupBy(t => t.fileName).ToList();
+            var files = avatar.textures.GroupBy(TextureMemory.Identity).ToList();
             int applied = files.Count(g => g.Any(t => t.applied)), pending = files.Count - applied;
             if (avatar.canRedo) return "Undone · original materials restored";
             return pending == 0 ? $"{applied} texture{(applied == 1 ? "" : "s")} applied" : $"{applied} applied · {pending} need{(pending == 1 ? "s" : "")} a slot";
@@ -193,7 +233,7 @@ namespace Orbiters.MyAvatar.Editor
             undo.SetEnabled(avatar.undoMaterials.Count > 0 && !busy); save.SetEnabled(avatar.textures.Count > 0 && !busy);
             if (busy && string.IsNullOrEmpty(note)) return;
             if (avatar.textures.Count == 0) { zone.ShowIdle(string.IsNullOrEmpty(note) ? null : note, noteWarning); return; }
-            bool pending = !avatar.canRedo && avatar.textures.GroupBy(t => t.fileName).Any(g => !g.Any(t => t.applied));
+            bool pending = !avatar.canRedo && avatar.textures.GroupBy(TextureMemory.Identity).Any(g => !g.Any(t => t.applied));
             bool hasNote = !string.IsNullOrEmpty(note);
             zone.ShowDone(hasNote ? note : StatusText(), hasNote ? noteWarning : pending);
             zone.SetBackground(backgroundStatus);
@@ -225,14 +265,21 @@ namespace Orbiters.MyAvatar.Editor
             EditorGUILayout.EndHorizontal();
         }
 
-        // The robot has already flipped on the drop zone; save the account preference and flip it back if that fails.
+        // The shared writer publishes optimistic state and serializes account writes across inspectors.
         private async Task SetAiAsync(bool enabled)
         {
-            aiEnabled = enabled;
+            if (!active) return;
+            localAiChoice = true;
+            ApplyAiEnabled(enabled);
             string token = AuthenticationService.GetAuth()?.token;
-            try { aiEnabled = await TextureAi.SetEnabledAsync(token, enabled); }
-            catch (Exception) { aiEnabled = !enabled; SetNote("Could not change the AI setting. Check your connection and try again.", true); }
-            zone?.SetAi(aiConnected, aiEnabled);
+            Task<bool> request = TextureAi.SetEnabledAsync(token, enabled);
+            long choice = TextureAi.Preferences.Revision;
+            try { await request; }
+            catch (Exception)
+            {
+                if (active && choice == TextureAi.Preferences.Revision && token == AuthenticationService.GetAuth()?.token)
+                    SetNote("AI is paused locally. Could not save the account setting; check your connection and try again.", true);
+            }
         }
 
         internal static Button Button(string text, Action action)

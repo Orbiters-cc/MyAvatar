@@ -1,19 +1,21 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "unity": "2022.3",
   "description": "Apply texture sets to your avatar, create its VRChat thumbnail, pose it with symmetry and unmerged clothing, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
     "name": "Orbiters",
-    "url": "https://orbiters.cc"
+    "url": "https://orbiters.cc",
+    "email": "blackorbit.eclaire@gmail.com"
   },
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.2.5 <0.3.0",
+    "orbiters.toolkit": ">=0.2.6 <0.3.0",
     "orbiters.xraygizmos": ">=0.2.2 <0.3.0",
     "com.vrchat.avatars": ">=3.5.0 <4.0.0"
-  }
+  },
+  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.5.1/MyAvatar-0.5.1.zip"
 }

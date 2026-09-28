@@ -250,7 +250,8 @@ namespace Orbiters.MyAvatar.Editor
                 { if (File.Exists(parent + ".meta")) paths.Add((parent + ".meta").Replace('\\', '/')); parent = Path.GetDirectoryName(parent); }
             }
             var result = await UnitGitReleases.CommitProjectFilesAsync(root, "texture change", paths.Where(File.Exists).ToArray());
-            if (!result.Success) throw new InvalidOperationException(result.Message);
+            if (!result.Success) throw new InvalidOperationException("Scene and assets saved, but the Git checkpoint failed: " + result.Message);
+            if (result.NoChanges) return "Saved · no new changes to checkpoint.";
             return "Saved · commit " + result.CommitHash.Substring(0, Math.Min(8, result.CommitHash.Length));
         }
 #endif

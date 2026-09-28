@@ -1,0 +1,8 @@
+{
+  "name": "Orbiters.MyAvatar.Editor.Tests",
+  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "Orbiters.Toolkit.Editor", "VRC.SDKBase"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll"]
+}

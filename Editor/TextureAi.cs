@@ -36,11 +36,25 @@ namespace Orbiters.MyAvatar.Editor
         private static double Round(float value) => Math.Round(Mathf.Clamp01(value), 3);
 
         [Serializable] private sealed class Preference { public bool enabled; }
+        internal static readonly TextureAiPreferences Preferences = new TextureAiPreferences((token, enabled) =>
+        {
+            string url = OrbitersEnvironment.ApiUrl("myavatar/ai-preferences");
+            return cancellation => WritePreferenceAsync(url, token, enabled, cancellation);
+        });
+
+        static TextureAi()
+        {
+            AuthenticationService.Changed += Preferences.InvalidateContext;
+            OrbitersEnvironment.Changed += Preferences.InvalidateContext;
+        }
 
         /// <summary>Turns AI help on or off for the account (the same switch as on the Orbiters account page).</summary>
-        internal static async Task<bool> SetEnabledAsync(string token, bool enabled, CancellationToken cancellation = default)
+        internal static Task<bool> SetEnabledAsync(string token, bool enabled, CancellationToken cancellation = default) =>
+            Preferences.SetAsync(token, enabled, cancellation);
+
+        private static async Task<bool> WritePreferenceAsync(string url, string token, bool enabled, CancellationToken cancellation)
         {
-            var preference = await OrbitersApi.SendAsync<Preference>(OrbitersEnvironment.ApiUrl("myavatar/ai-preferences"), token,
+            var preference = await OrbitersApi.SendAsync<Preference>(url, token,
                 new { enabled }, cancellation, System.Net.Http.HttpMethod.Put);
             return preference?.enabled ?? enabled;
         }

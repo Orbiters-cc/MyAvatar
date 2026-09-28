@@ -371,7 +371,7 @@ namespace Orbiters.MyAvatar.Editor
 
         private static TextureEntry Link(TextureEntry source, TextureSlot slot, string reason)
         {
-            var entry = new TextureEntry { texture = source.texture, fileName = source.fileName, role = source.role };
+            var entry = new TextureEntry { texture = source.texture, sourceKey = source.sourceKey, fileName = source.fileName, role = source.role };
             Assign(entry, slot, source.confidence > 0 ? source.confidence : .95f, reason);
             return entry;
         }

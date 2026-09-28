@@ -100,7 +100,7 @@ namespace Orbiters.MyAvatar.Editor
                     token.ThrowIfCancellationRequested();
                     var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(resolved[i]);
                     if (!texture) throw new InvalidOperationException("Unity could not load " + Path.GetFileName(paths[i]));
-                    result.Add(new TextureEntry { texture = texture, fileName = Path.GetFileName(paths[i]), role = TextureMatching.FileRole(Path.GetFileName(paths[i])) });
+                    result.Add(new TextureEntry { texture = texture, sourceKey = TextureMemory.SourceKey(paths[i]), fileName = Path.GetFileName(paths[i]), role = TextureMatching.FileRole(Path.GetFileName(paths[i])) });
                 }
                 foreach (var file in pending) cache[file.source] = new CachedFile { asset = file.asset, length = file.length, modified = file.modified };
                 var written = pending.Select(p => p.asset).ToArray();

@@ -5,7 +5,7 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
 ## Get started
 
 1. Install **My Avatar** from the Orbiters VPM repository. Toolkit and XRay Gizmos
-   are required dependencies; Unit Git is optional. The VRChat avatar SDK removes this editor-only
+   are required dependencies; Unit Git 0.1.3 or newer is optional. The VRChat avatar SDK removes this editor-only
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
@@ -24,7 +24,7 @@ Unity 2022.3 avatar texture setup, with an optional Orbiters account.
    project's Git repository is initialized in Unit Git. The checkpoint includes the current scene (including its other pending
    changes), generated textures/materials and their metadata. Unrelated project
    paths and staged changes are excluded. Ignored checkpoint files must be
-   unignored first. Nothing is pushed.
+   unignored first. Saving unchanged files succeeds without making an empty commit. Nothing is pushed.
 
 ## Thumbnail
 
@@ -41,7 +41,7 @@ avatar, then press **Capture**: the thumbnail is saved at once and the card flas
 while the studio keeps showing the live camera so you can capture again. **Browse**
 uses an existing image instead and closes the studio. The image is saved as
 `Assets/Orbiters/MyAvatar/Thumbnails/<avatar> <id>/<avatar> thumbnail.png`; a new
-capture replaces it.
+capture gets a unique filename so Unity Undo and Redo restore the previous pixels.
 
 Whenever the VRChat SDK builder shows this avatar, My Avatar fills in this thumbnail
 through the SDK's own thumbnail selection, exactly as if you had chosen the file with

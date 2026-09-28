@@ -18,11 +18,12 @@ namespace Orbiters.MyAvatar.Editor
             return "Assets/Orbiters/MyAvatar/Thumbnails/" + SafeName(avatar.gameObject.name) + " " + hash;
         }
 
-        // Saves a captured or browsed image and assigns it; the same asset is overwritten on each new capture.
+        // Each capture is immutable so Undo/Redo can restore both the reference and its pixels.
         internal static Texture2D Save(MyAvatar avatar, Texture2D image)
         {
-            string folder = Folder(avatar), path = folder + "/" + SafeName(avatar.gameObject.name) + " thumbnail.png";
+            string folder = Folder(avatar);
             TextureImport.EnsureFolder(folder);
+            string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafeName(avatar.gameObject.name) + " thumbnail.png");
             File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Application.dataPath), path), image.EncodeToPNG());
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             if (AssetImporter.GetAtPath(path) is TextureImporter importer && (importer.mipmapEnabled || importer.npotScale != TextureImporterNPOTScale.None))
