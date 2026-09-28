@@ -180,6 +180,8 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (state == next) { Retarget(); return; }
             state = next;
+            // While the height springs between layouts, the field's own background would show as a strip under the track.
+            EnableInClassList("drop-zone--working", next == State.Working);
             Show(layer, instant: false);
         }
 

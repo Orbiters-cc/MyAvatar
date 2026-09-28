@@ -258,6 +258,9 @@ namespace Orbiters.MyAvatar.Editor
                     if (double.IsNaN(fit)) continue;
                     double evidence = Evidence(slotBag[slot]) * 3 + Evidence(nameBag[slot.material]) * 3 + Evidence(contextBag[slot.material]) * 1.5 + Evidence(meshBag[slot.material]);
                     if (slot.existingName.ToLowerInvariant() == plainName) evidence += 10;
+                    // A variant of the texture now in the slot keeps its whole name and adds to it ("Body_BaseMap" ->
+                    // "Body_BaseMap_Green"): the strongest sign short of the same name.
+                    else if (VariantOf(System.IO.Path.GetFileNameWithoutExtension(texture.fileName), slot.existingName)) evidence += 8;
                     ranked.Add(new Candidate { slot = slot, evidence = evidence, score = evidence + fit + Preference(texture, slot) });
                 }
                 ranked = ranked.OrderByDescending(c => c.score).ToList();
@@ -270,7 +273,12 @@ namespace Orbiters.MyAvatar.Editor
                 // Slots currently showing the same texture are one target too: replacing it everywhere is expected.
                 var rival = ranked.Skip(1).FirstOrDefault(c => !group.Contains(c) && !(best.slot.existing && c.slot.existing == best.slot.existing));
                 if (rival != null && best.score - rival.score < .5)
-                { texture.reason = "Several slots are about equally likely. Choose the target below."; Suggest(texture, best.slot); continue; }
+                {
+                    texture.reason = rival.slot.material == best.slot.material
+                        ? $"Probably {best.slot.materialName}, but its {best.slot.description} and {rival.slot.description} slots are about as likely."
+                        : $"Probably {best.slot.materialName}, but {rival.slot.materialName} is about as likely.";
+                    Suggest(texture, best.slot); continue;
+                }
                 Assign(texture, best.slot, (float)Math.Min(.99, .9 + best.evidence / 100), "Matched " + best.slot.materialName + " / " + best.slot.description + " by name.");
                 foreach (var member in group) grouped.Add(Link(texture, member.slot, "Shares its mesh and UV layout with " + best.slot.materialName + "."));
             }
@@ -315,6 +323,14 @@ namespace Orbiters.MyAvatar.Editor
                     linked.Add(Link(texture, other, "Replaces " + slot.existingName + " here too, like on " + slot.materialName + "."));
             }
             textures.AddRange(linked);
+        }
+
+        private static bool VariantOf(string file, string existing)
+        {
+            var existingTokens = Tokens(existing, stem: false);
+            if (existingTokens.Count == 0 || existingTokens.All(Generic.Contains)) return false;
+            var fileTokens = Tokens(file, stem: false);
+            return fileTokens.Count > existingTokens.Count && existingTokens.All(fileTokens.Contains);
         }
 
         private static double Preference(TextureEntry texture, TextureSlot slot)

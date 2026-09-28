@@ -1,7 +1,7 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "unity": "2022.3",
   "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages (alpha), create its VRChat thumbnail, pose it with symmetry and a clothing preview, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
@@ -53,5 +53,5 @@
       }
     }
   },
-  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.6.0/MyAvatar-0.6.0.zip"
+  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.6.1/MyAvatar-0.6.1.zip"
 }

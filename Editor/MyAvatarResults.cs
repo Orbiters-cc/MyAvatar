@@ -28,22 +28,27 @@ namespace Orbiters.MyAvatar.Editor
                     TextureChanges.Dirty(avatar); apply();
                 }
                 var suggested = slots.Where(s => s.materialName == entry.suggestedMaterialName && s.property == entry.suggestedProperty).ToArray();
-                var button = suggested.Length == 1
-                    ? MyAvatarEditor.Button("Use on " + suggested[0].materialName, () => Choose(suggested[0]))
-                    : MyAvatarEditor.Button("Choose slot…", null);
-                button.tooltip = suggested.Length == 1 ? suggested[0].Label : "Pick the material slot for this texture.";
-                if (suggested.Length != 1)
-                    button.clicked += () => {
-                        var menu = new GenericMenu();
-                        foreach (var slot in slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s.role))
-                            .OrderBy(s => !s.active).ThenBy(s => s.secondary).ThenBy(s => s.materialName))
-                        {
-                            var selected = slot;
-                            menu.AddItem(new GUIContent((selected.active ? "" : "Hidden objects/") + selected.materialName.Replace("/", " ∕ ") + "/" + selected.description.Replace("/", " ∕ ") + " (" + selected.property + ")"),
-                                false, () => Choose(selected));
-                        }
-                        menu.ShowAsContext();
-                    };
+                void Menu()
+                {
+                    var menu = new GenericMenu();
+                    foreach (var slot in slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s.role))
+                        .OrderBy(s => !s.active).ThenBy(s => s.secondary).ThenBy(s => s.materialName))
+                    {
+                        var selected = slot;
+                        menu.AddItem(new GUIContent((selected.active ? "" : "Hidden objects/") + selected.materialName.Replace("/", " ∕ ") + "/" + selected.description.Replace("/", " ∕ ") + " (" + selected.property + ")"),
+                            false, () => Choose(selected));
+                    }
+                    menu.ShowAsContext();
+                }
+                // The best guess in one click, and every other compatible slot one menu away.
+                if (suggested.Length == 1)
+                {
+                    var use = MyAvatarEditor.Button("Use on " + suggested[0].materialName, () => Choose(suggested[0]));
+                    use.tooltip = suggested[0].Label;
+                    use.AddToClassList("texture-choose"); card.Add(use);
+                }
+                var button = MyAvatarEditor.Button(suggested.Length == 1 ? "Other…" : "Choose slot…", Menu);
+                button.tooltip = "Pick the material slot for this texture.";
                 button.AddToClassList("texture-choose"); card.Add(button);
             }
         }

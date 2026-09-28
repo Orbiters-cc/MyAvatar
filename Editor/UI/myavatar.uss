@@ -5,6 +5,7 @@
 /* Drop zone: one surface that morphs between the empty field, the progress bar and the result. Height is sprung in code. */
 .drop-zone { background-color: #212121; border-radius: 16px; margin-bottom: 12px; overflow: hidden; transition-property: background-color; transition-duration: 0.16s; }
 .drop-zone:hover, .drop-zone.drag-over { background-color: #262626; }
+.drop-zone.drop-zone--working, .drop-zone.drop-zone--working:hover { background-color: rgba(0, 0, 0, 0); }
 .drop-zone__layer { position: absolute; left: 0; right: 0; top: 0; transform-origin: center top; }
 .drop-zone__idle { padding: 22px 12px 18px 12px; align-items: center; }
 .drop-icon { width: 32px; height: 38px; margin-bottom: 10px; opacity: 0.85; }

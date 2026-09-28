@@ -78,8 +78,8 @@ accessory and the avatar, component types and up to 12,000 characters of the dro
 
 Once a drop has placed an image that can be compressed, a **Quick optimization** row
 appears below the drop field with the estimated texture memory before and after.
-**Optimize** caps every texture the avatar's materials show at 512 px (never upscaling)
-and sets its PC (Standalone) import settings for the best quality per byte of VRAM:
+**Optimize** caps the textures of the avatar's body mesh at 2048 px and every other
+texture the avatar's materials show at 512 px (never upscaling), and sets their PC (Standalone) import settings for the best quality per byte of VRAM:
 BC1 for colour whose alpha is unused (measured on the pixels, not taken from the
 importer), BC7 when alpha is used, BC5 for normal maps; mipmaps and mipmap streaming
 on, crunch off (crunch only shrinks the download, not memory), best compression

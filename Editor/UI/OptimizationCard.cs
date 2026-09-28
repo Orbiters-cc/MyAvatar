@@ -39,7 +39,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             string estimate = $"{Megabytes(before)} → {Megabytes(after)} texture memory (estimated VRAM on PC)";
             var text = new Label(applied ? estimate + (offer ? $" · {plan.changes.Count} more can be optimized" : "")
-                : $"Cap {plan.changes.Count} texture{(plan.changes.Count == 1 ? "" : "s")} at {TextureOptimization.MaxSize} px and compress for PC · {estimate}");
+                : $"Cap {plan.changes.Count} texture{(plan.changes.Count == 1 ? "" : "s")} (body {TextureOptimization.BodyMaxSize} px, the rest {TextureOptimization.MaxSize} px) and compress for PC · {estimate}");
             text.AddToClassList("optimize-card__text"); texts.Add(text);
             text.tooltip = "Estimated from each texture's format, size and mipmaps, the way VRChat ranks texture memory. Download size is not estimated.";
 
@@ -53,7 +53,7 @@ namespace Orbiters.MyAvatar.Editor
             if (offer)
             {
                 var button = MyAvatarEditor.Button("Optimize", optimize);
-                button.tooltip = $"Cap every texture on this avatar at {TextureOptimization.MaxSize} px and compress it for PC: BC1 for opaque colour, BC7 when alpha is used, " +
+                button.tooltip = $"Cap the body's textures at {TextureOptimization.BodyMaxSize} px and every other texture on this avatar at {TextureOptimization.MaxSize} px, and compress them for PC: BC1 for opaque colour, BC7 when alpha is used, " +
                     "BC5 for normal maps, with mipmaps and mipmap streaming on and crunch off. Ramps, lookup tables and HDR images are left alone.\n" +
                     "Textures also used by another avatar in the open scenes, or inside a package, are copied for this avatar first. Undo restores everything.";
                 button.AddToClassList("mcb-button--primary"); button.AddToClassList("optimize-card__button"); buttons.Add(button);

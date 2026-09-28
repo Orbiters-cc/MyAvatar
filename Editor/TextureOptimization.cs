@@ -20,6 +20,8 @@ namespace Orbiters.MyAvatar.Editor
     internal static class TextureOptimization
     {
         internal const int MaxSize = 512;
+        // The body carries most of what people look at: its textures keep up to 2048 px.
+        internal const int BodyMaxSize = 2048;
         internal const string Platform = "Standalone";
         internal const string OptimizeName = "My Avatar: quick optimization", RevertName = "My Avatar: undo optimization";
 
@@ -162,7 +164,10 @@ namespace Orbiters.MyAvatar.Editor
         {
             var plan = new Plan();
             var candidates = new List<(Texture2D texture, TextureImporter importer)>();
-            foreach (var group in TextureMatching.Slots(avatar).Where(s => s.existing).GroupBy(s => s.existing))
+            var slots = TextureMatching.Slots(avatar);
+            var body = Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(AvatarRoot(avatar).transform);
+            var bodyTextures = new HashSet<Texture>(slots.Where(s => s.existing && s.parts.Any(p => p.renderer == body)).Select(s => s.existing));
+            foreach (var group in slots.Where(s => s.existing).GroupBy(s => s.existing))
             {
                 var texture = group.Key;
                 long bytes = Bytes(texture);
@@ -177,13 +182,14 @@ namespace Orbiters.MyAvatar.Editor
                 bool normal = importer.textureType == TextureImporterType.NormalMap;
                 var format = Format(normal, !normal && alpha[texture]);
                 var standalone = importer.GetPlatformTextureSettings(Platform);
-                var size = Capped(texture.width, texture.height, MaxSize);
+                int cap = bodyTextures.Contains(texture) ? BodyMaxSize : MaxSize;
+                var size = Capped(texture.width, texture.height, cap);
                 long before = Bytes(texture), after = Bytes(size.x, size.y, BitsPerPixel(Runtime(format)), true);
                 bool change = size.x != texture.width || size.y != texture.height || texture.format != Runtime(format) || !importer.mipmapEnabled || !importer.streamingMipmaps;
                 // Turning mipmaps on can outweigh the saving on an already small texture; never grow a texture.
                 if (!change || after > before) continue;
                 plan.changes.Add(new TexturePlan { texture = texture, path = importer.assetPath, format = format, before = before, after = after,
-                    maxSize = Mathf.Min(MaxSize, standalone.overridden ? standalone.maxTextureSize : importer.maxTextureSize) });
+                    maxSize = Mathf.Min(cap, standalone.overridden ? standalone.maxTextureSize : importer.maxTextureSize) });
                 plan.after += after - before;
             }
             return plan;
