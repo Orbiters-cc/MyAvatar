@@ -30,7 +30,9 @@ namespace Orbiters.MyAvatar.Editor
         internal Func<string, object, List<TextureEntry>, List<TextureSlot>, CancellationToken, Task<TextureAi.Result>> RequestAi = TextureAi.RequestAsync;
         private void OnEnable()
         {
-            avatar = (MyAvatar)target; active = true;
+            // An inspector kept past its object (a closed scene) has nothing to show.
+            avatar = target as MyAvatar; active = avatar != null;
+            if (!avatar) return;
             Undo.undoRedoPerformed += Reload; AssemblyReloadEvents.beforeAssemblyReload += Cancel;
             TextureAi.Preferences.Changed += PreferenceChanged;
             AuthenticationService.Changed += AccountChanged; OrbitersEnvironment.Changed += AccountChanged;
