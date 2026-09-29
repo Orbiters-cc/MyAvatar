@@ -1,6 +1,6 @@
 {
   "name": "Orbiters.MyAvatar.Editor.Tests",
-  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "Orbiters.Toolkit.Editor", "VRC.SDKBase"],
+  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "Orbiters.Toolkit", "Orbiters.Toolkit.Editor", "Orbiters.Toolkit.VRChat", "Orbiters.Toolkit.Editor.VRChat", "VRC.SDKBase"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "overrideReferences": true,

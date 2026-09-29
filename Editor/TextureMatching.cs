@@ -157,19 +157,24 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly string[] Primary = { "_MainTex", "_BaseMap", "_BaseColorMap", "_Albedo", "_BumpMap", "_NormalMap", "_EmissionMap", "_EmissiveColorMap",
             "_MetallicGlossMap", "_MochieMetallicMaps", "_OcclusionMap", "_ParallaxMap", "_SpecGlossMap", "_MaskMap" };
 
+        private static readonly string[] ColorFamily = { "color", "emission" };
+        private static readonly string[] SurfaceFamily = { "roughness", "smoothness", "specular", "occlusion" };
+
         private static double RoleFit(string textureRole, string slotRole)
         {
             if (textureRole == slotRole && textureRole != "unknown") return 0;
-            var colorFamily = new[] { "color", "emission" };
-            var surfaceFamily = new[] { "metallic", "roughness", "smoothness", "specular", "occlusion" };
-            if (colorFamily.Contains(textureRole) && colorFamily.Contains(slotRole)) return -1;
-            if (surfaceFamily.Contains(textureRole) && slotRole == "metallic") return -.5;
+            if (ColorFamily.Contains(textureRole) && ColorFamily.Contains(slotRole)) return -1;
             if (textureRole == "unknown" && slotRole != "normal") return -.75;
             if (slotRole == "unknown" && textureRole != "normal") return -.75;
             return double.NaN;
         }
 
         internal static bool Compatible(string textureRole, string slotRole) => !double.IsNaN(RoleFit(textureRole, slotRole));
+
+        // A metallic slot packs several maps in its channels (Standard: metallic in red, smoothness in alpha), so a single
+        // roughness, smoothness, specular or occlusion image put there as it is renders wrong. Never chosen automatically;
+        // the slot menu offers it apart, for an image that is already packed that way.
+        internal static bool Packed(string textureRole, string slotRole) => SurfaceFamily.Contains(textureRole) && slotRole == "metallic";
 
         // ---- Names ------------------------------------------------------------------------------------------
 
@@ -265,6 +270,8 @@ namespace Orbiters.MyAvatar.Editor
                 }
                 ranked = ranked.OrderByDescending(c => c.score).ToList();
                 var best = ranked.FirstOrDefault();
+                if (best == null && slots.Any(s => Packed(texture.role, s.role)))
+                { texture.reason = $"No {texture.role} slot here: metallic maps pack metallic and smoothness in their channels. Choose a slot below if this image is packed that way."; continue; }
                 if (best == null || best.evidence < 1) { texture.reason = "No clear material and texture-slot match. Choose a slot below."; if (best != null) Suggest(texture, best.slot); continue; }
                 // Parts of one mesh that share a UV layout (colour variants of the same strands, for example) are one target:
                 // a single texture set covers all of them.
@@ -345,7 +352,7 @@ namespace Orbiters.MyAvatar.Editor
             return value;
         }
 
-        // Coarse UV occupancy per mesh submesh; two submeshes of one mesh with nearly the same occupancy share a layout.
+        // Coarse UV coverage per mesh submesh; two submeshes of one mesh with nearly the same coverage share a layout.
         private sealed class UvLayouts
         {
             private const int Size = 32;
@@ -367,21 +374,47 @@ namespace Orbiters.MyAvatar.Editor
                 return false;
             }
 
+            // The cells each triangle covers, not just its corners: complementary halves of an atlas stay apart. A tiled
+            // triangle moves into the 0–1 square as a whole, so a corner at exactly 1 is never folded back onto 0.
             private bool[] Grid(Mesh mesh, int submesh)
             {
                 if (cache.TryGetValue((mesh, submesh), out var grid)) return grid;
                 grid = new bool[Size * Size];
                 var uv = new List<Vector2>();
                 mesh.GetUVs(0, uv);
-                if (uv.Count > 0)
-                    foreach (int index in mesh.GetIndices(submesh))
-                    {
-                        if (index >= uv.Count) continue;
-                        var p = uv[index];
-                        int x = Mathf.Clamp((int)(Mathf.Repeat(p.x, 1f) * Size), 0, Size - 1), y = Mathf.Clamp((int)(Mathf.Repeat(p.y, 1f) * Size), 0, Size - 1);
-                        grid[y * Size + x] = true;
-                    }
+                var indices = uv.Count > 0 ? mesh.GetIndices(submesh) : Array.Empty<int>();
+                var topology = mesh.GetTopology(submesh);
+                int corners = topology == MeshTopology.Triangles ? 3 : topology == MeshTopology.Quads ? 4 : 1;
+                for (int i = 0; i + corners <= indices.Length; i += corners)
+                {
+                    bool valid = true;
+                    for (int c = i; c < i + corners; c++) valid &= indices[c] < uv.Count;
+                    if (!valid) continue;
+                    var first = uv[indices[i]];
+                    if (corners == 1) { Cover(grid, first, first, first); continue; }
+                    Cover(grid, first, uv[indices[i + 1]], uv[indices[i + 2]]);
+                    if (corners == 4) Cover(grid, first, uv[indices[i + 2]], uv[indices[i + 3]]);
+                }
                 return cache[(mesh, submesh)] = grid;
+            }
+
+            private static void Cover(bool[] grid, Vector2 a, Vector2 b, Vector2 c)
+            {
+                var tile = new Vector2(Mathf.Floor((a.x + b.x + c.x) / 3), Mathf.Floor((a.y + b.y + c.y) / 3));
+                a = (a - tile) * Size; b = (b - tile) * Size; c = (c - tile) * Size;
+                int Cell(float v) => Mathf.Clamp(Mathf.FloorToInt(v), 0, Size - 1);
+                // Corners always count, so triangles smaller than a cell still leave a mark.
+                grid[Cell(a.y) * Size + Cell(a.x)] = grid[Cell(b.y) * Size + Cell(b.x)] = grid[Cell(c.y) * Size + Cell(c.x)] = true;
+                float Side(Vector2 p, Vector2 q, Vector2 r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+                float area = Side(a, b, c);
+                if (Mathf.Abs(area) < 1e-6f) return;
+                for (int y = Cell(Mathf.Min(a.y, Mathf.Min(b.y, c.y))), yEnd = Cell(Mathf.Max(a.y, Mathf.Max(b.y, c.y))); y <= yEnd; y++)
+                for (int x = Cell(Mathf.Min(a.x, Mathf.Min(b.x, c.x))), xEnd = Cell(Mathf.Max(a.x, Mathf.Max(b.x, c.x))); x <= xEnd; x++)
+                {
+                    var center = new Vector2(x + .5f, y + .5f);
+                    float u = Side(b, c, center) / area, v = Side(c, a, center) / area, w = Side(a, b, center) / area;
+                    if (u > 0 && v > 0 && w > 0) grid[y * Size + x] = true;
+                }
             }
         }
 

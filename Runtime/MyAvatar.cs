@@ -12,6 +12,8 @@ namespace Orbiters.MyAvatar
 #endif
     {
         [HideInInspector] public string batchFolder;
+        /// <summary>The objects the current texture set is limited to (accessories a drop just added); empty for the whole avatar.</summary>
+        [HideInInspector] public List<Transform> batchScope = new List<Transform>();
         [HideInInspector] public string notice;
         [HideInInspector] public List<TextureEntry> textures = new List<TextureEntry>();
         [HideInInspector] public List<RendererSnapshot> undoMaterials = new List<RendererSnapshot>();

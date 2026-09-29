@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,8 +35,12 @@ namespace Orbiters.MyAvatar.Editor
         private readonly Host host;
         private readonly DropZone zone;
         private readonly VisualElement choice, notes, list;
-        private CancellationTokenSource background;
+        private CancellationTokenSource ai;
         private int revision;
+        // Accessories placed from their Bone menu: an AI answer still on its way never moves them again.
+        private readonly HashSet<OrbitersAttachment> placedByHand = new HashSet<OrbitersAttachment>();
+        internal Func<string, AccessoryAi.Request, CancellationToken, Task<AccessoryAi.Result>> RequestAi = AccessoryAi.RequestAsync;
+        internal Func<string> Token = () => AuthenticationService.GetAuth()?.token;
 
         internal AccessoriesSection(MyAvatar avatar, Host host) : base("Clothes and accessories")
         {
@@ -66,12 +71,14 @@ namespace Orbiters.MyAvatar.Editor
             EditorApplication.hierarchyChanged += Schedule;
             Undo.undoRedoPerformed += Schedule;
             OrbitersFeatures.Changed += FeatureChanged;
-            RegisterCallback<DetachFromPanelEvent>(_ =>
-            {
-                AccessoryService.Changed -= Changed; EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
-                OrbitersFeatures.Changed -= FeatureChanged; background?.Cancel();
-            });
+            RegisterCallback<DetachFromPanelEvent>(_ => Detach());
             FeatureChanged(Feature);
+        }
+
+        internal void Detach()
+        {
+            AccessoryService.Changed -= Changed; EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
+            OrbitersFeatures.Changed -= FeatureChanged; CancelAi();
         }
 
         internal DropZone Zone => zone;
@@ -88,16 +95,21 @@ namespace Orbiters.MyAvatar.Editor
         private IVisualElementScheduledItem pending;
         private void Schedule() { pending?.Pause(); pending = schedule.Execute(Refresh).StartingIn(300); }
 
+        // A new drop, the AI switch turned off or another account: answers still on their way are dropped.
+        internal void CancelAi() { revision++; ai?.Cancel(); ai = null; host.Background(null); }
+
         private async Task Drop(string[] paths)
         {
-            revision++; background?.Cancel();
+            if (AccessoryService.Busy(avatar)) return;
+            CancelAi();
             zone.ShowProgress(.02f, "Opening…");
             await Report(async () => await FollowUp(await AccessoryService.DropAsync(avatar, paths, PickRivalAsync, (value, text) => zone.ShowProgress(value, text), CancellationToken.None)));
         }
 
         private async Task Choose(string answer)
         {
-            revision++; background?.Cancel();
+            if (AccessoryService.Busy(avatar)) return;
+            CancelAi();
             zone.ShowProgress(.7f, "Attaching…");
             await Report(async () => await FollowUp(await AccessoryService.ChooseAsync(avatar, answer, (value, text) => zone.ShowProgress(value, text), CancellationToken.None)));
         }
@@ -114,49 +126,87 @@ namespace Orbiters.MyAvatar.Editor
         {
             Refresh();
             // Images of the drop go to the accessories just added (or to the avatar when nothing was added).
-            var images = outcomes.SelectMany(o => o.images ?? new List<string>()).Distinct().ToArray();
-            if (images.Length > 0)
+            var images = outcomes.SelectMany(o => o.images ?? new List<string>()).Distinct().Where(File.Exists).ToArray();
+            try
             {
-                var scope = outcomes.Where(o => o.attachment != null).Select(o => o.attachment.transform).ToArray();
-                await host.ApplyTextures(images, scope.Length > 0 ? scope : null);
+                if (images.Length > 0)
+                {
+                    var scope = outcomes.Where(o => o.attachment != null).Select(o => o.attachment.transform).ToArray();
+                    await host.ApplyTextures(images, scope.Length > 0 ? scope : null);
+                }
             }
+            finally { foreach (var staging in outcomes.Select(o => o.staging).Distinct()) AccessoryService.Release(avatar, staging); }
             if (host.AiOn()) _ = AskAiAsync(outcomes.Where(o => o.attachment != null && o.plan != null).ToList(), revision);
         }
+
+        // A drop Unity finished after reloading its scripts: its images and AI help, as after any drop.
+        private void ResumeFollowUp()
+        {
+            if (!AccessoryService.HasFollowUp(avatar)) return;
+            _ = host.Run(async () =>
+            {
+                var outcomes = AccessoryService.TakeFollowUp(avatar);
+                if (outcomes == null) return;
+                CancelAi();
+                await Report(() => FollowUp(outcomes));
+                AccessoryFollowUps.Complete(avatar, outcomes);
+            });
+        }
+
+        // Answers are for the drop, account and AI switch they were asked with.
+        private bool Current(int started, string token) => started == revision && avatar && host.AiOn() && Token() == token;
+
+        // Where an accessory is attached: an AI answer only applies to the placement it was asked about.
+        private static (OrbitersAttachment.AttachMode mode, Transform parent, string links, Transform owner, Vector3 position, Quaternion rotation, Vector3 scale) Placement(OrbitersAttachment attachment) =>
+            (attachment.mode, attachment.parent, string.Join(",", attachment.links.Select(l => (l.from ? l.from.GetInstanceID() : 0) + ">" + (l.to ? l.to.GetInstanceID() : 0))),
+                attachment.transform.parent, attachment.transform.localPosition, attachment.transform.localRotation, attachment.transform.localScale);
 
         // Several equally good variants of different items: one quick question before anything is installed.
         private async Task<AccessoryCandidates.Candidate> PickRivalAsync(AccessoryCandidates.Choice choice, List<AccessoryImport.Doc> docs)
         {
-            string token = AuthenticationService.GetAuth()?.token;
+            string token = Token();
             if (!host.AiOn() || string.IsNullOrEmpty(token)) return null;
             var request = AccessoryAi.ForCandidates(avatar.transform, choice, docs);
             if (!request.worthAsking) return null;
             zone.ShowProgress(.8f, "Asking Orbiters AI which one to use…");
-            try { return (await AccessoryAi.RequestAsync(token, request, CancellationToken.None)).candidate; }
+            var source = ai = new CancellationTokenSource();
+            int started = revision;
+            try
+            {
+                var candidate = (await RequestAi(token, request, source.Token)).candidate;
+                return Current(started, token) ? candidate : null;
+            }
             catch (Exception) { return null; }
+            finally { if (ai == source) ai = null; source.Dispose(); }
         }
 
         // After the local install: a guessed bone, unmatched clothing bones and manual steps, answered in the background.
         private async Task AskAiAsync(List<AccessoryService.Outcome> outcomes, int started)
         {
-            string token = AuthenticationService.GetAuth()?.token;
+            string token = Token();
             if (string.IsNullOrEmpty(token)) return;
-            var source = background = new CancellationTokenSource();
+            var source = ai = new CancellationTokenSource();
             try
             {
                 foreach (var outcome in outcomes)
                 {
+                    if (!Current(started, token)) return;
+                    if (!outcome.attachment) continue;
                     var request = AccessoryAi.ForPlan(outcome.plan, outcome.candidate, outcome.docs);
                     if (!request.worthAsking) continue;
+                    var placement = Placement(outcome.attachment);
                     host.Background($"Orbiters AI is checking {outcome.attachment.name}…");
-                    var result = await AccessoryAi.RequestAsync(token, request, source.Token);
+                    var result = await RequestAi(token, request, source.Token);
                     source.Token.ThrowIfCancellationRequested();
-                    if (started != revision || !outcome.attachment || !avatar) return;
+                    if (!Current(started, token)) return;
+                    // Placed by the user meanwhile (Bone menu, Inspector, Undo) or removed: their choice stands.
+                    if (!outcome.attachment || placedByHand.Contains(outcome.attachment) || Placement(outcome.attachment) != placement) continue;
                     Apply(outcome, result);
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { if (started == revision && avatar) AddNotes(new MyAvatar.AccessoryNote { text = "Orbiters AI unavailable: " + ex.Message, warning = true }); }
-            finally { if (background == source) { background = null; host.Background(null); } source.Dispose(); }
+            catch (Exception ex) { if (Current(started, token)) AddNotes(new MyAvatar.AccessoryNote { text = "Orbiters AI unavailable: " + ex.Message, warning = true }); }
+            finally { if (ai == source) { ai = null; host.Background(null); } source.Dispose(); }
         }
 
         private void Apply(AccessoryService.Outcome outcome, AccessoryAi.Result result)
@@ -179,7 +229,8 @@ namespace Orbiters.MyAvatar.Editor
         private void Refresh()
         {
             if (!avatar || style.display == DisplayStyle.None) return;
-            if (AccessoryService.Busy) return;
+            if (AccessoryService.Busy(avatar)) return;
+            if (AccessoryService.HasFollowUp(avatar)) schedule.Execute(ResumeFollowUp);
             if (string.IsNullOrEmpty(avatar.accessoryStatus)) zone.ShowIdle();
             else zone.ShowDone(avatar.accessoryStatus, avatar.accessoryWarning);
             RefreshChoice();
@@ -279,6 +330,7 @@ namespace Orbiters.MyAvatar.Editor
                 string group = id.ToString().Contains("Left") ? "Left/" : id.ToString().Contains("Right") ? "Right/" : "";
                 menu.AddItem(new GUIContent(group + ObjectNames.NicifyVariableName(id.ToString())), attachment.parent == bone, () =>
                 {
+                    placedByHand.Add(attachment);
                     AttachmentInstaller.Retarget(attachment, target, snap: true);
                     Selection.activeGameObject = attachment.gameObject;
                     Refresh();

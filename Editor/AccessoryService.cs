@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.VRChat;
@@ -12,23 +14,29 @@ using UnityEngine;
 namespace Orbiters.MyAvatar.Editor
 {
     // One accessory drop from files to an attached accessory: open archives, import packages, pick the variant, place it
-    // under the avatar root and attach it. A package with scripts recompiles Unity mid-way: the job is kept in SessionState
-    // and resumes after the domain reload, with or without an Inspector open.
+    // under the avatar root and attach it. A package with scripts recompiles Unity mid-way: each avatar's job is kept in
+    // SessionState and resumes after the domain reload, with or without an Inspector open; what the drop still has to do
+    // then (its images, AI help) waits for the avatar's Inspector.
     internal static class AccessoryService
     {
-        private const string JobKey = "Orbiters.MyAvatar.AccessoryJob";
+        internal const string JobKey = "Orbiters.MyAvatar.AccessoryJobs";
+        internal const string CodeMessage = "Orbiters does not control the content of this package or its scripts. Unity compiles and runs code as soon as it is imported.";
 
         // JsonUtility writes null strings as "": test hand and pick with IsNullOrEmpty.
         [Serializable]
         internal sealed class Job
         {
             public string avatar, batch, hand, pick;
+            /// <summary>The avatar's instance ID: finds it again after a domain reload, also in a scene that was never saved.</summary>
+            public int instance;
             /// <summary>Asset paths offered when a drop holds several different items.</summary>
             public List<string> options = new List<string>();
             public AccessoryImport.Drop drop = new AccessoryImport.Drop();
             public List<string> guids = new List<string>();
             public int nextPackage;
         }
+
+        [Serializable] private sealed class Jobs { public List<Job> list = new List<Job>(); }
 
         internal sealed class Outcome
         {
@@ -37,89 +45,153 @@ namespace Orbiters.MyAvatar.Editor
             public AccessoryCandidates.Candidate candidate;
             public List<AccessoryImport.Doc> docs;
             public List<string> images;
+            /// <summary>The drop's opened archives, released once its images are applied.</summary>
+            public string staging;
+            internal string followUp;
         }
 
         /// <summary>Raised whenever an avatar's accessory status or list changes, so Inspectors can refresh.</summary>
         internal static event Action<MyAvatar> Changed;
-        internal static bool Busy { get; private set; }
+        /// <summary>Asks before a package with code is imported; replaced in tests.</summary>
+        internal static Func<UntrustedCodeDialog.Request, bool> ConfirmCode = UntrustedCodeDialog.Confirm;
+        private static readonly HashSet<int> Running = new HashSet<int>();
+        // Drops finished after a domain reload, waiting for the avatar's Inspector to apply their images and ask AI.
 
-        internal static async Task<List<Outcome>> DropAsync(MyAvatar avatar, string[] paths, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
-            Action<float, string> progress, CancellationToken cancellation)
+        internal static bool Busy(MyAvatar avatar) => avatar && Running.Contains(avatar.GetInstanceID());
+        internal static bool HasFollowUp(MyAvatar avatar) => AccessoryFollowUps.Has(avatar);
+
+        internal static List<Outcome> TakeFollowUp(MyAvatar avatar)
         {
-            var job = new Job { avatar = GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString(), batch = Guid.NewGuid().ToString("N").Substring(0, 12) };
-            progress(.05f, "Opening the drop…");
-            string root = AccessoryImport.ProjectRoot, staging = AccessoryImport.Staging;
-            job.drop = await Task.Run(() => AccessoryImport.Expand(paths, root, staging), cancellation);
-            foreach (var package in job.drop.packages)
-            {
-                progress(.15f, "Reading " + System.IO.Path.GetFileName(package) + "…");
-                var index = await Task.Run(() => AccessoryImport.ReadPackage(package), cancellation);
-                job.guids.AddRange(index.guids);
-                foreach (var doc in index.docs) AccessoryImport.AddDoc(job.drop.docs, doc.name, () => doc.text);
-            }
-            cancellation.ThrowIfCancellationRequested();
-            job.drop.assets.AddRange(AccessoryImport.CopyModels(job.drop, job.batch));
-            return await RunAsync(avatar, job, pickRival, progress, cancellation);
+            return AccessoryFollowUps.Take(avatar);
         }
+
+        internal static Task<List<Outcome>> DropAsync(MyAvatar avatar, string[] paths, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
+            Action<float, string> progress, CancellationToken cancellation) => Locked(avatar, async () =>
+        {
+            var job = new Job { avatar = GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString(), instance = avatar.GetInstanceID(), batch = Guid.NewGuid().ToString("N").Substring(0, 12) };
+            progress(.05f, "Opening the drop…");
+            string root = AccessoryImport.ProjectRoot, staging = AccessoryImport.Staging, folder = Path.Combine(staging, job.batch);
+            var keep = KeptStaging();
+            try
+            {
+                job.drop = await Task.Run(() => { AccessoryImport.SweepStaging(staging, keep); return AccessoryImport.Expand(paths, root, folder); }, cancellation);
+                if (!await ReviewPackagesAsync(avatar, job, progress, cancellation)) { AccessoryImport.DeleteStaging(folder); return new List<Outcome>(); }
+                cancellation.ThrowIfCancellationRequested();
+                job.drop.assets.AddRange(AccessoryImport.CopyModels(job.drop, job.batch));
+                return await RunAsync(avatar, job, pickRival, progress, cancellation);
+            }
+            catch { AccessoryImport.DeleteStaging(folder); throw; }
+        });
+
+        // Every package is read before anything is imported: its GUIDs find the entry prefab wherever Unity puts it and its
+        // readmes help AI. A package that would write outside the project is refused; code asks first, and Cancel stops the drop.
+        private static async Task<bool> ReviewPackagesAsync(MyAvatar avatar, Job job, Action<float, string> progress, CancellationToken cancellation)
+        {
+            var code = new List<(string package, List<string> files)>();
+            foreach (var package in job.drop.packages.ToList())
+            {
+                string name = Path.GetFileName(package);
+                progress(.15f, "Reading " + name + "…");
+                UnityPackageIndex index;
+                try { index = await Task.Run(() => AccessoryImport.ReadPackage(package), cancellation); }
+                catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException)
+                { Refuse(job, package, name + ": not imported, it is not a readable Unity package."); continue; }
+                if (index.UnsafePaths.Count > 0) { Refuse(job, package, name + ": not imported, it would write files outside Assets and Packages."); continue; }
+                job.guids.AddRange(index.Entries.Select(e => e.Guid));
+                foreach (var doc in AccessoryImport.PackageDocs(index)) AccessoryImport.AddDoc(job.drop.docs, doc.name, () => doc.text);
+                var files = index.CodeFilesIncludingExisting(AssetDatabase.GUIDToAssetPath);
+                if (files.Count > 0) code.Add((name, files));
+            }
+            if (code.Count == 0) return true;
+            string subject = code.Count == 1 ? code[0].package : $"{code.Count} packages of this drop";
+            if (ConfirmCode(new UntrustedCodeDialog.Request
+            {
+                Subject = subject, Message = CodeMessage, ConfirmLabel = "Import anyway",
+                Files = code.SelectMany(c => code.Count == 1 ? c.files : c.files.Select(f => c.package + " › " + f)).ToList(),
+            })) return true;
+            Status(avatar, $"Cancelled · nothing was imported, {subject} {(code.Count == 1 ? "contains" : "contain")} code.", false, Notes(job));
+            return false;
+        }
+
+        private static void Refuse(Job job, string package, string note) { job.drop.packages.Remove(package); job.drop.refused.Add(note); }
+        private static List<MyAvatar.AccessoryNote> Notes(Job job) => job.drop.refused.Select(r => new MyAvatar.AccessoryNote { text = r, warning = true }).ToList();
 
         /// <summary>The question a drop is waiting on: hands ("left", "right", "both") or items (asset paths), with labels.</summary>
         internal static List<(string label, string value)> PendingOptions(MyAvatar avatar, out bool hands)
         {
             hands = false;
             var result = new List<(string, string)>();
-            if (string.IsNullOrEmpty(avatar.accessoryChoice)) return result;
-            var job = JsonUtility.FromJson<Job>(avatar.accessoryChoice);
+            var job = Pending(avatar);
+            if (job == null) return result;
             hands = job.options.Count == 0;
             if (hands) return new List<(string, string)> { ("Left hand", "left"), ("Right hand", "right"), ("Both", "both") };
-            foreach (var path in job.options) result.Add((System.IO.Path.GetFileNameWithoutExtension(path), path));
+            foreach (var path in job.options) result.Add((Path.GetFileNameWithoutExtension(path), path));
             return result;
         }
 
         /// <summary>Continues a drop that waited for the user: a hand, or one of several items (the others stay offered).</summary>
-        internal static Task<List<Outcome>> ChooseAsync(MyAvatar avatar, string answer, Action<float, string> progress, CancellationToken cancellation)
+        internal static Task<List<Outcome>> ChooseAsync(MyAvatar avatar, string answer, Action<float, string> progress, CancellationToken cancellation) => Locked(avatar, () =>
         {
-            var job = JsonUtility.FromJson<Job>(avatar.accessoryChoice);
+            var job = Pending(avatar) ?? throw new InvalidOperationException("This choice is no longer pending.");
             if (job.options.Count == 0) { job.hand = answer; avatar.accessoryChoice = null; }
             else
             {
                 job.pick = answer;
                 job.options.Remove(answer);
-                avatar.accessoryChoice = job.options.Count > 0 ? JsonUtility.ToJson(new Job { avatar = job.avatar, batch = job.batch, drop = job.drop, guids = job.guids, nextPackage = job.nextPackage, options = job.options }) : null;
+                avatar.accessoryChoice = job.options.Count > 0 ? JsonUtility.ToJson(new Job { avatar = job.avatar, instance = job.instance, batch = job.batch, drop = job.drop, guids = job.guids, nextPackage = job.nextPackage, options = job.options }) : null;
             }
             Dirty(avatar);
             return RunAsync(avatar, job, null, progress, cancellation);
-        }
+        });
 
         internal static void DismissChoice(MyAvatar avatar)
         {
+            var job = Pending(avatar);
             avatar.accessoryChoice = null; Dirty(avatar);
+            if (job != null) Release(avatar, job.drop.staging);
             Changed?.Invoke(avatar);
+        }
+
+        /// <summary>Removes a drop's opened archives once nothing needs them: its images applied, no choice still offered from it.</summary>
+        internal static void Release(MyAvatar avatar, string staging)
+        {
+            if (string.IsNullOrEmpty(staging) || avatar && Pending(avatar)?.drop.staging == staging) return;
+            AccessoryImport.DeleteStaging(staging);
+        }
+
+        private static Job Pending(MyAvatar avatar) => avatar && !string.IsNullOrEmpty(avatar.accessoryChoice) ? JsonUtility.FromJson<Job>(avatar.accessoryChoice) : null;
+
+        // One job per avatar at a time; drops on other avatars run on their own.
+        internal static async Task<List<Outcome>> Locked(MyAvatar avatar, Func<Task<List<Outcome>>> work)
+        {
+            int id = avatar.GetInstanceID();
+            if (!Running.Add(id)) throw new InvalidOperationException("My Avatar is still adding an accessory to this avatar. Try again when it is done.");
+            try { return await work(); }
+            finally { Running.Remove(id); Changed?.Invoke(avatar); }
         }
 
         private static async Task<List<Outcome>> RunAsync(MyAvatar avatar, Job job, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
             Action<float, string> progress, CancellationToken cancellation)
         {
-            Busy = true;
+            // Saved before each import: a package with scripts reloads the domain, and the job resumes from the next package.
+            // Anything that ends the job here (done, failed, cancelled) forgets it; a domain reload does not.
             try
             {
                 while (job.nextPackage < job.drop.packages.Count)
                 {
-                    var package = job.drop.packages[job.nextPackage++];
-                    SessionState.SetString(JobKey, JsonUtility.ToJson(job));
-                    progress(.25f + .4f * job.nextPackage / job.drop.packages.Count, "Importing " + System.IO.Path.GetFileNameWithoutExtension(package) + "…");
-                    await AccessoryImport.ImportPackageAsync(package, cancellation);
+                    var package = job.drop.packages[job.nextPackage];
+                    // The editor can reload while this job waits for another avatar's native import. Keep the queued
+                    // package pending until it actually starts; only then may recovery advance past it.
+                    Save(job);
+                    progress(.25f + .4f * (job.nextPackage + 1) / job.drop.packages.Count, "Importing " + Path.GetFileNameWithoutExtension(package) + "…");
+                    await AccessoryImport.ImportPackageAsync(package, cancellation, () => { job.nextPackage++; Save(job); });
                 }
                 // Kept until Unity is idle: the import may still trigger a recompile and domain reload.
-                if (job.drop.packages.Count > 0) SessionState.SetString(JobKey, JsonUtility.ToJson(job));
+                if (job.drop.packages.Count > 0) Save(job);
                 while (EditorApplication.isCompiling || EditorApplication.isUpdating) await Task.Delay(100, cancellation);
-                SessionState.EraseString(JobKey);
-                return await InstallAsync(avatar, job, pickRival, progress);
             }
-            finally
-            {
-                Busy = false;
-                Changed?.Invoke(avatar);
-            }
+            finally { Forget(job); }
+            return await InstallAsync(avatar, job, pickRival, progress);
         }
 
         private static async Task<List<Outcome>> InstallAsync(MyAvatar avatar, Job job, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
@@ -130,11 +202,12 @@ namespace Orbiters.MyAvatar.Editor
             var assets = job.drop.assets.Concat(job.guids.Select(AssetDatabase.GUIDToAssetPath).Where(p => !string.IsNullOrEmpty(p))).ToList();
             progress(.75f, "Choosing what to put on…");
             var choice = AccessoryCandidates.Choose(assets);
-            var notes = job.drop.refused.Select(r => new MyAvatar.AccessoryNote { text = r, warning = true }).ToList();
+            var notes = Notes(job);
             if (choice.best == null)
             {
                 Status(avatar, job.drop.images.Count > 0 ? null : "Nothing to put on the avatar in this drop: no prefab or model with a mesh.", true, notes);
-                if (job.drop.images.Count > 0) outcomes.Add(new Outcome { docs = job.drop.docs, images = job.drop.images });
+                if (job.drop.images.Count > 0) outcomes.Add(new Outcome { docs = job.drop.docs, images = job.drop.images, staging = job.drop.staging });
+                else Release(avatar, job.drop.staging);
                 return outcomes;
             }
             if (choice.NeedsHand && string.IsNullOrEmpty(job.hand))
@@ -171,14 +244,17 @@ namespace Orbiters.MyAvatar.Editor
                 if (outcome == null) continue;
                 outcome.docs = job.drop.docs;
                 outcome.images = job.drop.images;
+                outcome.staging = job.drop.staging;
                 outcomes.Add(outcome);
             }
+            // Without images to apply nothing reads the opened archives any more.
+            if (outcomes.Count == 0 || job.drop.images.Count == 0) Release(avatar, job.drop.staging);
             Status(avatar, Summary(outcomes, choice.all.Count - chosen.Count), notes.Any(n => n.warning), notes);
             return outcomes;
         }
 
         /// <summary>Adds one more copy of an accessory already on the avatar (the "Add another" choice).</summary>
-        internal static Task<List<Outcome>> InstallPathAsync(MyAvatar avatar, string path)
+        internal static Task<List<Outcome>> InstallPathAsync(MyAvatar avatar, string path) => Locked(avatar, () =>
         {
             var outcomes = new List<Outcome>();
             var candidate = AccessoryCandidates.Choose(new[] { path }).best;
@@ -187,7 +263,7 @@ namespace Orbiters.MyAvatar.Editor
             if (outcome != null) outcomes.Add(outcome);
             Status(avatar, outcome != null ? outcome.attachment.name + " " + Describe(outcome.attachment, outcome.plan) : "Nothing was added.", notes.Any(n => n.warning), notes);
             return Task.FromResult(outcomes);
-        }
+        });
 
         private static Outcome Install(MyAvatar avatar, AccessoryCandidates.Candidate candidate, List<MyAvatar.AccessoryNote> notes, bool allowDuplicate = false)
         {
@@ -258,24 +334,74 @@ namespace Orbiters.MyAvatar.Editor
         // back stale notes when the user undoes the accessory itself.
         private static void Dirty(MyAvatar avatar) => EditorUtility.SetDirty(avatar);
 
-        // A job interrupted by a domain reload (a package with scripts) picks up where it was.
+        // ---- Jobs across domain reloads ----------------------------------------------------------------------------
+
+        internal static List<Job> Saved()
+        {
+            var json = SessionState.GetString(JobKey, null);
+            return string.IsNullOrEmpty(json) ? new List<Job>() : JsonUtility.FromJson<Jobs>(json)?.list ?? new List<Job>();
+        }
+
+        internal static void Save(Job job) { var jobs = Saved(); jobs.RemoveAll(j => j.batch == job.batch); jobs.Add(job); Write(jobs); }
+        internal static void Forget(Job job) { var jobs = Saved(); if (jobs.RemoveAll(j => j.batch == job.batch) > 0) Write(jobs); }
+
+        private static void Write(List<Job> jobs)
+        {
+            if (jobs.Count == 0) SessionState.EraseString(JobKey);
+            else SessionState.SetString(JobKey, JsonUtility.ToJson(new Jobs { list = jobs }));
+        }
+
+        // The instance ID holds for the whole editor session, also in a scene that was never saved; the global ID after the
+        // scene was reopened.
+        internal static MyAvatar Find(Job job)
+        {
+            var avatar = EditorUtility.InstanceIDToObject(job.instance) as MyAvatar;
+            if (avatar) return avatar;
+            return GlobalObjectId.TryParse(job.avatar, out var id) ? GlobalObjectId.GlobalObjectIdentifierToObjectSlow(id) as MyAvatar : null;
+        }
+
+        // Opened archives still needed by a pending choice or a job in progress.
+        private static HashSet<string> KeptStaging()
+        {
+            var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var stagings = UnityEngine.Object.FindObjectsByType<MyAvatar>(FindObjectsInactive.Include, FindObjectsSortMode.None).Select(a => Pending(a)?.drop.staging)
+                .Concat(Saved().Select(j => j.drop.staging)).Concat(AccessoryFollowUps.Staging());
+            foreach (var staging in stagings.Where(s => !string.IsNullOrEmpty(s)))
+                try { keep.Add(Path.GetFullPath(staging)); }
+                catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { }
+            return keep;
+        }
+
+        // A job interrupted by a domain reload (a package with scripts) picks up where it was, one avatar after another.
         [InitializeOnLoadMethod]
         private static void Resume() => EditorApplication.delayCall += TryResume;
 
         private static async void TryResume()
         {
-            var json = SessionState.GetString(JobKey, null);
-            if (string.IsNullOrEmpty(json)) return;
+            var jobs = Saved();
+            if (jobs.Count == 0) return;
             if (EditorApplication.isCompiling || EditorApplication.isUpdating) { EditorApplication.delayCall += TryResume; return; }
-            SessionState.EraseString(JobKey);
-            var job = JsonUtility.FromJson<Job>(json);
-            if (!GlobalObjectId.TryParse(job.avatar, out var id) || !(GlobalObjectId.GlobalObjectIdentifierToObjectSlow(id) is MyAvatar avatar)) return;
+            foreach (var job in jobs) await ResumeAsync(job);
+        }
+
+        internal static async Task ResumeAsync(Job job)
+        {
+            var avatar = Find(job);
+            if (!avatar)
+            {
+                Forget(job); AccessoryImport.DeleteStaging(job.drop.staging);
+                Debug.LogWarning("My Avatar could not find the avatar it was adding " + string.Join(", ", job.drop.packages.Select(Path.GetFileNameWithoutExtension)) +
+                    " to. The package was imported, but nothing was put on: drop it again on the avatar.");
+                return;
+            }
+            if (Busy(avatar)) return;
             try
             {
                 Status(avatar, "Finishing the accessory import…", false, null);
-                await RunAsync(avatar, job, null, (_, text) => { }, CancellationToken.None);
+                var outcomes = await Locked(avatar, () => RunAsync(avatar, job, null, (_, __) => { }, CancellationToken.None));
+                if (outcomes.Count > 0 && avatar) { AccessoryFollowUps.Save(avatar, outcomes); Changed?.Invoke(avatar); }
             }
-            catch (Exception ex) { Status(avatar, ex.Message, true, null); }
+            catch (Exception ex) { AccessoryImport.DeleteStaging(job.drop.staging); Status(avatar, ex.Message, true, null); }
         }
     }
 }

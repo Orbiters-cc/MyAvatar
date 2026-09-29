@@ -39,11 +39,10 @@ namespace Orbiters.MyAvatar.Editor
                 string full = paths[i].Replace('\\', '/');
                 if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
                 string asset = full.Substring(root.Length);
-                if ((asset.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) || asset.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase)) && AssetDatabase.LoadAssetAtPath<Texture2D>(asset))
-                {
-                    var importer = AssetImporter.GetAtPath(asset) as TextureImporter;
-                    if (TextureMatching.FileRole(Path.GetFileName(paths[i])) != "normal" || importer != null && importer.textureType == TextureImporterType.NormalMap) resolved[i] = asset;
-                }
+                // A project texture is used as it is when its import settings suit its role; otherwise it is copied with
+                // the settings an external file of that role gets, and the original stays untouched.
+                if ((asset.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) || asset.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase)) && AssetDatabase.LoadAssetAtPath<Texture2D>(asset) &&
+                    Suits(AssetImporter.GetAtPath(asset) as TextureImporter, TextureMatching.FileRole(Path.GetFileName(paths[i])))) resolved[i] = asset;
             }
             var cache = await Task.Run(() => LibraryStore.Read<Dictionary<string, CachedFile>>(CacheFile), token);
             var pending = new List<PendingFile>();
@@ -130,10 +129,17 @@ namespace Orbiters.MyAvatar.Editor
             return File.Exists(asset) && cached.assetModified == File.GetLastWriteTimeUtc(asset).Ticks && cached.metaModified == File.GetLastWriteTimeUtc(asset + ".meta").Ticks;
         }
 
+        // Colour images are sRGB; metallic, roughness, occlusion, masks and other data are read as linear values.
+        private static bool Srgb(string role) => role == "color" || role == "emission" || role == "unknown";
+
+        internal static bool Suits(TextureImporter importer, string role) => importer != null &&
+            (role == "normal" ? importer.textureType == TextureImporterType.NormalMap :
+                importer.textureType == TextureImporterType.Default && importer.sRGBTexture == Srgb(role));
+
         // Unity fills omitted importer fields with its defaults; only the settings My Avatar owns are specified.
         private static string Meta(string role)
         {
-            bool normal = role == "normal", srgb = role == "color" || role == "emission" || role == "unknown";
+            bool normal = role == "normal", srgb = Srgb(role);
             return "fileFormatVersion: 2\nguid: " + Guid.NewGuid().ToString("N") + "\nTextureImporter:\n  serializedVersion: 12\n  mipmaps:\n    sRGBTexture: " +
                 (srgb ? 1 : 0) + "\n  isReadable: 0\n  textureType: " + (normal ? 1 : 0) + "\n";
         }

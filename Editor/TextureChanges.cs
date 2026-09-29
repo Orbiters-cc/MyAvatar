@@ -15,33 +15,50 @@ namespace Orbiters.MyAvatar.Editor
     internal static class TextureChanges
     {
         internal sealed class Change { public TextureEntry entry; public TextureSlot slot; public float confidence; public string reason; }
+        internal sealed class SlotState { public TextureSlot slot; public Material material; public Texture texture; }
+
+        // A texture set limited to some objects (an accessory drop) only changes their renderers: other objects keep a
+        // material they share with them as it is.
+        internal static bool InScope(Renderer renderer, List<Transform> scope) => scope == null || scope.Count == 0 || scope.Any(t => t && renderer.transform.IsChildOf(t));
+
+        internal static List<TextureSlot> Scoped(List<TextureSlot> slots, List<Transform> scope) =>
+            scope == null || scope.Count == 0 ? slots : slots.Where(s => s.parts.Any(p => p.renderer && InScope(p.renderer, scope))).ToList();
+
+        /// <summary>The slots of the current texture set: the whole avatar, or the objects its drop was limited to.</summary>
+        internal static List<TextureSlot> Slots(MyAvatar avatar) => Scoped(TextureMatching.Slots(avatar), avatar.batchScope);
 
         // Applies pending entries. Applying again to the same batch extends the same logical operation: its generated
-        // materials are reused and the Undo/Redo snapshot keeps the state from before the batch.
-        internal static int Apply(MyAvatar avatar, List<TextureEntry> entries, string folder)
+        // materials are reused and the Undo/Redo snapshot keeps the state from before the batch. A new batch passes its scope.
+        internal static int Apply(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Transform> scope = null)
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar) || !avatar.gameObject.scene.IsValid())
                 throw new InvalidOperationException("Apply textures to an avatar in an open scene, outside Play Mode.");
+            scope = scope ?? avatar.batchScope;
             bool extend = avatar.batchFolder == folder && !avatar.canRedo && avatar.undoMaterials.Count > 0;
             var copyToOriginal = extend ? CopyMap(avatar) : new Dictionary<Material, Material>();
+            // A generated material can become shared after the first apply (duplicating a renderer, for example).
+            // Reusing it would modify those excluded objects too, so split it again for the current scope.
+            var outside = avatar.GetComponentsInChildren<Renderer>(true).Where(r => !InScope(r, scope))
+                .SelectMany(r => r.sharedMaterials).Where(m => m).ToHashSet();
+            var reusable = new HashSet<Material>(copyToOriginal.Keys.Where(m => !outside.Contains(m)));
             var originalToCopy = new Dictionary<Material, Material>();
             foreach (var pair in copyToOriginal) originalToCopy[pair.Value] = pair.Key;
             foreach (var entry in entries.Where(e => !e.applied && e.material && originalToCopy.ContainsKey(e.material))) entry.material = originalToCopy[entry.material];
-            var slots = TextureMatching.Slots(avatar);
+            var slots = Scoped(TextureMatching.Slots(avatar), scope);
             var applicable = entries.Where(e => !e.applied && e.texture && e.material && slots.Any(s => s.material == e.material && s.property == e.property)).ToList();
             if (applicable.Count == 0) return 0;
             if (applicable.GroupBy(e => (e.material, e.property)).Any(g => g.Count() > 1))
                 throw new InvalidOperationException("Choose only one texture for each material slot.");
             TextureImport.EnsureFolder(folder + "/Materials");
             var replacements = new Dictionary<Material, Material>();
-            var reused = applicable.Select(e => e.material).Where(copyToOriginal.ContainsKey).Distinct().ToArray();
+            var reused = applicable.Select(e => e.material).Where(reusable.Contains).Distinct().ToArray();
             var snapshots = avatar.undoMaterials.Where(_ => extend).Select(s => new RendererSnapshot { renderer = s.renderer, before = s.before, after = s.after }).ToList();
             var previous = snapshots.Select(s => s.after).ToList();
             try
             {
                 var created = new List<(Material copy, string path)>();
                 var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var group in applicable.Where(e => !copyToOriginal.ContainsKey(e.material)).GroupBy(e => e.material))
+                foreach (var group in applicable.Where(e => !reusable.Contains(e.material)).GroupBy(e => e.material))
                 {
                     var copy = new Material(group.Key) { name = group.Key.name };
                     foreach (var entry in group) Assign(copy, entry.property, entry.texture);
@@ -53,11 +70,11 @@ namespace Orbiters.MyAvatar.Editor
                 AssetDatabase.StartAssetEditing();
                 try { foreach (var (copy, path) in created) AssetDatabase.CreateAsset(copy, path); }
                 finally { AssetDatabase.StopAssetEditing(); }
-                var renderers = avatar.GetComponentsInChildren<Renderer>(true).Where(r => r.sharedMaterials.Any(m => m && replacements.ContainsKey(m))).ToList();
+                var renderers = avatar.GetComponentsInChildren<Renderer>(true).Where(r => InScope(r, scope) && r.sharedMaterials.Any(m => m && replacements.ContainsKey(m))).ToList();
                 Undo.IncrementCurrentGroup(); int groupId = Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName("My Avatar: apply textures");
                 Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(renderers).Concat(reused).ToArray(), "My Avatar: apply textures");
-                foreach (var entry in applicable.Where(e => copyToOriginal.ContainsKey(e.material))) Assign(entry.material, entry.property, entry.texture);
+                foreach (var entry in applicable.Where(e => reusable.Contains(e.material))) Assign(entry.material, entry.property, entry.texture);
                 foreach (var renderer in renderers)
                 {
                     var current = renderer.sharedMaterials;
@@ -86,7 +103,7 @@ namespace Orbiters.MyAvatar.Editor
                         entry.reason = "Another texture was chosen for this slot.";
                     }
                 }
-                avatar.textures = entries; avatar.batchFolder = folder;
+                avatar.textures = entries; avatar.batchFolder = folder; avatar.batchScope = scope;
                 Dirty(avatar);
                 foreach (var material in reused) AssetDatabase.SaveAssetIfDirty(material);
                 Undo.CollapseUndoOperations(groupId);
@@ -101,8 +118,28 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
-        // Merges background AI answers into the batch already applied locally, as one extra Undo step.
-        internal static int Revise(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Change> changes)
+        // What the slots sent to AI show when it is asked, on each material and on the copy this batch made of it.
+        internal static List<SlotState> Capture(MyAvatar avatar, IEnumerable<TextureSlot> slots)
+        {
+            var copies = new Dictionary<Material, Material>();
+            foreach (var pair in CopyMap(avatar)) copies[pair.Value] = pair.Key;
+            var states = new List<SlotState>();
+            foreach (var slot in slots)
+            {
+                states.Add(new SlotState { slot = slot, material = slot.material, texture = TextureOf(slot.material, slot.property) });
+                if (slot.material && copies.TryGetValue(slot.material, out var copy)) states.Add(new SlotState { slot = slot, material = copy, texture = TextureOf(copy, slot.property) });
+            }
+            return states;
+        }
+
+        private static bool Unchanged(List<SlotState> states, TextureSlot slot) =>
+            states.Where(s => s.slot == slot).All(s => s.material && TextureOf(s.material, slot.property) == s.texture);
+
+        private static Texture TextureOf(Material material, string property) => material && material.HasProperty(property) ? material.GetTexture(property) : null;
+
+        // Merges background AI answers into the batch already applied locally, as one extra Undo step. An answer for a slot
+        // whose texture changed since the request (a material Inspector edit) is not applied: the newer choice stands.
+        internal static int Revise(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Change> changes, List<SlotState> before)
         {
             if (avatar.batchFolder != folder || avatar.canRedo || !ReferenceEquals(avatar.textures, entries) ||
                 avatar.undoMaterials.Any(s => !s.renderer || !s.renderer.sharedMaterials.SequenceEqual(s.after)))
@@ -112,12 +149,23 @@ namespace Orbiters.MyAvatar.Editor
             Undo.IncrementCurrentGroup(); int groupId = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName("My Avatar: Orbiters AI matches");
             Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(copyToOriginal.Keys).ToArray(), "My Avatar: Orbiters AI matches");
+            // Checked before this merge changes anything itself.
+            var edited = new HashSet<Change>(changes.Where(c => !Unchanged(before, c.slot)));
             int accepted = 0;
             foreach (var change in changes)
             {
                 var occupant = entries.FirstOrDefault(e => e != change.entry && e.material && Original(e.material) == change.slot.material && e.property == change.slot.property);
                 // Choices the user confirmed in an earlier apply outrank the model.
                 if (change.entry.reason == TextureMatching.RememberedReason || occupant?.reason == TextureMatching.RememberedReason) continue;
+                if (edited.Contains(change))
+                {
+                    if (!change.entry.applied)
+                    {
+                        change.entry.suggestedMaterialName = change.slot.materialName; change.entry.suggestedProperty = change.slot.property;
+                        change.entry.reason = $"Orbiters AI suggested {change.slot.materialName} / {change.slot.description}, which was changed meanwhile. Choose a slot below.";
+                    }
+                    continue;
+                }
                 if (occupant != null) { Unassign(occupant, copyToOriginal); occupant.reason = "Orbiters AI placed " + change.entry.fileName + " in this slot instead."; }
                 Unassign(change.entry, copyToOriginal);
                 change.entry.material = change.slot.material; change.entry.property = change.slot.property; change.entry.confidence = change.confidence;
@@ -227,20 +275,24 @@ namespace Orbiters.MyAvatar.Editor
 #endif
         }
 
-#if MYAVATAR_UNITGIT
-        private static async Task<string> CommitAsync(MyAvatar avatar, string root)
+        // What a checkpoint records: the scene, the dropped textures, generated batches, and the textures whose import
+        // settings Quick optimization changed in place (their .meta holds those settings).
+        internal static HashSet<string> CheckpointPaths(MyAvatar avatar)
         {
             var scene = avatar.gameObject.scene;
-            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scene.path, scene.path + ".meta" };
-            foreach (var entry in avatar.textures.Where(t => t.texture))
+            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(scene.path))
             {
-                string texturePath = AssetDatabase.GetAssetPath(entry.texture);
-                if (texturePath.StartsWith("Assets/", StringComparison.Ordinal))
-                { paths.Add(texturePath); paths.Add(texturePath + ".meta"); }
+                paths.Add(scene.path); paths.Add(scene.path + ".meta");
+                // Include every referenced generated batch, including materials kept for Undo.
+                foreach (var dependency in AssetDatabase.GetDependencies(scene.path, true).Where(p => p.StartsWith("Assets/Orbiters/MyAvatar/", StringComparison.Ordinal)))
+                { paths.Add(dependency); if (File.Exists(dependency + ".meta")) paths.Add(dependency + ".meta"); }
             }
-            // Include every referenced generated batch, including materials kept for Undo.
-            foreach (var dependency in AssetDatabase.GetDependencies(scene.path, true).Where(p => p.StartsWith("Assets/Orbiters/MyAvatar/", StringComparison.Ordinal)))
-            { paths.Add(dependency); if (File.Exists(dependency + ".meta")) paths.Add(dependency + ".meta"); }
+            var textures = avatar.textures.Where(t => t.texture).Select(t => AssetDatabase.GetAssetPath(t.texture))
+                .Concat(avatar.optimization.textures.Select(t => AssetDatabase.GUIDToAssetPath(t.guid)));
+            foreach (var texturePath in textures)
+                if (!string.IsNullOrEmpty(texturePath) && texturePath.StartsWith("Assets/", StringComparison.Ordinal))
+                { paths.Add(texturePath); paths.Add(texturePath + ".meta"); }
             if (!string.IsNullOrEmpty(avatar.batchFolder) && Directory.Exists(avatar.batchFolder))
                 foreach (var file in Directory.EnumerateFiles(avatar.batchFolder, "*", SearchOption.AllDirectories)) paths.Add(file.Replace('\\', '/'));
             foreach (var path in paths.ToArray())
@@ -249,7 +301,13 @@ namespace Orbiters.MyAvatar.Editor
                 while (!string.IsNullOrEmpty(parent) && parent != "Assets")
                 { if (File.Exists(parent + ".meta")) paths.Add((parent + ".meta").Replace('\\', '/')); parent = Path.GetDirectoryName(parent); }
             }
-            var result = await UnitGitReleases.CommitProjectFilesAsync(root, "texture change", paths.Where(File.Exists).ToArray());
+            return paths;
+        }
+
+#if MYAVATAR_UNITGIT
+        private static async Task<string> CommitAsync(MyAvatar avatar, string root)
+        {
+            var result = await UnitGitReleases.CommitProjectFilesAsync(root, "texture change", CheckpointPaths(avatar).Where(File.Exists).ToArray());
             if (!result.Success) throw new InvalidOperationException("Scene and assets saved, but the Git checkpoint failed: " + result.Message);
             if (result.NoChanges) return "Saved · no new changes to checkpoint.";
             return "Saved · commit " + result.CommitHash.Substring(0, Math.Min(8, result.CommitHash.Length));

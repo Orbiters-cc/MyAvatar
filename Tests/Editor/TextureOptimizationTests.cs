@@ -70,14 +70,6 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.IsFalse(TextureOptimization.Same(original, drifted));
         }
 
-        [Test] public void TransparentSamplesAreCounted()
-        {
-            var opaque = new[] { new Color32(10, 20, 30, 255), new Color32(200, 200, 200, 255) };
-            Assert.AreEqual(0f, TextureAnalysis.Compute(opaque).transparent);
-            var cutout = new[] { new Color32(10, 20, 30, 255), new Color32(200, 200, 200, 0) };
-            Assert.AreEqual(.5f, TextureAnalysis.Compute(cutout).transparent);
-        }
-
         [Test] public void EmptyRecordIsNotApplied()
         {
             var record = new TextureOptimizationRecord();

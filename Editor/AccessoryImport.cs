@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Orbiters.Toolkit.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,6 +17,9 @@ namespace Orbiters.MyAvatar.Editor
     {
         internal const string Folder = "Assets/Orbiters/MyAvatar/Accessories";
         internal const int MaxDocChars = 4000, MaxDocs = 6;
+        // What the archives of one drop may expand to on disk: a clothing ZIP with its textures fits well within these.
+        internal const int MaxArchiveEntries = 20000;
+        internal const long MaxArchiveBytes = 4L * 1024 * 1024 * 1024;
         private static readonly string[] Models = { ".fbx", ".obj" };
         private static readonly string[] Images = { ".png", ".jpg", ".jpeg", ".tga" };
         private static readonly string[] Docs = { ".txt", ".md" };
@@ -32,22 +36,19 @@ namespace Orbiters.MyAvatar.Editor
             public List<string> packages = new List<string>(), assets = new List<string>(), models = new List<string>(), images = new List<string>();
             public List<Doc> docs = new List<Doc>();
             public List<string> refused = new List<string>();
+            /// <summary>This drop's own folder for opened archives, removed once the drop is done.</summary>
+            public string staging;
         }
 
-        // Package index read before import: what it will bring, so the entry prefab is found by GUID wherever Unity puts it.
-        internal sealed class PackageIndex
-        {
-            public readonly List<string> guids = new List<string>(), paths = new List<string>();
-            public readonly List<Doc> docs = new List<Doc>();
-            public bool scripts;
-        }
+        private sealed class Budget { public int entries, archives; public long bytes; }
 
-        // Background thread: no Unity API.
+        // Background thread: no Unity API. Archives open into the drop's own staging folder.
         internal static Drop Expand(string[] paths, string projectRoot, string staging)
         {
-            var drop = new Drop();
+            var drop = new Drop { staging = staging };
             var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var raw in paths) Add(drop, Absolute(raw, projectRoot), projectRoot, staging, parents, 0);
+            var budget = new Budget();
+            foreach (var raw in paths) Add(drop, Absolute(raw, projectRoot), projectRoot, staging, parents, budget, 0);
             // A prefab or model dropped alone often has its README next to it or one folder up.
             foreach (var parent in parents)
             {
@@ -59,12 +60,12 @@ namespace Orbiters.MyAvatar.Editor
             return drop;
         }
 
-        private static void Add(Drop drop, string path, string projectRoot, string staging, HashSet<string> parents, int depth)
+        private static void Add(Drop drop, string path, string projectRoot, string staging, HashSet<string> parents, Budget budget, int depth)
         {
             if (Directory.Exists(path))
             {
                 if (depth > 3) return;
-                foreach (var entry in SafeEntries(path)) Add(drop, entry, projectRoot, staging, parents, depth + 1);
+                foreach (var entry in SafeEntries(path)) Add(drop, entry, projectRoot, staging, parents, budget, depth + 1);
                 return;
             }
             if (!File.Exists(path)) return;
@@ -73,9 +74,15 @@ namespace Orbiters.MyAvatar.Editor
             if (ext == ".unitypackage") drop.packages.Add(path);
             else if (ext == ".zip" && depth < 3)
             {
-                var target = Path.Combine(staging, Hash(path + File.GetLastWriteTimeUtc(path).Ticks));
-                if (!Directory.Exists(target)) { var temp = target + ".tmp"; if (Directory.Exists(temp)) Directory.Delete(temp, true); ZipFile.ExtractToDirectory(path, temp); Directory.Move(temp, target); }
-                Add(drop, target, projectRoot, staging, parents, depth + 1);
+                var target = Path.Combine(staging, (++budget.archives).ToString());
+                try { ExtractZip(path, target, budget); }
+                catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException || ex is NotSupportedException || ex is ArgumentException)
+                {
+                    DeleteFolder(target);
+                    drop.refused.Add(name + ": not opened, " + (ex is InvalidDataException ? ex.Message : "it is not a readable ZIP."));
+                    return;
+                }
+                Add(drop, target, projectRoot, staging, parents, budget, depth + 1);
             }
             else if (ext == ".prefab")
             {
@@ -107,70 +114,74 @@ namespace Orbiters.MyAvatar.Editor
             catch (UnauthorizedAccessException) { }
         }
 
-        // A .unitypackage is a gzipped tar of <guid>/pathname, <guid>/asset and <guid>/asset.meta entries.
-        internal static PackageIndex ReadPackage(string path)
+        // The package's entries without importing it, with the small text files kept to read its readmes.
+        internal static UnityPackageIndex ReadPackage(string path) => UnityPackageIndex.Read(path, p => Docs.Contains(Ext(p)));
+
+        internal static List<Doc> PackageDocs(UnityPackageIndex index)
         {
-            var index = new PackageIndex();
-            var pathnames = new Dictionary<string, string>();
-            var texts = new Dictionary<string, byte[]>();
-            using (var stream = new GZipStream(File.OpenRead(path), CompressionMode.Decompress))
-            {
-                var header = new byte[512];
-                string longName = null;
-                while (ReadExactly(stream, header, 512))
-                {
-                    if (header.All(b => b == 0)) break;
-                    string name = longName ?? Ascii(header, 0, 100);
-                    string prefix = Ascii(header, 345, 155);
-                    if (longName == null && prefix.Length > 0) name = prefix + "/" + name;
-                    longName = null;
-                    long size = Convert.ToInt64(Ascii(header, 124, 12).Trim().Trim('\0').PadLeft(1, '0'), 8);
-                    char type = (char)header[156];
-                    var parts = name.TrimStart('.', '/').Split('/');
-                    bool keep = type == 'L' || parts.Length == 2 && (parts[1] == "pathname" || parts[1] == "asset" && size <= 64 * 1024);
-                    byte[] data = keep ? new byte[size] : null;
-                    if (keep) ReadExactly(stream, data, (int)size); else Skip(stream, size);
-                    Skip(stream, (512 - size % 512) % 512);
-                    if (type == 'L') { longName = Encoding.UTF8.GetString(data).TrimEnd('\0'); continue; }
-                    if (data == null) continue;
-                    if (parts[1] == "pathname") pathnames[parts[0]] = Encoding.UTF8.GetString(data).Split('\n')[0].Trim();
-                    else texts[parts[0]] = data;
-                }
-            }
-            foreach (var pair in pathnames)
-            {
-                index.guids.Add(pair.Key);
-                index.paths.Add(pair.Value);
-                string ext = Ext(pair.Value);
-                if (ext == ".cs" || ext == ".dll") index.scripts = true;
-                if (Docs.Contains(ext) && texts.TryGetValue(pair.Key, out var text)) AddDoc(index.docs, Path.GetFileName(pair.Value), () => Encoding.UTF8.GetString(text));
-            }
-            return index;
+            var docs = new List<Doc>();
+            foreach (var entry in index.Entries.Where(e => e.Content != null)) AddDoc(docs, Path.GetFileName(entry.Path), () => Encoding.UTF8.GetString(entry.Content));
+            return docs;
         }
 
-        // Imports one package without Unity's dialog. A package with scripts recompiles afterwards; the job it belongs to is
-        // persisted by the caller and resumes after the domain reload.
-        internal static Task ImportPackageAsync(string path, CancellationToken cancellation)
+        // Bounded in files and expanded bytes across the whole drop, nested archives included; every file stays inside its folder.
+        private static void ExtractZip(string zip, string target, Budget budget)
         {
-            var done = new TaskCompletionSource<bool>();
-            string name = Path.GetFileNameWithoutExtension(path);
-            void Completed(string package) { if (package == name) done.TrySetResult(true); }
-            void Failed(string package, string error) { if (package == name) done.TrySetException(new InvalidOperationException("Unity could not import " + package + ": " + error)); }
-            void Cancelled(string package) { if (package == name) done.TrySetCanceled(); }
-            AssetDatabase.importPackageCompleted += Completed;
-            AssetDatabase.importPackageFailed += Failed;
-            AssetDatabase.importPackageCancelled += Cancelled;
-            var registration = cancellation.Register(() => done.TrySetCanceled());
-            done.Task.ContinueWith(_ =>
+            string root = Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            using (var archive = ZipFile.OpenRead(zip))
             {
-                AssetDatabase.importPackageCompleted -= Completed;
-                AssetDatabase.importPackageFailed -= Failed;
-                AssetDatabase.importPackageCancelled -= Cancelled;
-                registration.Dispose();
-            }, TaskScheduler.FromCurrentSynchronizationContext());
-            AssetDatabase.ImportPackage(path, false);
-            return done.Task;
+                long declared = archive.Entries.Sum(e => e.Length);
+                if (budget.entries + archive.Entries.Count > MaxArchiveEntries) throw new InvalidDataException("it holds too many files.");
+                if (budget.bytes + declared > MaxArchiveBytes) throw new InvalidDataException("it expands to more than 4 GB.");
+                budget.entries += archive.Entries.Count;
+                Directory.CreateDirectory(root);
+                var buffer = new byte[81920];
+                foreach (var entry in archive.Entries)
+                {
+                    string destination = Path.GetFullPath(Path.Combine(root, entry.FullName));
+                    if (!destination.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("it has files that would be written outside its folder.");
+                    if (entry.FullName.EndsWith("/", StringComparison.Ordinal) || entry.FullName.EndsWith("\\", StringComparison.Ordinal)) { Directory.CreateDirectory(destination); continue; }
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination));
+                    using (var input = entry.Open())
+                    using (var output = File.Create(destination))
+                        for (int n; (n = input.Read(buffer, 0, buffer.Length)) > 0;)
+                        {
+                            // Sizes declared by the archive can lie: the bytes actually written count.
+                            if ((budget.bytes += n) > MaxArchiveBytes) throw new InvalidDataException("it expands to more than 4 GB.");
+                            output.Write(buffer, 0, n);
+                        }
+                }
+            }
         }
+
+        /// <summary>Removes a drop's opened archives. Only folders inside the staging folder are ever deleted.</summary>
+        internal static void DeleteStaging(string staging)
+        {
+            if (string.IsNullOrEmpty(staging)) return;
+            string root = Path.GetFullPath(Staging).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, full;
+            try { full = Path.GetFullPath(staging); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { return; }
+            if (full.StartsWith(root, StringComparison.OrdinalIgnoreCase) && full.Length > root.Length) DeleteFolder(full);
+        }
+
+        // Background thread. Leftovers of drops that never finished (Unity closed, no Inspector after a resumed drop), except
+        // those a pending choice still offers.
+        internal static void SweepStaging(string staging, ICollection<string> keep)
+        {
+            foreach (var dir in SafeDirectories(staging))
+                if (!keep.Contains(Path.GetFullPath(dir)) && Directory.GetLastWriteTimeUtc(dir) < DateTime.UtcNow.AddDays(-7)) DeleteFolder(dir);
+        }
+
+        private static void DeleteFolder(string dir)
+        {
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        // Imports share a gate with other Orbiters tools; the caller persists its job before a script can reload Unity.
+        internal static Task ImportPackageAsync(string path, CancellationToken cancellation, Action starting = null) =>
+            UnityPackageImport.ImportAsync(path, cancellation, starting);
 
         // External models are copied next to each other with the images beside them, so their materials can find textures.
         internal static List<string> CopyModels(Drop drop, string batch)
@@ -220,6 +231,13 @@ namespace Orbiters.MyAvatar.Editor
             catch (UnauthorizedAccessException) { return Enumerable.Empty<string>(); }
         }
 
+        private static IEnumerable<string> SafeDirectories(string dir)
+        {
+            try { return Directory.Exists(dir) ? Directory.EnumerateDirectories(dir).ToList() : Enumerable.Empty<string>(); }
+            catch (IOException) { return Enumerable.Empty<string>(); }
+            catch (UnauthorizedAccessException) { return Enumerable.Empty<string>(); }
+        }
+
         private static IEnumerable<string> SafeFiles(string dir)
         {
             try { return Directory.EnumerateFiles(dir).ToList(); }
@@ -228,40 +246,5 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         private static string Ext(string path) => Path.GetExtension(path).ToLowerInvariant();
-
-        private static string Hash(string text)
-        {
-            using (var sha = System.Security.Cryptography.SHA1.Create())
-                return string.Concat(sha.ComputeHash(Encoding.UTF8.GetBytes(text)).Take(8).Select(b => b.ToString("x2")));
-        }
-
-        private static string Ascii(byte[] buffer, int offset, int length)
-        {
-            int end = Array.IndexOf(buffer, (byte)0, offset, length);
-            return Encoding.UTF8.GetString(buffer, offset, (end < 0 ? offset + length : end) - offset);
-        }
-
-        private static bool ReadExactly(Stream stream, byte[] buffer, int count)
-        {
-            int read = 0;
-            while (read < count)
-            {
-                int n = stream.Read(buffer, read, count - read);
-                if (n <= 0) return false;
-                read += n;
-            }
-            return true;
-        }
-
-        private static void Skip(Stream stream, long count)
-        {
-            var buffer = new byte[81920];
-            while (count > 0)
-            {
-                int n = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, count));
-                if (n <= 0) return;
-                count -= n;
-            }
-        }
     }
 }

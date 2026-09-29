@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -12,7 +13,7 @@ namespace Orbiters.MyAvatar.Editor
         {
             var pending = avatar.textures.Where(t => !t.applied && !avatar.textures.Any(o => o != t && o.applied && o.texture == t.texture)).ToList();
             if (pending.Count == 0) return;
-            var slots = TextureMatching.Slots(avatar);
+            var slots = TextureChanges.Slots(avatar);
             foreach (var entry in pending)
             {
                 var card = new VisualElement(); card.AddToClassList("texture-card"); root.Add(card);
@@ -30,14 +31,8 @@ namespace Orbiters.MyAvatar.Editor
                 var suggested = slots.Where(s => s.materialName == entry.suggestedMaterialName && s.property == entry.suggestedProperty).ToArray();
                 void Menu()
                 {
-                    var menu = new GenericMenu();
-                    foreach (var slot in slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s.role))
-                        .OrderBy(s => !s.active).ThenBy(s => s.secondary).ThenBy(s => s.materialName))
-                    {
-                        var selected = slot;
-                        menu.AddItem(new GUIContent((selected.active ? "" : "Hidden objects/") + selected.materialName.Replace("/", " ∕ ") + "/" + selected.description.Replace("/", " ∕ ") + " (" + selected.property + ")"),
-                            false, () => Choose(selected));
-                    }
+                    var menu = new GenericMenu { allowDuplicateNames = true };
+                    foreach (var (path, slot) in MenuItems(entry, slots)) menu.AddItem(new GUIContent(path), false, () => Choose(slot));
                     menu.ShowAsContext();
                 }
                 // The best guess in one click, and every other compatible slot one menu away.
@@ -52,5 +47,26 @@ namespace Orbiters.MyAvatar.Editor
                 button.AddToClassList("texture-choose"); card.Add(button);
             }
         }
+
+        // The slots an image can go to, one unique menu path each: visible objects first, packed metallic slots apart (the
+        // image must already be packed for them), and materials that share a name told apart by their object's path.
+        internal static List<(string path, TextureSlot slot)> MenuItems(TextureEntry entry, List<TextureSlot> slots)
+        {
+            bool Packed(TextureSlot s) => TextureMatching.Packed(entry.role, s.role);
+            var offered = slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s.role) || Packed(s))
+                .OrderBy(s => !s.active).ThenBy(Packed).ThenBy(s => s.secondary).ThenBy(s => s.materialName).ToList();
+            var names = new Dictionary<Material, string>();
+            foreach (var same in offered.GroupBy(s => s.material).Select(g => g.First()).GroupBy(s => s.materialName))
+                foreach (var slot in same)
+                {
+                    string name = Item(slot.materialName) + (same.Count() > 1 ? " · " + slot.rendererPath.Replace("/", " › ") : "");
+                    for (int n = 2; names.ContainsValue(name); n++) name = Item(slot.materialName) + " · " + slot.rendererPath.Replace("/", " › ") + " (" + n + ")";
+                    names[slot.material] = name;
+                }
+            return offered.Select(s => ((s.active ? "" : "Hidden objects/") + (Packed(s) ? "Packed metallic slots (image must be packed)/" : "") +
+                names[s.material] + "/" + Item(s.description) + " (" + s.property + ")", s)).ToList();
+        }
+
+        private static string Item(string text) => (text ?? "").Replace("/", " ∕ ");
     }
 }

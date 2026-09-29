@@ -138,22 +138,21 @@ namespace Orbiters.MyAvatar.Editor
 
         // ---- Plan ---------------------------------------------------------------------------------------------
 
-        // Alpha is measured on the imported pixels: many opaque textures still carry an unused alpha channel.
+        // Alpha is measured on the imported pixels: many opaque textures still carry an unused alpha channel. Any texel below
+        // full opacity counts, at full resolution; when mipmap streaming holds only smaller mips, alpha is kept to be safe.
         private static readonly Dictionary<(int, Hash128), bool> AlphaCache = new Dictionary<(int, Hash128), bool>();
 
-        private static Dictionary<Texture2D, bool> AlphaUsed(IEnumerable<(Texture2D texture, TextureImporter importer)> textures)
+        internal static Dictionary<Texture2D, bool> AlphaUsed(IEnumerable<(Texture2D texture, TextureImporter importer)> textures)
         {
             var result = new Dictionary<Texture2D, bool>();
-            var measure = new List<Texture2D>();
             foreach (var (texture, importer) in textures)
             {
-                if (importer.alphaSource == TextureImporterAlphaSource.None || texture.format == TextureFormat.DXT1 || texture.format == TextureFormat.DXT1Crunched ||
-                    !GraphicsFormatUtility.HasAlphaChannel(texture.graphicsFormat)) result[texture] = false;
+                if (importer.alphaSource == TextureImporterAlphaSource.None || importer.alphaSource == TextureImporterAlphaSource.FromInput && !importer.DoesSourceTextureHaveAlpha() ||
+                    texture.format == TextureFormat.DXT1 || texture.format == TextureFormat.DXT1Crunched || !GraphicsFormatUtility.HasAlphaChannel(texture.graphicsFormat)) result[texture] = false;
                 else if (AlphaCache.TryGetValue((texture.GetInstanceID(), texture.imageContentsHash), out bool used)) result[texture] = used;
-                else measure.Add(texture);
+                else if (QualitySettings.streamingMipmapsActive && texture.streamingMipmaps && texture.loadedMipmapLevel > 0) result[texture] = true;
+                else result[texture] = AlphaCache[(texture.GetInstanceID(), texture.imageContentsHash)] = TextureAnalysis.UsesAlpha(texture);
             }
-            foreach (var pair in TextureAnalysis.Measure(measure))
-                result[pair.Key] = AlphaCache[(pair.Key.GetInstanceID(), pair.Key.imageContentsHash)] = pair.Value.transparent > 0;
             return result;
         }
 
@@ -404,7 +403,8 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var renderer in renderers)
             {
                 var materials = renderer.sharedMaterials;
-                foreach (var swap in record.swaps.Where(s => s.renderer == renderer))
+                // Newest first: a later optimization copied the copy (A → B → C), so C goes back to B, then B to A.
+                foreach (var swap in Enumerable.Reverse(record.swaps).Where(s => s.renderer == renderer))
                     if (swap.index < materials.Length && materials[swap.index] == swap.after) materials[swap.index] = swap.before; else keptSlots++;
                 renderer.sharedMaterials = materials; PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             }

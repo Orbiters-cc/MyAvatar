@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -21,6 +22,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
         private bool ownScene;
         private GameObject mine, theirs;
         private string folder, generated;
+        private readonly List<string> extraGenerated = new List<string>();
         private MyAvatar avatar;
         private Material own, other;
         private Texture2D opaque, cutout;
@@ -66,6 +68,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             if (own) UnityEngine.Object.DestroyImmediate(own);
             if (other) UnityEngine.Object.DestroyImmediate(other);
             if (!string.IsNullOrEmpty(generated) && AssetDatabase.IsValidFolder(generated)) AssetDatabase.DeleteAsset(generated);
+            foreach (var path in extraGenerated) if (AssetDatabase.IsValidFolder(path)) AssetDatabase.DeleteAsset(path);
+            extraGenerated.Clear();
             if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
         }
 
@@ -149,6 +153,34 @@ namespace Orbiters.MyAvatar.Editor.Tests
             importer.maxTextureSize = 256; importer.mipmapEnabled = false; importer.SaveAndReimport();
             Assert.AreEqual(1, TextureOptimization.Reconcile(new[] { entry }));
             Assert.IsFalse(importer.mipmapEnabled);
+        }
+
+        [UnityTest] public IEnumerator TwoRealOptimizationsRestoreTheOriginalMaterialAndKeepOtherAvatar()
+        {
+            if (Type.GetType("VRC.SDK3.Avatars.Components.VRCAvatarDescriptor, VRCSDK3A") == null) Assert.Ignore("VRChat avatar SDK not installed.");
+            yield return Wait(TextureOptimization.OptimizeAsync(avatar, (_, __) => { }, CancellationToken.None));
+            generated = avatar.optimization.folder;
+            var firstCopy = renderer.sharedMaterial;
+            Assert.That(firstCopy, Is.Not.SameAs(own));
+
+            // A new texture set brings another shared image to the material created by the previous optimization.
+            var nextShared = Image("New_Emission", 1024, false);
+            firstCopy.SetTexture("_EmissionMap", nextShared);
+            other.SetTexture("_EmissionMap", nextShared);
+            avatar.batchFolder = folder + "/SecondDrop";
+            yield return Wait(TextureOptimization.OptimizeAsync(avatar, (_, __) => { }, CancellationToken.None));
+            extraGenerated.Add(avatar.optimization.folder);
+            Assert.That(renderer.sharedMaterial, Is.Not.SameAs(firstCopy));
+            Assert.That(avatar.optimization.swaps.Count, Is.EqualTo(2));
+            Assert.That(other.GetTexture("_EmissionMap"), Is.SameAs(nextShared));
+            Assert.That(Standalone(nextShared).overridden, Is.False);
+
+            Assert.That(TextureOptimization.Revert(avatar), Is.Null);
+            Assert.That(renderer.sharedMaterial, Is.SameAs(own));
+            Assert.That(other.GetTexture("_MainTex"), Is.SameAs(cutout));
+            Assert.That(other.GetTexture("_EmissionMap"), Is.SameAs(nextShared));
+            Assert.That(Standalone(cutout).overridden, Is.False);
+            Assert.That(Standalone(nextShared).overridden, Is.False);
         }
     }
 }

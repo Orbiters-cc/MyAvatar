@@ -112,6 +112,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
         [UnityTest] public IEnumerator AiOffThenOnStillRejectsOldResponse() { yield return LateResponse("off-on"); }
         [UnityTest] public IEnumerator ClosingInspectorRejectsLateResponse() { yield return LateResponse("close"); }
         [UnityTest] public IEnumerator CurrentAiResponseStillApplies() { yield return LateResponse("current"); }
+        // A texture set by hand in the material's own Inspector while AI was answering stays.
+        [UnityTest] public IEnumerator MaterialEditedMeanwhileRejectsLateResponse() { yield return LateResponse("edited"); }
 
         private IEnumerator LateResponse(string action)
         {
@@ -130,6 +132,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             if (action.StartsWith("off")) Call("ApplyAiEnabled", false);
             if (action == "off-on") Call("ApplyAiEnabled", true);
             if (action == "close") UnityEngine.Object.DestroyImmediate(editor);
+            var edited = action == "edited" ? new Texture2D(2, 2) { name = "edited" } : null;
+            if (edited) material.SetTexture("_MainTex", edited);
             response.SetResult(new TextureAi.Result { changes = new List<TextureChanges.Change> {
                 new TextureChanges.Change { entry = entry, slot = slot, confidence = 1, reason = "fixture" } } });
             yield return Wait(task);
@@ -137,6 +141,14 @@ namespace Orbiters.MyAvatar.Editor.Tests
             {
                 Assert.That(entry.applied, Is.True);
                 Assert.That(AssetDatabase.GetAssetPath(owner.GetComponent<MeshRenderer>().sharedMaterial.GetTexture("_MainTex")), Is.EqualTo(folder + "/fixture.asset"));
+            }
+            else if (action == "edited")
+            {
+                Assert.That(entry.applied, Is.False); Assert.That(entry.material, Is.Null);
+                StringAssert.Contains("changed meanwhile", entry.reason);
+                Assert.That(owner.GetComponent<MeshRenderer>().sharedMaterial, Is.SameAs(material));
+                Assert.That(material.GetTexture("_MainTex"), Is.SameAs(edited));
+                UnityEngine.Object.DestroyImmediate(edited);
             }
             else
             {

@@ -60,7 +60,7 @@ namespace Orbiters.MyAvatar.Editor
             return request;
         }
 
-        /// <summary>After the local install: the bone a guessed prop goes to, unmatched clothing bones and manual steps.</summary>
+        /// <summary>After the local install: the bone a guessed prop goes to, unmatched or ambiguous clothing bones and manual steps.</summary>
         internal static Request ForPlan(AttachmentPlan plan, AccessoryCandidates.Candidate installed, List<AccessoryImport.Doc> docs)
         {
             var request = new Request();
@@ -81,7 +81,8 @@ namespace Orbiters.MyAvatar.Editor
                     match = matches.TryGetValue(pair.Key, out var m) && avatarIds.TryGetValue(m, out var a) ? a : null,
                 });
             }
-            var unresolved = plan.Unmatched.Where(ids.ContainsKey).Select(b => ids[b]).ToArray();
+            // Bones several avatar bones fit equally were left unlinked: AI chooses, as for unmatched ones.
+            var unresolved = plan.Unmatched.Concat(plan.Ambiguous.Select(m => m.Source)).Where(ids.ContainsKey).Select(b => ids[b]).Distinct().ToArray();
             var objects = new List<object>();
             foreach (var t in root.GetComponentsInChildren<Transform>(true))
             {

@@ -48,6 +48,7 @@ namespace Orbiters.MyAvatar.Editor
         private void ApplyAiEnabled(bool enabled)
         {
             if (aiEnabled != enabled || !enabled) Edited();
+            if (!enabled) accessories?.CancelAi();
             aiEnabled = enabled;
             zone?.SetAi(aiConnected, aiEnabled);
             accessories?.Zone.SetAi(aiConnected, aiEnabled);
@@ -127,8 +128,8 @@ namespace Orbiters.MyAvatar.Editor
             zone.ShowProgress(.04f, "Finding textures…");
             var files = await Task.Run(() => TextureImport.Expand(paths), cancellation);
             cancellation.ThrowIfCancellationRequested();
-            var slots = TextureMatching.Slots(avatar);
-            if (scope != null) slots = slots.Where(s => s.parts.Any(p => p.renderer && scope.Any(r => r && p.renderer.transform.IsChildOf(r)))).ToList();
+            var scoped = scope?.Where(t => t).ToList() ?? new List<Transform>();
+            var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar), scoped);
             if (slots.Count == 0) throw new InvalidOperationException("No editable texture slots were found below this avatar.");
             if (slots.Count > 512) throw new InvalidOperationException("This avatar has more than 512 texture slots. Place My Avatar on a smaller avatar root.");
             string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
@@ -155,9 +156,9 @@ namespace Orbiters.MyAvatar.Editor
             await Task.Yield();
             cancellation.ThrowIfCancellationRequested();
             Undo.RecordObject(avatar, "My Avatar: texture set");
-            int count = TextureChanges.Apply(avatar, entries, folder);
+            int count = TextureChanges.Apply(avatar, entries, folder, scoped);
             if (count == 0) { avatar.undoMaterials.Clear(); avatar.canRedo = false; }
-            avatar.textures = entries; avatar.batchFolder = folder; avatar.notice = null;
+            avatar.textures = entries; avatar.batchFolder = folder; avatar.batchScope = scoped; avatar.notice = null;
             TextureMemory.Record(avatar, entries);
             TextureChanges.Dirty(avatar);
             zone.ShowProgress(1f, "Done");
@@ -179,6 +180,7 @@ namespace Orbiters.MyAvatar.Editor
             background?.Cancel();
             var source = background = new CancellationTokenSource();
             int started = revision;
+            var before = TextureChanges.Capture(avatar, slots);
             SetBackground($"Orbiters AI is placing {sent.Count} more texture{(sent.Count == 1 ? "" : "s")}…");
             try
             {
@@ -186,7 +188,7 @@ namespace Orbiters.MyAvatar.Editor
                 while (busy && !source.IsCancellationRequested) await Task.Delay(50, source.Token);
                 source.Token.ThrowIfCancellationRequested();
                 if (!active || !avatar || !aiEnabled || started != revision) return;
-                TextureChanges.Revise(avatar, entries, folder, result.changes);
+                TextureChanges.Revise(avatar, entries, folder, result.changes, before);
                 TextureMemory.Record(avatar, entries);
             }
             catch (OperationCanceledException) { return; }
