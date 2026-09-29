@@ -29,7 +29,7 @@ namespace Orbiters.MyAvatar.Editor
 
         // Applies pending entries. Applying again to the same batch extends the same logical operation: its generated
         // materials are reused and the Undo/Redo snapshot keeps the state from before the batch. A new batch passes its scope.
-        internal static int Apply(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Transform> scope = null)
+        internal static int Apply(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Transform> scope = null, bool splitShared = true)
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar) || !avatar.gameObject.scene.IsValid())
                 throw new InvalidOperationException("Apply textures to an avatar in an open scene, outside Play Mode.");
@@ -38,7 +38,7 @@ namespace Orbiters.MyAvatar.Editor
             var copyToOriginal = extend ? CopyMap(avatar) : new Dictionary<Material, Material>();
             // A generated material can become shared after the first apply (duplicating a renderer or the whole avatar).
             // Reusing it would modify those excluded objects too, so split it again for the current scope.
-            var outside = avatar.GetComponentsInChildren<Renderer>(true).Where(r => !InScope(r, scope))
+            var outside = !splitShared ? new HashSet<Material>() : avatar.GetComponentsInChildren<Renderer>(true).Where(r => !InScope(r, scope))
                 .Concat(SceneRenderers(avatar.gameObject.scene).Where(r => !r.transform.IsChildOf(avatar.transform)))
                 .SelectMany(r => r.sharedMaterials).Where(m => m).ToHashSet();
             var reusable = new HashSet<Material>(copyToOriginal.Keys.Where(m => !outside.Contains(m)));
@@ -154,6 +154,9 @@ namespace Orbiters.MyAvatar.Editor
 
         // Merges background AI answers into the batch already applied locally, as one extra Undo step. An answer for a slot
         // whose texture changed since the request (a material Inspector edit) is not applied: the newer choice stands.
+        // Intended: answers edit the batch's generated materials in place, without the shared-material split of Apply.
+        // An avatar duplicated while the answers were pending (a creator quickly branching one setup for two uses) shares
+        // those materials and gets the same, better matches instead of being left with the first guesses. Not a bug.
         internal static int Revise(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Change> changes, List<SlotState> before)
         {
             if (avatar.batchFolder != folder || avatar.canRedo || !ReferenceEquals(avatar.textures, entries) ||
@@ -190,7 +193,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             if (accepted > 0)
             {
-                Apply(avatar, entries, folder);
+                Apply(avatar, entries, folder, splitShared: false);
                 foreach (var copy in copyToOriginal.Keys) AssetDatabase.SaveAssetIfDirty(copy);
                 Dirty(avatar);
             }
