@@ -37,7 +37,7 @@ namespace Orbiters.MyAvatar.Editor
 
         private static readonly Color Green = new Color(0f, .855f, .427f), Amber = new Color(1f, .69f, .13f), Dash = new Color(.48f, .48f, .48f);
         private readonly Action<string[]> dropped;
-        private readonly VisualElement idle, working, done, fill, shimmer, statusDot, backgroundDot;
+        private readonly VisualElement idle, working, done, fill, shimmer, statusDot, backgroundDot, actions;
         private readonly Label progressLabel, statusLabel, backgroundLabel, idleMessage;
         private State state = State.Idle;
         private VisualElement outgoing;
@@ -78,7 +78,7 @@ namespace Orbiters.MyAvatar.Editor
             var background = new VisualElement(); background.AddToClassList("drop-zone__background"); done.Add(background);
             backgroundDot = new VisualElement(); backgroundDot.AddToClassList("drop-zone__dot"); background.Add(backgroundDot);
             backgroundLabel = new Label(); backgroundLabel.AddToClassList("drop-zone__background-label"); background.Add(backgroundLabel);
-            var actions = new VisualElement(); actions.AddToClassList("drop-zone__actions"); done.Add(actions);
+            actions = new VisualElement(); actions.AddToClassList("drop-zone__actions"); done.Add(actions);
             foreach (var action in doneActions) actions.Add(action);
             if (actions.childCount == 0) actions.style.display = DisplayStyle.None;
             var again = new VisualElement(); again.AddToClassList("drop-zone__again"); done.Add(again);
@@ -127,6 +127,27 @@ namespace Orbiters.MyAvatar.Editor
             targetProgress = Mathf.Max(targetProgress, Mathf.Clamp01(value));
             progressLabel.text = text;
             Enter(State.Working, working);
+        }
+
+        // Undo and Save: shown while the set has something to undo or save, folded away (with the field springing to its new
+        // height) once it is saved.
+        internal void SetActionsShown(bool shown)
+        {
+            if (actions.childCount == 0) return;
+            bool visible = actions.style.display != DisplayStyle.None && !actions.ClassListContains("drop-zone__actions--hiding");
+            if (shown == visible) return;
+            if (shown)
+            {
+                actions.style.display = DisplayStyle.Flex;
+                actions.AddToClassList("drop-zone__actions--hiding");
+                actions.schedule.Execute(() => actions.RemoveFromClassList("drop-zone__actions--hiding")).StartingIn(16);
+                return;
+            }
+            actions.AddToClassList("drop-zone__actions--hiding");
+            actions.schedule.Execute(() =>
+            {
+                if (actions.ClassListContains("drop-zone__actions--hiding")) actions.style.display = DisplayStyle.None;
+            }).StartingIn(180);
         }
 
         internal void ShowDone(string status, bool warning)

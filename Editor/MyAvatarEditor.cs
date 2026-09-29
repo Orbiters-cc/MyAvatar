@@ -27,6 +27,8 @@ namespace Orbiters.MyAvatar.Editor
         [NonSerialized] private bool noteWarning;
         [NonSerialized] private int revision;
         [NonSerialized] private bool busy, aiConnected, aiEnabled, active, localAiChoice;
+        // True from a successful Save until the next change: Undo and Save have nothing left to do.
+        [NonSerialized] private bool saved;
         internal Func<string, object, List<TextureEntry>, List<TextureSlot>, CancellationToken, Task<TextureAi.Result>> RequestAi = TextureAi.RequestAsync;
         private void OnEnable()
         {
@@ -46,7 +48,7 @@ namespace Orbiters.MyAvatar.Editor
         }
         private void Cancel() { active = false; Edited(); operation?.Cancel(); }
         // Any edit, Undo or Redo makes a pending AI answer stale: it must never overwrite a newer state.
-        private void Edited() { revision++; pendingAi = null; background?.Cancel(); if (active) SetBackground(null); }
+        private void Edited() { revision++; saved = false; pendingAi = null; background?.Cancel(); if (active) SetBackground(null); }
         private void ApplyAiEnabled(bool enabled)
         {
             if (aiEnabled != enabled || !enabled) Edited();
@@ -89,6 +91,7 @@ namespace Orbiters.MyAvatar.Editor
             save = Button("Save", () => _ = Run(async () => {
                 SetNote("Saving…", false);
                 note = await TextureChanges.SaveAsync(avatar); noteWarning = false;
+                saved = true;
             }, false));
             save.tooltip = TextureChanges.Commits ? "Save the scene and generated assets, and record a “texture change” checkpoint in Unit Git. Nothing is pushed."
                 : "Save the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint.";
@@ -256,6 +259,7 @@ namespace Orbiters.MyAvatar.Editor
             bool pending = !avatar.canRedo && avatar.textures.GroupBy(TextureMemory.Identity).Any(g => !g.Any(t => t.applied) && !g.All(t => t.dismissed));
             bool hasNote = !string.IsNullOrEmpty(note);
             zone.ShowDone(hasNote ? note : StatusText(), hasNote ? noteWarning : pending);
+            zone.SetActionsShown(!saved);
             zone.SetBackground(backgroundStatus);
             if (!avatar.canRedo) MyAvatarResults.Populate(results, avatar, Edited, () => _ = Run(() => {
                 note = null;
