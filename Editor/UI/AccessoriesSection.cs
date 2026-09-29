@@ -42,7 +42,8 @@ namespace Orbiters.MyAvatar.Editor
         internal Func<string, AccessoryAi.Request, CancellationToken, Task<AccessoryAi.Result>> RequestAi = AccessoryAi.RequestAsync;
         internal Func<string> Token = () => AuthenticationService.GetAuth()?.token;
 
-        internal AccessoriesSection(MyAvatar avatar, Host host) : base("Clothes and accessories")
+        // No card around it: the drop field sits directly in the section, like the texture one.
+        internal AccessoriesSection(MyAvatar avatar, Host host) : base("Clothes and accessories", card: false)
         {
             this.avatar = avatar;
             this.host = host;

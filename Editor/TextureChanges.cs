@@ -170,7 +170,7 @@ namespace Orbiters.MyAvatar.Editor
             // Checked before this merge changes anything itself.
             var edited = new HashSet<Change>(changes.Where(c => !Unchanged(before, c.slot)));
             int accepted = 0;
-            foreach (var change in changes)
+            foreach (var change in changes.Where(c => !c.entry.dismissed))
             {
                 var occupant = entries.FirstOrDefault(e => e != change.entry && e.material && Original(e.material) == change.slot.material && e.property == change.slot.property);
                 // Choices the user confirmed in an earlier apply outrank the model.

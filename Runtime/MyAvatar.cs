@@ -47,6 +47,8 @@ namespace Orbiters.MyAvatar
         public Material material;
         public string property;
         public bool applied;
+        // Set aside by the user from the "needs a slot" list (an unrelated image of the dropped folder, for example).
+        public bool dismissed;
         public bool appliedBeforeLast;
         public Material materialBeforeLast;
         public string propertyBeforeLast;

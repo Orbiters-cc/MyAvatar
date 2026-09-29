@@ -27,6 +27,7 @@ namespace Orbiters.MyAvatar.Editor
         internal const string RememberedReason = "Your earlier choice for this file on this avatar.";
         internal const string ChosenReason = "Chosen by you.";
         internal const string MissingSlotReason = "The rest of this texture set matched ";
+        internal const string NoClearMatchReason = "No clear material and texture-slot match.";
 
         internal static List<TextureSlot> Slots(MyAvatar avatar)
         {
@@ -272,7 +273,7 @@ namespace Orbiters.MyAvatar.Editor
                 var best = ranked.FirstOrDefault();
                 if (best == null && slots.Any(s => Packed(texture.role, s.role)))
                 { texture.reason = $"No {texture.role} slot here: metallic maps pack metallic and smoothness in their channels. Choose a slot below if this image is packed that way."; continue; }
-                if (best == null || best.evidence < 1) { texture.reason = "No clear material and texture-slot match. Choose a slot below."; if (best != null) Suggest(texture, best.slot); continue; }
+                if (best == null || best.evidence < 1) { texture.reason = NoClearMatchReason + " Choose a slot below."; if (best != null) Suggest(texture, best.slot); continue; }
                 // Parts of one mesh that share a UV layout (colour variants of the same strands, for example) are one target:
                 // a single texture set covers all of them.
                 var group = ranked.Skip(1).Where(c => best.score - c.score < .5 && c.slot.property == best.slot.property && c.slot.material != best.slot.material &&

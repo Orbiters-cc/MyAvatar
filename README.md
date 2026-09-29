@@ -14,9 +14,12 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing 
    256 MB per file and 1 GB per batch are supported. The field turns into a
    progress bar, then shows the result with **Undo** and **Save**; drop another
    set on it at any time.
-4. Clear matches apply automatically. A texture that still needs a slot appears as
-   one row below the field: **Use on …** accepts the suggestion, **Choose slot…**
-   picks another. Either applies immediately.
+4. Clear matches apply automatically. Textures that still need a slot are listed
+   below the field, grouped by the material they most likely belong to (**No clear
+   target** last): **Use** accepts the suggestion, **Other…** / **Choose slot…** picks
+   another, and either applies immediately. The **×** of a row, of a group or
+   **Dismiss all** leaves images out (screenshots, icons of the dropped folder); Undo
+   brings them back.
 5. **Undo** restores the materials from before the set (then reads **Redo**),
    including after a scene reload. Save your scene to retain the component data.
 6. **Save** saves the current avatar scene and generated assets. When Unit Git is
@@ -28,7 +31,7 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing 
 
 ## Clothes and accessories (alpha)
 
-Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. A second drop field
+Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. A second drop field, styled like the texture one,
 takes what clothing and accessory creators deliver: a `.unitypackage`, a `.zip` (also
 one holding a package, like `…_UnzipMe.zip`), a prefab or an FBX, with their textures
 and `.txt` readmes, or their folder. My Avatar imports what is not in the project yet,
@@ -76,8 +79,10 @@ accessory and the avatar, component types and up to 12,000 characters of the dro
 
 ## Quick optimization
 
-Once a drop has placed an image that can be compressed, a **Quick optimization** row
-appears below the drop field with the estimated texture memory before and after.
+Once a drop has placed an image that can be compressed, a **Quick optimization** card
+appears below the drop field with the estimated texture memory before and after. It
+opens by itself when a drop brings something to optimize; otherwise it stays folded
+under its title.
 **Optimize** caps the body material's textures (the largest part of the avatar's body mesh) at 2048 px and every other
 texture the avatar's materials show at 512 px (never upscaling), and sets their PC (Standalone) import settings for the best quality per byte of VRAM:
 BC1 for colour whose alpha is unused (measured on the pixels, not taken from the
@@ -103,7 +108,8 @@ Once optimized, the row points to [d4rkAvatarOptimizer](https://github.com/d4rkc
 for merging meshes and materials and removing unused bones and blendshapes, offers
 **Add to avatar** when it is installed but not on the avatar, or notes that it is
 disabled. It optimizes at upload; with VRCFury or Modular Avatar its author
-recommends that over **Create Optimized Copy**.
+recommends that over **Create Optimized Copy**. My Avatar is not associated with
+d4rkAvatarOptimizer.
 
 ## Thumbnail
 

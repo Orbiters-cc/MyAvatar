@@ -38,8 +38,19 @@
 
 .mcb-button.pressed { scale: 0.97 0.97; }
 
-/* Textures that still need a slot: one compact row each. */
-.texture-card { flex-direction: row; align-items: center; background-color: #212121; border-radius: 10px; padding: 8px 10px 8px 8px; margin-bottom: 6px; }
+/* Textures that still need a slot: grouped by their most likely material, one compact row each. */
+.texture-list { margin-bottom: 6px; }
+.texture-list__header { flex-direction: row; align-items: center; justify-content: space-between; margin: 2px 0 4px 2px; }
+.texture-list__title { margin: 0; padding: 0; font-size: 11px; color: #9a9a9a; }
+.texture-group { margin-bottom: 8px; }
+.texture-group__header { flex-direction: row; align-items: center; height: 24px; margin: 0 0 4px 2px; }
+.texture-group__title { flex-shrink: 1; margin: 0; padding: 0; font-size: 12px; -unity-font-style: bold; color: #e6e6e6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.texture-group__count { flex-grow: 1; margin: 0 0 0 6px; padding: 0; font-size: 11px; color: #7a7a7a; }
+.mcb-button.texture-dismiss { width: 22px; min-width: 22px; height: 22px; min-height: 22px; margin: 0 0 0 4px; padding: 0; border-width: 0; border-radius: 11px; background-color: rgba(0, 0, 0, 0); flex-shrink: 0; align-items: center; justify-content: center; }
+.mcb-button.texture-dismiss:hover { background-color: rgba(255, 255, 255, 0.08); }
+.texture-dismiss__icon { width: 12px; height: 12px; --icon-color: #7a7a7a; }
+.mcb-button.texture-dismiss:hover .texture-dismiss__icon { --icon-color: #e6e6e6; }
+.texture-card { flex-direction: row; align-items: center; background-color: #212121; border-radius: 10px; padding: 8px 6px 8px 8px; margin-bottom: 6px; }
 .texture-preview { width: 34px; height: 34px; margin-right: 10px; flex-shrink: 0; border-radius: 6px; }
 .texture-text { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 8px; }
 .filename { white-space: normal; color: #ffffff; -unity-font-style: bold; font-size: 12px; }
@@ -47,7 +58,12 @@
 .texture-choose { flex-shrink: 0; max-width: 150px; }
 
 /* Quick optimization: the offer or the result, then the d4rkAvatarOptimizer suggestion. */
-.optimize-card { background-color: #212121; border-radius: 10px; padding: 10px 10px 10px 14px; margin-bottom: 6px; }
+.optimize-card { background-color: #212121; border-radius: 10px; margin-bottom: 6px; }
+.optimize-card__header { flex-direction: row; align-items: center; padding: 10px 12px; border-radius: 10px; cursor: link; }
+.optimize-card__header:hover { background-color: #262626; }
+.optimize-card__chevron { width: 12px; height: 12px; margin-right: 6px; flex-shrink: 0; --icon-color: #8c8c8c; transition-property: rotate; transition-duration: 0.15s; }
+.optimize-card--open .optimize-card__chevron { rotate: 90deg; }
+.optimize-card__body { padding: 0 12px 12px 30px; }
 .optimize-card__row { flex-direction: row; align-items: center; }
 .optimize-card__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 8px; }
 .optimize-card__heading { flex-direction: row; align-items: center; }
@@ -56,13 +72,19 @@
 .optimize-card__text { margin: 3px 0 0 0; padding: 0; white-space: normal; color: #8c8c8c; font-size: 10px; }
 .optimize-card__buttons { flex-direction: row; flex-shrink: 0; }
 .mcb-button.optimize-card__button { height: 28px; min-height: 28px; margin: 0 0 0 6px; padding: 0 12px; border-radius: 14px; font-size: 11px; }
-.optimize-suggestion { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 10px; padding-top: 8px; border-top-width: 1px; border-color: #2e2e2e; }
-.optimize-suggestion__text { flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 160px; margin: 0 6px 0 0; padding: 0; font-size: 11px; color: #bdbdbd; white-space: normal; }
-.optimize-suggestion__prompt { flex-grow: 1; flex-shrink: 1; flex-basis: 0; min-width: 200px; margin: 0 6px 0 0; }
+/* One column: the text over the full width, then the actions on one line. */
+.optimize-suggestion { margin-top: 10px; padding-top: 10px; border-top-width: 1px; border-color: #2e2e2e; }
+.optimize-suggestion__text { margin: 0; padding: 0; font-size: 11px; color: #bdbdbd; white-space: normal; }
+.optimize-suggestion__disclaimer { margin: 4px 0 0 0; padding: 0; font-size: 10px; color: #6f6f6f; white-space: normal; }
+.optimize-suggestion__actions { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 /* A suggestion here, not a missing requirement: the shared prompt without its warning frame. */
-.optimize-suggestion .optimize-suggestion__prompt { margin: 0 6px 0 0; padding: 0; background-color: rgba(0, 0, 0, 0); border-width: 0; }
+.optimize-suggestion .optimize-suggestion__prompt { margin: 0; padding: 0; background-color: rgba(0, 0, 0, 0); border-width: 0; }
+.optimize-suggestion .orb-dependency { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+.optimize-suggestion .orb-dependency__texts { flex-basis: auto; flex-grow: 0; min-width: 0; margin: 0; }
 .optimize-suggestion .orb-dependency__title { font-size: 11px; -unity-font-style: normal; color: #bdbdbd; }
-.mcb-button.optimize-suggestion__button { height: 24px; min-height: 24px; margin: 0; padding: 0 10px; border-radius: 12px; font-size: 11px; flex-shrink: 0; }
+.optimize-suggestion .orb-dependency__install { margin: 0 6px 0 0; }
+.mcb-button.optimize-suggestion__button { height: 24px; min-height: 24px; margin: 0 6px 0 0; padding: 0 10px; border-radius: 12px; font-size: 11px; flex-shrink: 0; }
+.mcb-button.optimize-suggestion__link { flex-shrink: 0; }
 
 /* Thumbnail: summary row, then the shared photoshoot studio when open. */
 .thumbnail-section { margin-top: 18px; }

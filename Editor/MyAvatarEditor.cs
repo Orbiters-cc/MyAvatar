@@ -236,9 +236,11 @@ namespace Orbiters.MyAvatar.Editor
         private string StatusText()
         {
             var files = avatar.textures.GroupBy(TextureMemory.Identity).ToList();
-            int applied = files.Count(g => g.Any(t => t.applied)), pending = files.Count - applied;
+            // Files the user dismissed are left out: they were never meant for this avatar.
+            int applied = files.Count(g => g.Any(t => t.applied)), pending = files.Count(g => !g.Any(t => t.applied) && !g.All(t => t.dismissed));
             if (avatar.canRedo) return "Undone · original materials restored";
-            return pending == 0 ? $"{applied} texture{(applied == 1 ? "" : "s")} applied" : $"{applied} applied · {pending} need{(pending == 1 ? "s" : "")} a slot";
+            if (pending == 0) return applied == 0 ? "No texture applied" : $"{applied} texture{(applied == 1 ? "" : "s")} applied";
+            return $"{applied} applied · {pending} need{(pending == 1 ? "s" : "")} a slot";
         }
 
         private void RefreshResults()
@@ -249,7 +251,7 @@ namespace Orbiters.MyAvatar.Editor
             undo.SetEnabled(avatar.undoMaterials.Count > 0 && !busy); save.SetEnabled(avatar.textures.Count > 0 && !busy);
             if (busy && string.IsNullOrEmpty(note)) return;
             if (avatar.textures.Count == 0) { zone.ShowIdle(string.IsNullOrEmpty(note) ? null : note, noteWarning); return; }
-            bool pending = !avatar.canRedo && avatar.textures.GroupBy(TextureMemory.Identity).Any(g => !g.Any(t => t.applied));
+            bool pending = !avatar.canRedo && avatar.textures.GroupBy(TextureMemory.Identity).Any(g => !g.Any(t => t.applied) && !g.All(t => t.dismissed));
             bool hasNote = !string.IsNullOrEmpty(note);
             zone.ShowDone(hasNote ? note : StatusText(), hasNote ? noteWarning : pending);
             zone.SetBackground(backgroundStatus);
@@ -257,7 +259,7 @@ namespace Orbiters.MyAvatar.Editor
                 note = null;
                 TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);
                 TextureMemory.Record(avatar, avatar.textures); TextureChanges.Dirty(avatar); return Task.CompletedTask;
-            }));
+            }), RefreshResults);
             OptimizationCard.Populate(results, avatar, () => _ = Run(Optimize), () => _ = Run(() => {
                 note = TextureOptimization.Revert(avatar); noteWarning = note != null; return Task.CompletedTask;
             }), RefreshResults);
