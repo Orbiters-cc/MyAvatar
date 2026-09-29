@@ -140,19 +140,26 @@ namespace Orbiters.MyAvatar.Editor
 
         // Alpha is measured on the imported pixels: many opaque textures still carry an unused alpha channel. Any texel below
         // full opacity counts, at full resolution; when mipmap streaming holds only smaller mips, alpha is kept to be safe.
-        private static readonly Dictionary<(int, Hash128), bool> AlphaCache = new Dictionary<(int, Hash128), bool>();
+        // Keyed by the imported contents' hash and kept in Library: measuring reads every texel back from the GPU, too slow
+        // to repeat for each texture after every script reload.
+        private const string AlphaCacheFile = "alpha-cache.json";
+        private static Dictionary<string, bool> alphaCache;
 
         internal static Dictionary<Texture2D, bool> AlphaUsed(IEnumerable<(Texture2D texture, TextureImporter importer)> textures)
         {
             var result = new Dictionary<Texture2D, bool>();
+            alphaCache ??= LibraryStore.Read<Dictionary<string, bool>>(AlphaCacheFile);
+            bool measured = false;
             foreach (var (texture, importer) in textures)
             {
+                string key = texture.imageContentsHash.ToString();
                 if (importer.alphaSource == TextureImporterAlphaSource.None || importer.alphaSource == TextureImporterAlphaSource.FromInput && !importer.DoesSourceTextureHaveAlpha() ||
                     texture.format == TextureFormat.DXT1 || texture.format == TextureFormat.DXT1Crunched || !GraphicsFormatUtility.HasAlphaChannel(texture.graphicsFormat)) result[texture] = false;
-                else if (AlphaCache.TryGetValue((texture.GetInstanceID(), texture.imageContentsHash), out bool used)) result[texture] = used;
+                else if (alphaCache.TryGetValue(key, out bool used)) result[texture] = used;
                 else if (QualitySettings.streamingMipmapsActive && texture.streamingMipmaps && texture.loadedMipmapLevel > 0) result[texture] = true;
-                else result[texture] = AlphaCache[(texture.GetInstanceID(), texture.imageContentsHash)] = TextureAnalysis.UsesAlpha(texture);
+                else { result[texture] = alphaCache[key] = TextureAnalysis.UsesAlpha(texture); measured = true; }
             }
+            if (measured) LibraryStore.Write(AlphaCacheFile, alphaCache.Skip(Math.Max(0, alphaCache.Count - 4096)).ToDictionary(p => p.Key, p => p.Value));
             return result;
         }
 

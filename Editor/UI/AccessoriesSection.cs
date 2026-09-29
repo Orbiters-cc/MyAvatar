@@ -132,7 +132,11 @@ namespace Orbiters.MyAvatar.Editor
                 if (images.Length > 0)
                 {
                     var scope = outcomes.Where(o => o.attachment != null).Select(o => o.attachment.transform).ToArray();
-                    await host.ApplyTextures(images, scope.Length > 0 ? scope : null);
+                    // Materials whose shader is missing have no slots: the accessory itself was still added.
+                    if (scope.Length > 0 && TextureChanges.Scoped(TextureMatching.Slots(avatar), scope.ToList()).Count == 0)
+                        AccessoryService.Status(avatar, ((avatar.accessoryStatus ?? "") + " Its textures were not applied: its materials have no texture slot My Avatar can edit (is their shader installed?).").Trim(),
+                            avatar.accessoryWarning, avatar.accessoryNotes);
+                    else await host.ApplyTextures(images, scope.Length > 0 ? scope : null);
                 }
             }
             finally { foreach (var staging in outcomes.Select(o => o.staging).Distinct()) AccessoryService.Release(avatar, staging); }

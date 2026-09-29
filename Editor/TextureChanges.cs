@@ -36,9 +36,10 @@ namespace Orbiters.MyAvatar.Editor
             scope = scope ?? avatar.batchScope;
             bool extend = avatar.batchFolder == folder && !avatar.canRedo && avatar.undoMaterials.Count > 0;
             var copyToOriginal = extend ? CopyMap(avatar) : new Dictionary<Material, Material>();
-            // A generated material can become shared after the first apply (duplicating a renderer, for example).
+            // A generated material can become shared after the first apply (duplicating a renderer or the whole avatar).
             // Reusing it would modify those excluded objects too, so split it again for the current scope.
             var outside = avatar.GetComponentsInChildren<Renderer>(true).Where(r => !InScope(r, scope))
+                .Concat(SceneRenderers(avatar.gameObject.scene).Where(r => !r.transform.IsChildOf(avatar.transform)))
                 .SelectMany(r => r.sharedMaterials).Where(m => m).ToHashSet();
             var reusable = new HashSet<Material>(copyToOriginal.Keys.Where(m => !outside.Contains(m)));
             var originalToCopy = new Dictionary<Material, Material>();
@@ -134,6 +135,20 @@ namespace Orbiters.MyAvatar.Editor
 
         private static bool Unchanged(List<SlotState> states, TextureSlot slot) =>
             states.Where(s => s.slot == slot).All(s => s.material && TextureOf(s.material, slot.property) == s.texture);
+
+        // Every renderer of the open scenes and of the avatar's own scene (a preview scene is not among the open ones).
+        private static IEnumerable<Renderer> SceneRenderers(UnityEngine.SceneManagement.Scene avatarScene)
+        {
+            var scenes = new List<UnityEngine.SceneManagement.Scene> { avatarScene };
+            for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (scene != avatarScene) scenes.Add(scene);
+            }
+            foreach (var scene in scenes.Where(s => s.IsValid() && s.isLoaded))
+                foreach (var root in scene.GetRootGameObjects())
+                    foreach (var renderer in root.GetComponentsInChildren<Renderer>(true)) yield return renderer;
+        }
 
         private static Texture TextureOf(Material material, string property) => material && material.HasProperty(property) ? material.GetTexture(property) : null;
 

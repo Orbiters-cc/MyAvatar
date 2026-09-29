@@ -62,6 +62,8 @@ namespace Orbiters.MyAvatar.Editor
 
         private static void Add(Drop drop, string path, string projectRoot, string staging, HashSet<string> parents, Budget budget, int depth)
         {
+            // macOS archive metadata: "__MACOSX" folders and "._name" resource forks are not the files they are named after.
+            if (Path.GetFileName(path) == "__MACOSX" || Path.GetFileName(path).StartsWith("._", StringComparison.Ordinal)) return;
             if (Directory.Exists(path))
             {
                 if (depth > 3) return;
