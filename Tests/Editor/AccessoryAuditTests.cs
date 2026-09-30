@@ -152,6 +152,84 @@ namespace Orbiters.MyAvatar.Editor.Tests
             finally { AccessoryImport.DeleteStaging(staging); }
         }
 
+        // A readme is read only as far as it is kept; a text file too large to be a readme is not read at all.
+        [Test] public void ReadmesAreReadOnlyAsFarAsTheyAreKept()
+        {
+            string readme = Path.Combine(temp, "README.txt"), log = Path.Combine(temp, "Log.txt");
+            File.WriteAllText(readme, new string('a', AccessoryImport.MaxDocChars * 3));
+            File.WriteAllText(log, new string('b', (int)AccessoryImport.MaxDocBytes + 1));
+            Assert.That(AccessoryImport.ReadDoc(readme).Length, Is.EqualTo(AccessoryImport.MaxDocChars));
+            Assert.That(AccessoryImport.ReadDoc(log), Is.Null);
+            var drop = AccessoryImport.Expand(new[] { readme, log }, AccessoryImport.ProjectRoot, Path.Combine(temp, "Staging"));
+            Assert.That(drop.docs.Select(d => d.name), Is.EqualTo(new[] { "README.txt" }));
+            Assert.That(drop.docs[0].text.Length, Is.EqualTo(AccessoryImport.MaxDocChars));
+        }
+
+        // An OBJ finds its materials in the libraries it names and their images, relative to it: they are copied with it, in
+        // the same layout. Absolute names, files outside the dropped folder and anything but libraries and images stay out.
+        [Test] public void ObjIsCopiedWithItsMaterialLibraryAndImages()
+        {
+            string dropped = Path.Combine(temp, "Drop"), hat = Path.Combine(dropped, "Hat"), textures = Path.Combine(dropped, "Textures");
+            Directory.CreateDirectory(hat); Directory.CreateDirectory(textures);
+            File.WriteAllText(Path.Combine(hat, "Hat.obj"), "# fixture\nmtllib Hat Materials.mtl\no Hat\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl Felt\nf 1/1 2/2 3/3\n");
+            File.WriteAllText(Path.Combine(hat, "Hat Materials.mtl"),
+                "newmtl Felt\nKd 1 1 1\nmap_Kd -s 1 1 1 ../Textures/Felt Color.png\nbump ..\\Textures\\Felt_Normal.png\nmap_d Setup.cs\nmap_Ks ../../Outside.png\n");
+            var pixels = new Texture2D(2, 2);
+            foreach (var image in new[] { Path.Combine(textures, "Felt Color.png"), Path.Combine(textures, "Felt_Normal.png"), Path.Combine(temp, "Outside.png") })
+                File.WriteAllBytes(image, pixels.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(pixels);
+            File.WriteAllText(Path.Combine(hat, "Setup.cs"), "class Setup {}");
+
+            var drop = AccessoryImport.Expand(new[] { dropped }, AccessoryImport.ProjectRoot, Path.Combine(temp, "Staging"));
+            string root = Path.GetFullPath(dropped).Replace('\\', '/') + "/";
+            Assert.That(drop.models.Single(), Does.EndWith("/Hat/Hat.obj"));
+            Assert.That(drop.companions.Select(c => c.path.Substring(root.Length)),
+                Is.EquivalentTo(new[] { "Hat/Hat Materials.mtl", "Textures/Felt Color.png", "Textures/Felt_Normal.png" }));
+
+            string batch = "audit-" + Guid.NewGuid().ToString("N"), folder = AccessoryImport.Folder + "/" + batch;
+            bool existed = AssetDatabase.IsValidFolder(AccessoryImport.Folder);
+            try
+            {
+                var models = AccessoryImport.CopyModels(drop, batch);
+                Assert.That(models, Is.EqualTo(new[] { folder + "/Hat/Hat.obj" }));
+                foreach (var file in new[] { "Hat/Hat.obj", "Hat/Hat Materials.mtl", "Textures/Felt Color.png", "Textures/Felt_Normal.png" })
+                    Assert.That(File.Exists(folder + "/" + file), Is.True, file);
+                Assert.That(Directory.GetFiles(folder, "*.cs", SearchOption.AllDirectories), Is.Empty);
+                Assert.That(Directory.GetFiles(folder, "Outside.png", SearchOption.AllDirectories), Is.Empty);
+                Assert.That(AssetDatabase.LoadAssetAtPath<Texture2D>(folder + "/Textures/Felt Color.png"), Is.Not.Null);
+            }
+            finally { DeleteCopies(folder, existed); }
+        }
+
+        private static void DeleteCopies(string folder, bool keepParent)
+        {
+            if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
+            if (!keepParent && AssetDatabase.IsValidFolder(AccessoryImport.Folder) && !Directory.EnumerateFileSystemEntries(AccessoryImport.Folder).Any())
+                AssetDatabase.DeleteAsset(AccessoryImport.Folder);
+        }
+
+        // Two dropped models with the same name keep their own files: the second gets a folder of its own.
+        [Test] public void ModelsOfTheSameNameDoNotOverwriteEachOther()
+        {
+            string first = Path.Combine(temp, "First"), second = Path.Combine(temp, "Second");
+            foreach (var (dir, color) in new[] { (first, "Red"), (second, "Blue") })
+            {
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, "Hat.obj"), "mtllib Hat.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+                File.WriteAllText(Path.Combine(dir, "Hat.mtl"), "newmtl " + color + "\n");
+            }
+            var drop = AccessoryImport.Expand(new[] { first, second }, AccessoryImport.ProjectRoot, Path.Combine(temp, "Staging"));
+            string batch = "audit-" + Guid.NewGuid().ToString("N"), folder = AccessoryImport.Folder + "/" + batch;
+            bool existed = AssetDatabase.IsValidFolder(AccessoryImport.Folder);
+            try
+            {
+                var models = AccessoryImport.CopyModels(drop, batch);
+                Assert.That(models.Count, Is.EqualTo(2));
+                Assert.That(models.Select(m => File.ReadAllText(Path.Combine(Path.GetDirectoryName(m), "Hat.mtl"))), Is.EquivalentTo(new[] { "newmtl Red\n", "newmtl Blue\n" }));
+            }
+            finally { DeleteCopies(folder, existed); }
+        }
+
         [Test] public void StagingCleanupNeverDeletesOutsideTheStagingFolder()
         {
             // A drop's staging path comes from data saved in the scene: anything outside the staging folder is left alone.

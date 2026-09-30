@@ -155,10 +155,19 @@ namespace Orbiters.MyAvatar.Editor
             var slider = new Slider(0f, PhysBoneParts.MaxStretchLimit); row.Add(slider);
             var value = new Label(); value.AddToClassList("physics-stretch__value"); row.Add(value);
             IVisualElementScheduledItem apply = null;
+            Action write = null;
+            // Writes the value waiting for the handle to rest, at once: also when the handle is let go, and when the card goes
+            // away first (the Inspector closed, the cards rebuilt), so no edit is lost.
+            void Flush()
+            {
+                apply?.Pause();
+                var pending = write; write = null;
+                pending?.Invoke();
+            }
             show = current =>
             {
                 // Leave the handle alone while it is being dragged or its value is about to be written.
-                if (apply != null && apply.isActive) return;
+                if (write != null) return;
                 float stretch = current.MaxStretch ?? current.PhysBones.Average(p => p.maxStretch);
                 slider.SetValueWithoutNotify(Mathf.Min(stretch, PhysBoneParts.MaxStretchLimit));
                 value.text = StretchText(current.MaxStretch.HasValue ? stretch : (float?)null);
@@ -168,9 +177,12 @@ namespace Orbiters.MyAvatar.Editor
                 // The number follows the handle at once; the PhysBones are written once the handle rests.
                 float stretch = Mathf.Round(evt.newValue * 20f) / 20f;
                 value.text = StretchText(stretch);
+                write = () => PhysBoneParts.SetMaxStretch(physBones, stretch);
                 apply?.Pause();
-                apply = slider.schedule.Execute(() => PhysBoneParts.SetMaxStretch(physBones, stretch)).StartingIn(150);
+                apply = slider.schedule.Execute(Flush).StartingIn(150);
             });
+            slider.RegisterCallback<PointerUpEvent>(_ => Flush(), TrickleDown.TrickleDown);
+            slider.RegisterCallback<DetachFromPanelEvent>(_ => Flush());
             card.Add(row);
             return slider;
         }

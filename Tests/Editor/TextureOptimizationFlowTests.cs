@@ -14,8 +14,9 @@ using UnityEngine.TestTools;
 
 namespace Orbiters.MyAvatar.Editor.Tests
 {
-    // Optimizes a throwaway avatar in an additive scene: an unshared texture changes in place, a texture another avatar uses
-    // is copied for this avatar only, and both Undo optimization and Unity's Undo restore everything.
+    // Optimizes a throwaway avatar in an additive scene: an unshared texture changes in place, a texture another avatar, object
+    // or prefab uses is copied for this avatar only, a failure half-way leaves nothing applied, and both Undo optimization and
+    // Unity's Undo restore everything.
     public sealed class TextureOptimizationFlowTests
     {
         private Scene scene;
@@ -23,6 +24,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
         private GameObject mine, theirs;
         private string folder, generated;
         private readonly List<string> extraGenerated = new List<string>();
+        private readonly List<UnityEngine.Object> extraObjects = new List<UnityEngine.Object>();
         private MyAvatar avatar;
         private Material own, other;
         private Texture2D opaque, cutout;
@@ -64,6 +66,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             if (renderer) Undo.ClearUndo(renderer);
             if (mine) UnityEngine.Object.DestroyImmediate(mine);
             if (theirs) UnityEngine.Object.DestroyImmediate(theirs);
+            foreach (var value in extraObjects) if (value) UnityEngine.Object.DestroyImmediate(value);
+            extraObjects.Clear();
             if (ownScene) EditorSceneManager.CloseScene(scene, true);
             if (own) UnityEngine.Object.DestroyImmediate(own);
             if (other) UnityEngine.Object.DestroyImmediate(other);
@@ -142,6 +146,66 @@ namespace Orbiters.MyAvatar.Editor.Tests
             for (int i = 0; i < 5; i++) yield return null;
             Assert.AreEqual(own, renderer.sharedMaterial);
             Assert.IsFalse(Standalone(opaque).overridden);
+        }
+
+        // A texture an unopened prefab or a plain object of the open scene also shows is copied for this avatar, never
+        // changed in place.
+        [UnityTest] public IEnumerator TextureAPrefabUsesIsCopied() { yield return UsedElsewhereIsCopied(prefab: true); }
+        [UnityTest] public IEnumerator TextureAnotherObjectShowsIsCopied() { yield return UsedElsewhereIsCopied(prefab: false); }
+
+        private IEnumerator UsedElsewhereIsCopied(bool prefab)
+        {
+            var elsewhere = new Material(Shader.Find("Standard")) { name = "Elsewhere" };
+            elsewhere.SetTexture("_EmissionMap", opaque);
+            var holder = new GameObject("Elsewhere"); SceneManager.MoveGameObjectToScene(holder, scene);
+            holder.AddComponent<MeshRenderer>().sharedMaterial = elsewhere;
+            if (prefab)
+            {
+                AssetDatabase.CreateAsset(elsewhere, folder + "/Elsewhere.mat");
+                PrefabUtility.SaveAsPrefabAsset(holder, folder + "/Elsewhere.prefab");
+                UnityEngine.Object.DestroyImmediate(holder);
+            }
+            else { extraObjects.Add(holder); extraObjects.Add(elsewhere); }
+
+            yield return Wait(TextureOptimization.OptimizeAsync(avatar, (_, __) => { }, CancellationToken.None));
+            generated = avatar.optimization.folder;
+            Assert.That(Standalone(opaque).overridden, Is.False);
+            Assert.That(elsewhere.GetTexture("_EmissionMap"), Is.SameAs(opaque));
+            var copy = renderer.sharedMaterial.GetTexture("_EmissionMap");
+            Assert.That(copy, Is.Not.SameAs(opaque));
+            Assert.That(Standalone(copy).overridden, Is.True);
+            Assert.That(Standalone(copy).format, Is.EqualTo(TextureImporterFormat.DXT1));
+            Assert.That(avatar.optimization.textures.Any(t => t.guid == AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(opaque))), Is.False);
+        }
+
+        // A write that fails part-way puts back the settings already written, removes the copies and records nothing.
+        [UnityTest] public IEnumerator FailedOptimizationLeavesNothingHalfApplied()
+        {
+            var write = TextureOptimization.WriteSettings;
+            int calls = 0; string failed = null;
+            TextureOptimization.WriteSettings = (importer, state) =>
+            {
+                // The in-place texture is written first, then the copy of the shared one fails.
+                if (++calls == 2) { failed = importer.assetPath; throw new IOException("Fixture failure"); }
+                write(importer, state);
+            };
+            var task = TextureOptimization.OptimizeAsync(avatar, (_, __) => { }, CancellationToken.None);
+            try
+            {
+                double deadline = EditorApplication.timeSinceStartup + 60;
+                while (!task.IsCompleted && EditorApplication.timeSinceStartup < deadline) yield return null;
+            }
+            finally { TextureOptimization.WriteSettings = write; }
+            Assert.That(task.IsFaulted, Is.True);
+            Assert.That(task.Exception.GetBaseException(), Is.TypeOf<IOException>());
+            Assert.That(calls, Is.EqualTo(2));
+            Assert.That(Standalone(opaque).overridden, Is.False);
+            Assert.That(renderer.sharedMaterial, Is.SameAs(own));
+            Assert.That(TextureOptimization.Applied(avatar.optimization), Is.False);
+            Assert.That(avatar.optimization.textures, Is.Empty);
+            Assert.That(avatar.optimization.duplicates, Is.Empty);
+            Assert.That(AssetDatabase.LoadAssetAtPath<Texture2D>(failed), Is.Null);
+            Assert.That(AssetDatabase.IsValidFolder(Path.GetDirectoryName(Path.GetDirectoryName(failed)).Replace('\\', '/')), Is.False);
         }
 
         [Test] public void EditedImportSettingsAreKept()

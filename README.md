@@ -33,7 +33,7 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing,
 
 Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. The **Drop anything** field then also
 takes what clothing and accessory creators deliver: a `.unitypackage`, a `.zip` (also
-one holding a package, like `…_UnzipMe.zip`), a prefab or an FBX, with their textures
+one holding a package, like `…_UnzipMe.zip`), a prefab, an FBX or an OBJ (copied with the `.mtl` libraries and images it names), with their textures
 and `.txt` readmes, or their folder; a drop holding none of those is a texture set. My Avatar imports what is not in the project yet,
 picks what to put on, places it under the avatar root and attaches it. It never changes
 the avatar or moves bones into its armature: what attaches is applied to the build copy.
@@ -128,9 +128,12 @@ lookup tables, gradients, SDF maps, very thin strips, HDR images, render texture
 textures that are not plain imported images are left alone. Mobile settings come later.
 
 Import settings change in place, all in one import pass. A texture also used by
-another avatar in the open scenes, or inside a package, is copied under
-`Assets/Orbiters/MyAvatar/<batch-id>/` instead, and this avatar gets copies of the
-materials that show it, assigned only to renderers under this component. The row then
+something else (another object or avatar in the open scenes, or a prefab or scene in
+`Assets` that depends on it, other than this avatar's own prefab and model), or inside
+a package, is copied under `Assets/Orbiters/MyAvatar/<batch-id>/` instead, and this
+avatar gets copies of the materials that show it, assigned only to renderers under this
+component. It applies entirely or not at all: if a step fails, the import settings
+already written are put back and the copies removed. The row then
 shows the estimated texture memory (VRAM, as VRChat ranks it, not download size) and
 how many textures changed; **Optimize** comes back after a new texture drop or an Undo.
 The estimate reads the PC import settings, so it is right even when the editor keeps

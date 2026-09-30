@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.SceneManagement;
@@ -14,8 +15,9 @@ using Object = UnityEngine.Object;
 namespace Orbiters.MyAvatar.Editor
 {
     // Quick optimization: caps every texture the avatar's materials show at 512 px and picks the PC (Standalone) format
-    // with the best quality per byte of texture memory. Import settings change in place, unless the texture is also used by
-    // another avatar in the open scenes or lives in a package: then this avatar gets its own copy, through material copies.
+    // with the best quality per byte of texture memory. Import settings change in place, unless something besides this
+    // avatar also uses the texture (another object in the open scenes, a prefab or scene in Assets) or it lives in a
+    // package: then this avatar gets its own copy, through material copies.
     [InitializeOnLoad]
     internal static class TextureOptimization
     {
@@ -233,24 +235,45 @@ namespace Orbiters.MyAvatar.Editor
             return Bytes(texture);
         }
 
-        // Textures that other avatars' materials in the open scenes use; a descriptor around or inside this avatar is this avatar.
-        private static HashSet<Texture> OtherAvatarTextures(MyAvatar avatar)
+        // Which of the textures something besides this avatar shows: another object's renderers in the open scenes (other
+        // avatars included), or a prefab or scene in Assets depending on them through its materials, nested prefabs or
+        // animations. The open scenes count as they are now, not as saved; this avatar's own prefab and model assets, and
+        // those it nests, do not count. A descriptor around or inside this avatar is this avatar.
+        private static HashSet<Texture> UsedElsewhere(MyAvatar avatar, HashSet<Texture> textures)
         {
             var result = new HashSet<Texture>();
+            if (textures.Count == 0) return result;
+            var root = AvatarRoot(avatar).transform;
+            var own = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < SceneManager.sceneCount; i++)
             {
                 var scene = SceneManager.GetSceneAt(i);
                 if (!scene.isLoaded) continue;
-                foreach (var root in scene.GetRootGameObjects())
-                    foreach (var descriptor in root.GetComponentsInChildren<VRC.SDKBase.VRC_AvatarDescriptor>(true))
+                own.Add(scene.path);
+                foreach (var sceneRoot in scene.GetRootGameObjects())
+                    foreach (var renderer in sceneRoot.GetComponentsInChildren<Renderer>(true))
                     {
-                        if (avatar.transform.IsChildOf(descriptor.transform) || descriptor.transform.IsChildOf(avatar.transform)) continue;
-                        foreach (var renderer in descriptor.GetComponentsInChildren<Renderer>(true))
-                            foreach (var material in renderer.sharedMaterials.Where(m => m))
-                                foreach (int id in material.GetTexturePropertyNameIDs())
-                                { var texture = material.GetTexture(id); if (texture) result.Add(texture); }
+                        // Editor-only objects (previews, photo shoots) are not part of the scene.
+                        if (renderer.transform.IsChildOf(root) || ((renderer.hideFlags | renderer.gameObject.hideFlags) & HideFlags.DontSave) != 0) continue;
+                        foreach (var material in renderer.sharedMaterials.Where(m => m))
+                            foreach (int id in material.GetTexturePropertyNameIDs())
+                            { var texture = material.GetTexture(id); if (texture && textures.Contains(texture)) result.Add(texture); }
                     }
             }
+            foreach (var transform in root.GetComponentsInChildren<Transform>(true))
+                for (Object source = transform.gameObject; (source = PrefabUtility.GetCorrespondingObjectFromSource(source)) != null;)
+                    own.Add(AssetDatabase.GetAssetPath(source));
+            var stage = PrefabStageUtility.GetPrefabStage(root.gameObject);
+            if (stage != null) own.Add(stage.assetPath);
+            var remaining = textures.Where(t => !result.Contains(t)).GroupBy(AssetDatabase.GetAssetPath).ToDictionary(g => g.Key, g => g.First());
+            if (remaining.Count == 0) return result;
+            // One dependency walk over every other prefab and scene: each asset they reach is visited once.
+            var elsewhere = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" }).Concat(AssetDatabase.FindAssets("t:SceneAsset", new[] { "Assets" }))
+                .Select(AssetDatabase.GUIDToAssetPath).Where(p => (p.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)) && !own.Contains(p))
+                .Distinct().ToArray();
+            if (elsewhere.Length == 0) return result;
+            foreach (var path in AssetDatabase.GetDependencies(elsewhere, true))
+                if (remaining.TryGetValue(path, out var texture)) result.Add(texture);
             return result;
         }
 
@@ -265,8 +288,12 @@ namespace Orbiters.MyAvatar.Editor
             token.ThrowIfCancellationRequested();
             var plan = Build(avatar);
             if (plan.changes.Count == 0) throw new InvalidOperationException("The avatar's textures are already optimized.");
-            var others = OtherAvatarTextures(avatar);
-            foreach (var change in plan.changes) change.duplicate = change.path.StartsWith("Packages/", StringComparison.Ordinal) || others.Contains(change.texture);
+            progress(.16f, "Checking what else uses these textures…");
+            await Task.Yield();
+            token.ThrowIfCancellationRequested();
+            foreach (var change in plan.changes) change.duplicate = change.path.StartsWith("Packages/", StringComparison.Ordinal);
+            var elsewhere = UsedElsewhere(avatar, new HashSet<Texture>(plan.changes.Where(c => !c.duplicate).Select(c => (Texture)c.texture)));
+            foreach (var change in plan.changes) change.duplicate |= elsewhere.Contains(change.texture);
             int copies = plan.changes.Count(c => c.duplicate);
             if (copies > 0)
             {
@@ -281,25 +308,59 @@ namespace Orbiters.MyAvatar.Editor
             progress(1f, "Done");
         }
 
+        /// <summary>Writes one texture's new import settings; replaced in tests to fail part-way.</summary>
+        internal static Action<TextureImporter, ImporterState> WriteSettings = (importer, state) => { Write(importer, state); importer.SaveAndReimport(); };
+
+        // Every change or none: the copies, material copies and import settings are made first, and a failure on the way puts
+        // back the settings already written and removes this run's folder. Only then are the materials swapped and the
+        // record written, so it lists exactly what applied.
         private static void Apply(MyAvatar avatar, Plan plan)
         {
             var record = avatar.optimization;
             bool merge = Applied(record);
             string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
-            var duplicates = Duplicate(plan.changes.Where(c => c.duplicate).ToList(), folder);
-            var replacements = CopyMaterials(avatar, duplicates, folder);
-            var inPlace = plan.changes.Where(c => !c.duplicate).Select(c => (change: c, importer: (TextureImporter)AssetImporter.GetAtPath(c.path))).ToList();
+            var inPlace = plan.changes.Where(c => !c.duplicate).Select(c => (change: c, importer: AssetImporter.GetAtPath(c.path) as TextureImporter)).ToList();
+            if (inPlace.Any(p => p.importer == null)) throw new InvalidOperationException("A texture was moved or changed while it was measured. Optimize again.");
+            var written = new List<(TexturePlan change, TextureImporter importer, ImporterState before)>();
+            Dictionary<Texture, Texture2D> duplicates;
+            Dictionary<Material, Material> replacements;
+            try
+            {
+                duplicates = Duplicate(plan.changes.Where(c => c.duplicate).ToList(), folder);
+                replacements = CopyMaterials(avatar, duplicates, folder);
+                // One import pass for every changed texture, copies included.
+                AssetDatabase.StartAssetEditing();
+                try
+                {
+                    foreach (var (change, importer) in inPlace)
+                    {
+                        // Listed before writing: a write that fails half-way is put back too.
+                        written.Add((change, importer, Read(importer)));
+                        WriteSettings(importer, Target(change.format, change.maxSize));
+                    }
+                    foreach (var change in plan.changes.Where(c => c.duplicate))
+                        WriteSettings((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(duplicates[change.texture])), Target(change.format, change.maxSize));
+                }
+                finally { AssetDatabase.StopAssetEditing(); }
+            }
+            catch
+            {
+                Restore(written.Select(w => (w.importer, w.before)).ToList());
+                if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
+                throw;
+            }
 
             // Recorded before the Undo snapshot, as not applied: undoing then knows both states and restores the original.
             record.textures.RemoveAll(t => !t.applied);
-            var entries = new List<(OptimizedTexture entry, TexturePlan change, TextureImporter importer)>();
-            foreach (var (change, importer) in inPlace)
+            var entries = new List<OptimizedTexture>();
+            foreach (var (change, importer, before) in written)
             {
                 string guid = AssetDatabase.AssetPathToGUID(change.path);
                 var entry = record.textures.FirstOrDefault(t => t.guid == guid);
-                if (entry == null) record.textures.Add(entry = new OptimizedTexture { guid = guid, before = Read(importer) });
-                entry.after = Target(change.format, change.maxSize);
-                entries.Add((entry, change, importer));
+                if (entry == null) record.textures.Add(entry = new OptimizedTexture { guid = guid, before = before });
+                // Unity normalises some fields on save; compare later against what it actually stored.
+                entry.after = Read(importer);
+                entries.Add(entry);
             }
             EditorUtility.SetDirty(avatar);
 
@@ -315,30 +376,28 @@ namespace Orbiters.MyAvatar.Editor
                     { record.swaps.Add(new MaterialSwap { renderer = renderer, index = i, before = materials[i], after = copy }); materials[i] = copy; }
                 renderer.sharedMaterials = materials; PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             }
-            foreach (var (entry, _, _) in entries) entry.applied = true;
+            foreach (var entry in entries) entry.applied = true;
             record.duplicates.AddRange(duplicates.Values);
             if (duplicates.Count > 0) record.folder = folder;
             record.batch = avatar.batchFolder;
             record.bytesBefore = merge ? record.bytesBefore + plan.before - record.bytesAfter : plan.before;
             record.bytesAfter = plan.after;
             TextureChanges.Dirty(avatar);
+            Undo.CollapseUndoOperations(group);
+        }
 
-            // One import pass for every changed texture, copies included.
+        // Puts import settings back after a failed optimization; one that cannot be restored is reported and the rest go on.
+        private static void Restore(List<(TextureImporter importer, ImporterState state)> written)
+        {
+            if (written.Count == 0) return;
             AssetDatabase.StartAssetEditing();
             try
             {
-                foreach (var (entry, _, importer) in entries) { Write(importer, entry.after); importer.SaveAndReimport(); }
-                foreach (var change in plan.changes.Where(c => c.duplicate))
-                {
-                    var importer = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(duplicates[change.texture]));
-                    Write(importer, Target(change.format, change.maxSize)); importer.SaveAndReimport();
-                }
+                foreach (var (importer, state) in written)
+                    try { Write(importer, state); importer.SaveAndReimport(); }
+                    catch (Exception ex) { Debug.LogException(ex); }
             }
             finally { AssetDatabase.StopAssetEditing(); }
-            // Unity normalises some fields on save; compare later against what it actually stored.
-            foreach (var (entry, _, importer) in entries) entry.after = Read(importer);
-            TextureChanges.Dirty(avatar);
-            Undo.CollapseUndoOperations(group);
         }
 
         // Copies the files with their import settings under a new GUID, imported together; the originals stay untouched.
