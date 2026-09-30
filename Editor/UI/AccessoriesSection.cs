@@ -23,6 +23,7 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed partial class AccessoriesSection : AvatarSection
     {
         internal const string Feature = "myavatar.accessories";
+        internal static bool Enabled => OrbitersFeatures.IsEnabled(Feature);
 
         // What the section needs from the Inspector: its busy lock, the AI switch state and the texture pipeline.
         internal sealed class Host
@@ -32,6 +33,10 @@ namespace Orbiters.MyAvatar.Editor
             public Action<bool> SetAi;
             public Func<string[], Transform[], Task> ApplyTextures;
             public Action<string> Background;
+            /// <summary>The Inspector's shared drop field.</summary>
+            public DropZone Zone;
+            /// <summary>True while the drop field shows the accessories' progress and status (the last drop was one).</summary>
+            public Func<bool> OwnsZone = () => true;
         }
 
         private readonly MyAvatar avatar;
@@ -51,22 +56,8 @@ namespace Orbiters.MyAvatar.Editor
             this.avatar = avatar;
             this.host = host;
             Actions.Add(new StageBadge(FeatureStage.Alpha));
-            zone = new DropZone(new DropZone.Texts
-            {
-                Title = "Drop clothes and accessories here !",
-                Hint = "Unity package, ZIP, prefab or FBX · with its textures and readme",
-                Browse = "Choose file…", Again = "Drop another one, or", AgainLink = "choose a file",
-                AiOn = "AI help is on.\nWhen My Avatar can’t tell which bone an accessory goes on or how its bones fit, the accessory’s object and bone names, " +
-                       "its component types, your avatar’s bone names and up to 12,000 characters of its text readmes are sent to Orbiters’ AI. Never images or computer paths.\nClick to turn it off.",
-                AiOff = "AI help is off.\nAccessories My Avatar can’t fully place are left for you to adjust.\nClick to let AI help.",
-                AiDisconnected = "AI help is off.\nWhen My Avatar can’t tell where an accessory goes, AI can help. Log in at the top of this panel to use it.",
-                Pick = () =>
-                {
-                    string path = EditorUtility.OpenFilePanelWithFilters("Choose a clothing or accessory file", "", new[] { "Clothes and accessories", "unitypackage,zip,prefab,fbx", "All files", "*" });
-                    return string.IsNullOrEmpty(path) ? null : new[] { path };
-                },
-            }, paths => _ = host.Run(() => Drop(paths)), Array.Empty<VisualElement>(), host.SetAi);
-            Body.Add(zone);
+            // The Inspector's one drop field ("Drop anything"): it sends accessory drops here.
+            zone = host.Zone ?? new DropZone(DropZone.Anything, _ => { }, Array.Empty<VisualElement>(), host.SetAi);
             choice = new VisualElement(); choice.AddToClassList("accessory-choice"); Body.Add(choice);
             notes = new VisualElement(); notes.AddToClassList("accessory-notes"); Body.Add(notes);
             list = new VisualElement(); list.AddToClassList("accessory-list"); Body.Add(list);
@@ -107,7 +98,7 @@ namespace Orbiters.MyAvatar.Editor
         // A new drop, the AI switch turned off or another account: answers still on their way are dropped.
         internal void CancelAi() { revision++; ai?.Cancel(); ai = null; host.Background(null); }
 
-        private async Task Drop(string[] paths)
+        internal async Task Drop(string[] paths)
         {
             if (AccessoryService.Busy(avatar)) return;
             CancelAi();
@@ -152,6 +143,7 @@ namespace Orbiters.MyAvatar.Editor
             if (host.AiOn()) _ = AskAiAsync(outcomes.Where(o => o.attachment != null && o.plan != null).ToList(), revision);
             // Every drop asks again: on a custom base, does it fit?
             _ = CheckFitsAsync(outcomes.Where(o => o.attachment).Select(o => o.attachment).ToList(), dropped: true);
+            _ = NameAsync(outcomes.Where(o => o.attachment).Select(o => o.attachment).ToList());
         }
 
         // A drop Unity finished after reloading its scripts: its images and AI help, as after any drop.
@@ -246,12 +238,16 @@ namespace Orbiters.MyAvatar.Editor
             if (!avatar || style.display == DisplayStyle.None) return;
             if (AccessoryService.Busy(avatar)) return;
             if (AccessoryService.HasFollowUp(avatar)) schedule.Execute(ResumeFollowUp);
-            if (string.IsNullOrEmpty(avatar.accessoryStatus)) zone.ShowIdle();
-            else zone.ShowDone(avatar.accessoryStatus, avatar.accessoryWarning);
+            if (host.OwnsZone())
+            {
+                if (string.IsNullOrEmpty(avatar.accessoryStatus)) zone.ShowIdle();
+                else zone.ShowDone(avatar.accessoryStatus, avatar.accessoryWarning);
+            }
             RefreshChoice();
             RefreshNotes();
             RefreshList();
             RefreshFit();
+            RefreshNames();
         }
 
         private void RefreshChoice()
@@ -313,14 +309,26 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var entry = new VisualElement(); entry.AddToClassList("accessory-entry"); list.Add(entry);
                 var row = new VisualElement(); row.AddToClassList("accessory-item"); entry.Add(row);
-                var name = new Label(attachment.name); name.AddToClassList("accessory-item__name"); row.Add(name);
-                var status = FitStatus(attachment); if (status != null) row.Add(status);
-                var how = new Label(AccessoryService.Describe(attachment)); how.AddToClassList("accessory-item__how"); row.Add(how);
+                // What it looks like as worn (its refit included), rendered in the background and kept.
+                var worn = attachment.gameObject;
+                string look = ModelThumbnails.KeyFor(attachment.variant) + "|" + attachment.name + "|" + string.Join(",",
+                    attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh ? r.sharedMesh.GetInstanceID() : 0));
+                var picture = new AssetThumbnail(() => ModelThumbnails.Get(worn, look));
+                picture.AddToClassList("accessory-item__picture"); row.Add(picture);
+                // Beside the picture: its name, fit and buttons, then how it is attached on a second line.
+                var body = new VisualElement(); body.AddToClassList("accessory-item__body"); row.Add(body);
+                var top = new VisualElement(); top.AddToClassList("accessory-item__top"); body.Add(top);
+                var name = new Label(attachment.DisplayName) { tooltip = attachment.DisplayName != attachment.name ? attachment.name : null };
+                name.AddToClassList("accessory-item__name"); top.Add(name);
+                var status = FitStatus(attachment); if (status != null) top.Add(status);
+                var spacer = new VisualElement(); spacer.AddToClassList("accessory-item__spacer"); top.Add(spacer);
+                string description = AccessoryService.Describe(attachment);
+                var how = new Label(description) { tooltip = description }; how.AddToClassList("accessory-item__how"); body.Add(how);
                 var item = attachment;
                 if (attachment.mode == OrbitersAttachment.AttachMode.Parent)
-                    row.Add(Small("Bone ▾", () => BoneMenu(item)));
-                row.Add(Small("Select", () => Select(item.gameObject)));
-                row.Add(Small("Remove", () =>
+                    top.Add(Small("Bone ▾", () => BoneMenu(item)));
+                top.Add(Small("Select", () => Select(item.gameObject)));
+                top.Add(Small("Remove", () =>
                 {
                     entry.style.display = DisplayStyle.None;
                     AttachmentInstaller.Remove(item);

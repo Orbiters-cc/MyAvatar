@@ -42,6 +42,23 @@ namespace Orbiters.MyAvatar.Editor
 
         private sealed class Budget { public int entries, archives; public long bytes; }
 
+        /// <summary>
+        /// Whether a drop holds clothes or accessories (packages, archives, prefabs, models), not only textures. Background thread:
+        /// folders are looked into three levels deep, at most a few thousand entries.
+        /// </summary>
+        internal static bool HoldsAccessory(IEnumerable<string> paths, string projectRoot)
+        {
+            int seen = 0;
+            bool Holds(string path, int depth)
+            {
+                if (++seen > 4000) return false;
+                if (Directory.Exists(path)) return depth < 3 && SafeEntries(path).Any(entry => Holds(entry, depth + 1));
+                string ext = Ext(path);
+                return ext == ".unitypackage" || ext == ".zip" || ext == ".prefab" || Models.Contains(ext);
+            }
+            return paths.Any(p => Holds(Absolute(p, projectRoot), 0));
+        }
+
         // Background thread: no Unity API. Archives open into the drop's own staging folder.
         internal static Drop Expand(string[] paths, string projectRoot, string staging)
         {

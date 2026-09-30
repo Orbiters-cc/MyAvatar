@@ -29,6 +29,8 @@ namespace Orbiters.MyAvatar.Editor
         [NonSerialized] private bool busy, aiConnected, aiEnabled, active, localAiChoice;
         // True from a successful Save until the next change: Undo and Save have nothing left to do.
         [NonSerialized] private bool saved;
+        // The drop field shows what the last drop was: textures (their status, Undo and Save) or an accessory.
+        [NonSerialized] private bool accessoryDrop;
         internal Func<string, object, List<TextureEntry>, List<TextureSlot>, CancellationToken, Task<TextureAi.Result>> RequestAi = TextureAi.RequestAsync;
         private void OnEnable()
         {
@@ -55,7 +57,6 @@ namespace Orbiters.MyAvatar.Editor
             if (!enabled) accessories?.CancelAi();
             aiEnabled = enabled;
             zone?.SetAi(aiConnected, aiEnabled);
-            accessories?.Zone.SetAi(aiConnected, aiEnabled);
         }
         private void AccountChanged() { localAiChoice = false; ApplyAiEnabled(false); }
         private void PreferenceChanged(string token, bool enabled)
@@ -85,7 +86,7 @@ namespace Orbiters.MyAvatar.Editor
                 },
                 "Allow My Avatar to use AI when it can’t find where to put a texture (you can turn it off easily here)."));
             content = new VisualElement(); content.AddToClassList("content"); root.Add(content);
-            var section = new Label("Textures"); section.AddToClassList("section-title"); content.Add(section);
+            var section = new Label("Drop anything"); section.AddToClassList("section-title"); content.Add(section);
             undo = Button("Undo", () => _ = Run(() => { note = null; TextureChanges.UndoLast(avatar); RefreshResults(); return Task.CompletedTask; }));
             undo.tooltip = "Restore the materials from before this texture set. Click again to redo.";
             save = Button("Save", () => _ = Run(async () => {
@@ -97,7 +98,8 @@ namespace Orbiters.MyAvatar.Editor
                 : "Save the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint.";
             save.AddToClassList("mcb-button--primary");
             undo.AddToClassList("drop-zone__undo"); save.AddToClassList("drop-zone__save");
-            zone = new DropZone(DropZone.Textures, paths => _ = Run(() => Import(paths)), new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
+            zone = new DropZone(AccessoriesSection.Enabled ? DropZone.Anything : DropZone.Textures, paths => _ = Run(() => DropAnything(paths)),
+                new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
             zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
             accessories = new AccessoriesSection(avatar, new AccessoriesSection.Host
@@ -106,9 +108,11 @@ namespace Orbiters.MyAvatar.Editor
                 AiOn = () => aiConnected && aiEnabled,
                 SetAi = enabled => _ = SetAiAsync(enabled),
                 ApplyTextures = (images, scope) => Import(images, scope),
-                Background = status => accessories.Zone.SetBackground(status),
+                Background = status => zone.SetBackground(status),
+                Zone = zone,
+                OwnsZone = () => accessoryDrop,
             });
-            accessories.Zone.SetAi(aiConnected, aiEnabled); content.Add(accessories);
+            content.Add(accessories);
             content.Add(new ThumbnailSection(avatar, photoshoot));
             content.Add(new PosingSection(avatar));
             content.Add(new PhysicsSection(avatar));
@@ -116,12 +120,29 @@ namespace Orbiters.MyAvatar.Editor
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
+            content.Add(new ToolsSection());
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
             var credit = new Orbiters.Toolkit.Editor.SupportCredit(); credit.AddToClassList("myavatar-credit"); root.Add(credit);
             var toolbar = new IMGUIContainer(DrawToolbar); toolbar.AddToClassList("myavatar-toolbar"); root.Add(toolbar);
             return root;
+        }
+
+        // One field for everything: a drop holding a package, archive, prefab or model is an accessory (its images go to it);
+        // anything else is a texture set.
+        private async Task DropAnything(string[] paths)
+        {
+            string root = AccessoryImport.ProjectRoot;
+            if (AccessoriesSection.Enabled && await Task.Run(() => AccessoryImport.HoldsAccessory(paths, root)))
+            {
+                accessoryDrop = true;
+                zone.SetActionsShown(false);
+                await accessories.Drop(paths);
+                return;
+            }
+            accessoryDrop = false;
+            await Import(paths);
         }
 
         // Scope: only the materials of these objects (the accessories an accessory drop just added).
@@ -255,12 +276,18 @@ namespace Orbiters.MyAvatar.Editor
             undo.text = avatar.canRedo ? "Redo" : "Undo";
             undo.SetEnabled(avatar.undoMaterials.Count > 0 && !busy); save.SetEnabled(avatar.textures.Count > 0 && !busy);
             if (busy && string.IsNullOrEmpty(note)) return;
-            if (avatar.textures.Count == 0) { zone.ShowIdle(string.IsNullOrEmpty(note) ? null : note, noteWarning); return; }
+            // The field shows the accessory drop; the texture set's results stay listed below it.
+            bool showZone = !accessoryDrop;
+            if (!showZone) zone.SetActionsShown(false);
+            if (avatar.textures.Count == 0) { if (showZone) zone.ShowIdle(string.IsNullOrEmpty(note) ? null : note, noteWarning); return; }
             bool pending = !avatar.canRedo && avatar.textures.GroupBy(TextureMemory.Identity).Any(g => !g.Any(t => t.applied) && !g.All(t => t.dismissed));
             bool hasNote = !string.IsNullOrEmpty(note);
-            zone.ShowDone(hasNote ? note : StatusText(), hasNote ? noteWarning : pending);
-            zone.SetActionsShown(!saved);
-            zone.SetBackground(backgroundStatus);
+            if (showZone)
+            {
+                zone.ShowDone(hasNote ? note : StatusText(), hasNote ? noteWarning : pending);
+                zone.SetActionsShown(!saved);
+                zone.SetBackground(backgroundStatus);
+            }
             if (!avatar.canRedo) MyAvatarResults.Populate(results, avatar, Edited, () => _ = Run(() => {
                 note = null;
                 TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);

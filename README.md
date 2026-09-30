@@ -1,6 +1,6 @@
 # My Avatar
 
-Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing and physics, with an optional Orbiters account.
+Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing, physics and tools, with an optional Orbiters account.
 
 ## Get started
 
@@ -9,7 +9,7 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing 
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
-3. Drop PNG, JPG or TGA files (or their containing folder) into the drop field.
+3. Drop PNG, JPG or TGA files (or their containing folder) into the **Drop anything** field.
    Folder import includes immediate files, not nested folders. Up to 48 files,
    256 MB per file and 1 GB per batch are supported. The field turns into a
    progress bar, then shows the result with **Undo** and **Save**; drop another
@@ -31,10 +31,10 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing 
 
 ## Clothes and accessories (alpha)
 
-Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. A second drop field, styled like the texture one,
+Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. The **Drop anything** field then also
 takes what clothing and accessory creators deliver: a `.unitypackage`, a `.zip` (also
 one holding a package, like `…_UnzipMe.zip`), a prefab or an FBX, with their textures
-and `.txt` readmes, or their folder. My Avatar imports what is not in the project yet,
+and `.txt` readmes, or their folder; a drop holding none of those is a texture set. My Avatar imports what is not in the project yet,
 picks what to put on, places it under the avatar root and attaches it. It never changes
 the avatar or moves bones into its armature: what attaches is applied to the build copy.
 
@@ -70,6 +70,11 @@ for Modular Avatar, and VRCFury itself, can be installed from there. `.blend`, `
 Each accessory is one Undo step; **Remove** in the list deletes it. Packages with scripts
 make Unity recompile: the drop continues after it, even without the Inspector open.
 
+The list shows each accessory with a picture of it as worn (made in the background and kept in
+`Library/Orbiters/Thumbnails`), its fit, and how it is attached. With AI help on, each gets a short
+clean name there and in Posing (`Glowsticks_Body ultipaw Variant` reads **Glowsticks for Ultipaw**);
+its object keeps its own name, shown on hover.
+
 ### On a custom base
 
 When the avatar uses a custom base, My Avatar finds out which one in the background when its
@@ -81,15 +86,17 @@ arms, rigid props and accessories that already have the shapes are left alone, w
 question. Each drop asks again; accessories already on the avatar are checked once per custom
 base version.
 
-- **Does it fit your body?** **Yes** adds the blendshapes it lacks, so it flexes and moves
+- **Does it fit your body?** The question shows the custom base (picture, name, version) and the
+  shapes involved. **Already fits** adds the blendshapes it lacks, so it flexes and moves
   with the body, including every animation of those shapes once built. Shapes its creator
-  already made stay as they are. **No, ReFit it** shows the original base see-through over
+  already made stay as they are. **ReFit** shows the original base see-through over
   the body and lines the accessory up with it (its hips on the original's, when a little
-  off): move it if it is still off, choose how tight it should fit, then **ReFit**. This
-  step needs MCB on the avatar, which provides the original body.
+  off): drag its arrows in the Scene view if it is still off (the selection does not change),
+  choose how tight it should fit, then **ReFit now**. This step needs MCB on the avatar, which
+  provides the original body.
 - An accessory that already has some of the custom base's shapes, or whose creator marked it
   with **Orbiters › Fit Info** as made for the custom base, is only offered the missing shapes;
-  one marked as made for the original base goes straight to **ReFit it**.
+  one marked as made for the original base goes straight to **ReFit**.
 - ReFit is installed with one click the first time an answer needs it; the answer continues
   on its own once Unity has reloaded.
 - The result says how many shapes now follow the body, with **Restore original**. When some
@@ -209,6 +216,16 @@ has built it, estimated without building: the avatar's own expression parameters
 what VRCFury toggles, sliders and full controllers add, and what is left. The count
 updates as the hierarchy changes. **Compress parameters** adds or removes VRCFury's
 Parameter Compressor on the avatar and shows how many bits it saves or would save.
+
+## Tools
+
+Buttons for tools that go with My Avatar, each marked **Install** until it is in the project:
+
+- **Gesture Manager** (VRChat curated repository): installs the latest version when missing,
+  then puts its Gesture Manager object at the scene root, or selects the one already there.
+- **Unit Git**: opens Unit Git, after installing it when missing.
+
+An install goes through VPM like any optional dependency; the tool opens once Unity has reloaded.
 
 ## Toolbar
 

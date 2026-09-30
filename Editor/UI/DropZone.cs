@@ -35,6 +35,24 @@ namespace Orbiters.MyAvatar.Editor
             },
         };
 
+        /// <summary>One field for everything: textures, and clothes and accessories when that feature is on.</summary>
+        internal static readonly Texts Anything = new Texts
+        {
+            Title = "Drop anything !", Hint = "Textures, clothes and accessories · Unity package, ZIP, prefab, FBX, images or a folder",
+            Browse = "Choose file…", Again = "Drop something else, or", AgainLink = "choose a file",
+            AiOn = "AI help is on.\nWhat My Avatar can’t decide on its own is sent to Orbiters’ AI: where a texture goes (its name, size and colour stats), " +
+                   "which bone an accessory goes on (object, bone and component names, up to 12,000 characters of its readmes) and a short name for it. " +
+                   "Never images or computer paths.\nClick to turn it off.",
+            AiOff = "AI help is off.\nTextures and accessories My Avatar can’t fully place are left for you to adjust.\nClick to let AI help.",
+            AiDisconnected = "AI help is off.\nWhen My Avatar can’t tell where a texture or an accessory goes, AI can help. Log in at the top of this panel to use it.",
+            Pick = () =>
+            {
+                string path = EditorUtility.OpenFilePanelWithFilters("Choose textures, clothes or accessories", "",
+                    new[] { "Textures, clothes and accessories", "png,jpg,jpeg,tga,unitypackage,zip,prefab,fbx", "All files", "*" });
+                return string.IsNullOrEmpty(path) ? null : new[] { path };
+            },
+        };
+
         private static readonly Color Green = new Color(0f, .855f, .427f), Amber = new Color(1f, .69f, .13f), Dash = new Color(.48f, .48f, .48f);
         private readonly Action<string[]> dropped;
         private readonly VisualElement idle, working, done, fill, shimmer, statusDot, backgroundDot, actions;

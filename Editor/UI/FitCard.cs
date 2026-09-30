@@ -14,12 +14,15 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed class FitCard : VisualElement
     {
         private const string StyleSheetPath = "Packages/orbiters.myavatar/Editor/UI/fit-card.uss";
-        internal static readonly Color Blue = new Color32(77, 163, 255, 255), Green = new Color32(52, 211, 140, 255),
-            Amber = new Color32(255, 184, 64, 255), Red = new Color32(255, 107, 107, 255);
+        // My Avatar's palette: its green accent, the light grey of secondary actions, amber and red.
+        internal static readonly Color Green = new Color32(0, 218, 109, 255), Light = new Color32(217, 217, 217, 255),
+            Amber = new Color32(255, 176, 32, 255), Red = new Color32(255, 107, 107, 255);
 
         internal sealed class Model
         {
             public string Fit, Item, Base, Version, Error;
+            /// <summary>A picture of the custom base; null while it loads (asked again for a few seconds).</summary>
+            public Func<Texture2D> Thumbnail;
             public int Shapes;
             public List<string> ShapeNames = new List<string>();
             public bool Rough, CanCommission, Animate;
@@ -31,7 +34,7 @@ namespace Orbiters.MyAvatar.Editor
 
         internal sealed class Actions
         {
-            public Action Fits, Refit, NotNow, Confirm, Cancel, Select, Restore, Commission, Retry, Dismiss;
+            public Action Fits, Refit, NotNow, Confirm, Cancel, Restore, Commission, Retry, Dismiss;
             public Action<VisualElement> Install;
         }
 
@@ -49,38 +52,37 @@ namespace Orbiters.MyAvatar.Editor
             else switch (model.Fit)
             {
                 case AccessoryFit.Ask:
-                    Header(FitIcon.Glyph.Sparkle, Blue, "Does it fit your body?", model, actions.NotNow);
+                    Header(FitIcon.Glyph.Sparkle, Green, "Does it fit your body?", model, actions.NotNow);
                     Detail($"Your avatar uses {baseName}: {model.Shapes} of its blendshapes move the body right where {model.Item} sits.");
                     Chips(model);
                     var tiles = Row("fit-card__tiles");
-                    tiles.Add(Tile(FitIcon.Glyph.Check, Green, "It fits", "Add " + Count(model.Shapes) + " so it flexes with you", actions.Fits, "fit-tile--yes"));
-                    tiles.Add(Tile(FitIcon.Glyph.Refit, Blue, "It doesn't fit", "Refit it from the original base", actions.Refit, "fit-tile--refit"));
+                    tiles.Add(Tile(FitIcon.Glyph.Check, Green, "Already fits", "Add " + Count(model.Shapes) + " so it flexes with you", actions.Fits, "fit-tile--yes"));
+                    tiles.Add(Tile(FitIcon.Glyph.Refit, Light, "ReFit", "Fit it to your body from the original base", actions.Refit, "fit-tile--refit"));
                     break;
                 case AccessoryFit.AddShapes:
-                    Header(FitIcon.Glyph.Sparkle, Blue, "Make it move with your body", model, actions.NotNow);
+                    Header(FitIcon.Glyph.Sparkle, Green, "Make it move with your body", model, actions.NotNow);
                     Detail($"{model.Item} lacks {Count(model.Shapes)} of {baseName}, like its flexing. Its own blendshapes stay as they are.");
                     Chips(model);
                     Row("fit-card__actions").Add(Button("Add " + Count(model.Shapes), "fit-btn--primary", actions.Fits));
                     break;
                 case AccessoryFit.Refit:
-                    Header(FitIcon.Glyph.Refit, Blue, "Made for the original base", model, actions.NotNow);
+                    Header(FitIcon.Glyph.Refit, Green, "Made for the original base", model, actions.NotNow);
                     Detail($"{model.Item}'s creator made it for the original body. Refit it to {baseName} so it fits and flexes with you.");
                     Chips(model);
-                    Row("fit-card__actions").Add(Button("Refit to " + baseName, "fit-btn--primary", actions.Refit));
+                    Row("fit-card__actions").Add(Button("ReFit to " + baseName, "fit-btn--primary", actions.Refit));
                     break;
                 case AccessoryFit.Place:
-                    Header(FitIcon.Glyph.Target, Blue, "Line it up with the original body", model, actions.Cancel);
-                    Step(1, "The original body is shown in blue over yours.");
-                    var move = Step(2, $"If {model.Item} is off, move it onto the blue body.");
-                    move.Add(Button("Select it", "fit-btn--ghost fit-btn--small", actions.Select));
+                    Header(FitIcon.Glyph.Target, Green, "Line it up with the original body", model, actions.Cancel);
+                    Step(1, "The original body is shown see-through, in blue, over yours in the Scene view.");
+                    Step(2, $"If {model.Item} is off, drag its arrows in the Scene view onto the blue body.");
                     var tightness = Step(3, "How close should it sit?");
                     tightness.parent.Add(TightnessControl());
                     var place = Row("fit-card__actions");
-                    place.Add(Button("Refit now", "fit-btn--primary", actions.Confirm));
+                    place.Add(Button("ReFit now", "fit-btn--primary", actions.Confirm));
                     place.Add(Button("Cancel", "fit-btn--ghost", actions.Cancel));
                     break;
                 case AccessoryFit.Install:
-                    Header(FitIcon.Glyph.Download, Blue, "One click to go", model, actions.NotNow);
+                    Header(FitIcon.Glyph.Download, Green, "One click to go", model, actions.NotNow);
                     Detail($"ReFit fits clothing to {baseName}. It installs in a moment, then this continues on its own.");
                     actions.Install?.Invoke(this);
                     break;
@@ -136,9 +138,10 @@ namespace Orbiters.MyAvatar.Editor
         {
             AddToClassList("fit-card--running");
             var header = Row("fit-card__header");
-            var spinner = new FitIcon(FitIcon.Glyph.Spinner, Blue); spinner.AddToClassList("fit-card__spinner");
+            var spinner = new FitIcon(FitIcon.Glyph.Spinner, Green); spinner.AddToClassList("fit-card__spinner");
             var badge = new VisualElement(); badge.AddToClassList("fit-card__badge"); badge.Add(spinner); header.Add(badge);
-            var title = new Label("Fitting " + model.Item + " to " + baseName); title.AddToClassList("fit-card__title"); header.Add(title);
+            var title = new Label("Fitting " + model.Item); title.AddToClassList("fit-card__title"); header.Add(title);
+            header.Add(BasePill(model));
             var track = new VisualElement(); track.AddToClassList("fit-card__track"); Add(track);
             fill = new VisualElement(); fill.AddToClassList("fit-card__fill"); track.Add(fill);
             shimmer = new VisualElement { pickingMode = PickingMode.Ignore }; shimmer.AddToClassList("fit-card__shimmer"); fill.Add(shimmer);
@@ -164,11 +167,7 @@ namespace Orbiters.MyAvatar.Editor
             badge.Add(new FitIcon(glyph, color));
             header.Add(badge);
             var title = new Label(text); title.AddToClassList("fit-card__title"); header.Add(title);
-            if (!string.IsNullOrEmpty(model.Version))
-            {
-                var version = new Label("v" + model.Version) { tooltip = "Custom base version" };
-                version.AddToClassList("fit-card__version"); header.Add(version);
-            }
+            header.Add(BasePill(model));
             if (close != null)
             {
                 var closeButton = new Button { tooltip = "Not now" };
@@ -177,6 +176,23 @@ namespace Orbiters.MyAvatar.Editor
                 Press(closeButton, close);
                 header.Add(closeButton);
             }
+        }
+
+        // The avatar's custom base: its picture, name and version.
+        private VisualElement BasePill(Model model)
+        {
+            var pill = new VisualElement { tooltip = "Your avatar's custom base" };
+            pill.AddToClassList("fit-base");
+            // The picture may still be loading: it fades in when ready, never waited for.
+            if (model.Thumbnail != null)
+            {
+                var picture = new AssetThumbnail(model.Thumbnail);
+                picture.AddToClassList("fit-base__picture");
+                pill.Add(picture);
+            }
+            if (!string.IsNullOrEmpty(model.Base)) { var name = new Label(model.Base); name.AddToClassList("fit-base__name"); pill.Add(name); }
+            if (!string.IsNullOrEmpty(model.Version)) { var version = new Label("v" + model.Version); version.AddToClassList("fit-base__version"); pill.Add(version); }
+            return pill;
         }
 
         private void Detail(string text)
@@ -311,9 +327,12 @@ namespace Orbiters.MyAvatar.Editor
                     p.BeginPath(); p.MoveTo(P(5f, 12.5f)); p.LineTo(P(10f, 17.5f)); p.LineTo(P(19f, 7f)); p.Stroke();
                     break;
                 case Glyph.Refit:
-                    // Two arrows turning around: the mesh is fitted again.
-                    Arrow(p, P(12f, 12f), 7.5f * s, 200f, 330f, s);
-                    Arrow(p, P(12f, 12f), 7.5f * s, 20f, 150f, s);
+                    // ReFit's logo: a thin bar, a thick bar and three short ones (its SVG, 39 x 35, fitted in the box).
+                    Bar(p, P(2.5f, 4f), 19f, 1.9f, s);
+                    Bar(p, P(2.5f, 10.2f), 19f, 4.8f, s);
+                    Bar(p, P(2.5f, 18.6f), 4.5f, 1.5f, s);
+                    Bar(p, P(9.8f, 18.6f), 4.5f, 1.5f, s);
+                    Bar(p, P(17f, 18.6f), 4.5f, 1.5f, s);
                     break;
                 case Glyph.Target:
                     p.BeginPath(); p.Arc(P(12f, 12f), 7.5f * s, 0f, 360f); p.Stroke();
@@ -338,19 +357,16 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
-        // An arc from one angle to another (degrees, clockwise on screen) ending in an arrow head.
-        private static void Arrow(Painter2D p, Vector2 c, float r, float from, float to, float s)
+        // A filled bar from its top-left corner, in box units.
+        private static void Bar(Painter2D p, Vector2 topLeft, float width, float height, float s)
         {
-            p.BeginPath(); p.Arc(c, r, from, to); p.Stroke();
-            float a = to * Mathf.Deg2Rad;
-            var end = c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
-            var along = new Vector2(-Mathf.Sin(a), Mathf.Cos(a));
-            var across = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
             p.BeginPath();
-            p.MoveTo(end - along * 3.2f * s + across * 3f * s);
-            p.LineTo(end);
-            p.LineTo(end - along * 3.2f * s - across * 3f * s);
-            p.Stroke();
+            p.MoveTo(topLeft);
+            p.LineTo(topLeft + new Vector2(width * s, 0));
+            p.LineTo(topLeft + new Vector2(width * s, height * s));
+            p.LineTo(topLeft + new Vector2(0, height * s));
+            p.ClosePath();
+            p.Fill();
         }
 
         // A four-pointed star with curved sides.

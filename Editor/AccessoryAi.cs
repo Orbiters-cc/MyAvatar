@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
 
@@ -111,6 +112,37 @@ namespace Orbiters.MyAvatar.Editor
             };
             return request;
         }
+
+        [Serializable] private sealed class NameAnswer { public NameItem[] names; }
+        [Serializable] private sealed class NameItem { public string id, displayName; }
+
+        /// <summary>
+        /// Short clean names for accessories ("Glowsticks_Body ultipaw Variant" becomes "Glowsticks for Ultipaw"). Only their
+        /// object names, their asset paths inside the project and the avatar's base name are sent.
+        /// </summary>
+        internal static async Task<Dictionary<OrbitersAttachment, string>> NamesAsync(string token, IReadOnlyList<OrbitersAttachment> attachments,
+            string avatarBase, CancellationToken cancellation)
+        {
+            var byId = new Dictionary<string, OrbitersAttachment>();
+            var items = new List<object>();
+            foreach (var attachment in attachments.Where(a => a).Take(16))
+            {
+                string id = "a" + byId.Count;
+                byId[id] = attachment;
+                string path = attachment.variant ?? "";
+                if (path.StartsWith("Assets/", StringComparison.Ordinal)) path = path.Substring(7);
+                items.Add(new { id, name = Clip(attachment.name, 200), path = Clip(path, 200), avatarBase = string.IsNullOrEmpty(avatarBase) ? null : Clip(avatarBase, 80) });
+            }
+            var result = new Dictionary<OrbitersAttachment, string>();
+            if (items.Count == 0) return result;
+            var answer = await OrbitersApi.SendAsync<NameAnswer>(OrbitersEnvironment.ApiUrl("myavatar/accessory-name"), token, new { names = items }, cancellation);
+            foreach (var item in answer?.names ?? Array.Empty<NameItem>())
+                if (item?.id != null && byId.TryGetValue(item.id, out var attachment) && !string.IsNullOrWhiteSpace(item.displayName))
+                    result[attachment] = item.displayName.Trim();
+            return result;
+        }
+
+        private static string Clip(string value, int length) => value == null ? "" : value.Length <= length ? value : value.Substring(0, length);
 
         internal static async Task<Result> RequestAsync(string token, Request request, CancellationToken cancellation)
         {

@@ -20,7 +20,6 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed partial class AccessoriesSection
     {
         private CancellationTokenSource fitChecks;
-        private AccessoryFit.Placement placement;
         private bool detecting, resuming;
         // A failed detection (no connection, an unreadable body) is tried again after a while, not on every refresh.
         private double detectAgainAt;
@@ -29,23 +28,20 @@ namespace Orbiters.MyAvatar.Editor
         {
             fitChecks?.Cancel();
             fitChecks = null;
-            placement?.Dispose();
-            placement = null;
         }
 
         // Each refresh: detect the custom base once, drop a preview whose accessory is gone, continue what waited for ReFit.
         private void RefreshFit()
         {
-            if (placement != null && (!placement.Attachment || !avatar.accessoryNotes.Any(n => n.accessory == placement.Attachment && n.fit == AccessoryFit.Place)))
-            {
-                placement.Dispose();
-                placement = null;
-            }
+            var active = AccessoryFit.Placement.Active;
+            if (active != null && active.Attachment && active.Attachment.transform.IsChildOf(avatar.transform)
+                && !avatar.accessoryNotes.Any(n => n.accessory == active.Attachment && n.fit == AccessoryFit.Place))
+                active.Dispose();
             if (!detecting && UnityEditor.EditorApplication.timeSinceStartup >= detectAgainAt && CustomBaseDetection.Current(avatar.transform) == null)
                 _ = DetectAsync();
             if (resuming || AccessoryService.Busy(avatar)) return;
-            // Lining up without the preview (it went away with a script reload or a closed Inspector): ask again.
-            var unplaced = avatar.accessoryNotes.FirstOrDefault(n => n.fit == AccessoryFit.Place && (placement == null || placement.Attachment != n.accessory));
+            // Lining up without the preview (it went away with a script reload or another line-up): ask again.
+            var unplaced = avatar.accessoryNotes.FirstOrDefault(n => n.fit == AccessoryFit.Place && AccessoryFit.Placement.For(n.accessory as OrbitersAttachment) == null);
             if (unplaced != null)
             {
                 resuming = true;
@@ -94,6 +90,8 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (!avatar || renderer == null || !renderer.transform.IsChildOf(avatar.transform)) return;
             var attachment = renderer.GetComponentInParent<OrbitersAttachment>(true);
+            // Our own refit records its meshes as it goes: its result, not a new check, answers it.
+            if (attachment && attachment == working) return;
             var note = attachment ? avatar.accessoryNotes.FirstOrDefault(n => n.accessory == attachment && AccessoryFit.IsQuestion(n)) : null;
             if (note != null && !AccessoryService.Busy(avatar)) schedule.Execute(() => _ = RecheckAsync(attachment));
             Schedule();
@@ -182,7 +180,8 @@ namespace Orbiters.MyAvatar.Editor
             shownFit[id] = state;
             var model = new FitCard.Model
             {
-                Fit = note.fit, Item = attachment ? attachment.name : "This accessory", Base = note.fitBase, Version = note.fitVersion,
+                Fit = note.fit, Item = attachment ? attachment.DisplayName : "This accessory", Base = note.fitBase, Version = note.fitVersion,
+                Thumbnail = CustomBaseDetection.Current(avatar.transform)?.Info?.Thumbnail,
                 Error = note.text, Shapes = note.fitShapes, ShapeNames = note.fitShapeNames ?? new List<string>(), Rough = note.fitRough,
                 CanCommission = attachment && AccessoryFit.CanCommission(attachment), Animate = animate,
                 Running = running, Progress = workProgress, ProgressText = workText,
@@ -194,7 +193,6 @@ namespace Orbiters.MyAvatar.Editor
                 NotNow = () => Dismiss(note),
                 Confirm = () => Confirm(note),
                 Cancel = () => CancelPlacement(note),
-                Select = () => Select(attachment.gameObject),
                 Restore = () => RestoreFit(note),
                 Commission = () => AccessoryFit.Commission(attachment),
                 Retry = string.IsNullOrEmpty(note.fitNext) ? null : (Action)(() => Act(note, note.fitNext)),
@@ -264,14 +262,13 @@ namespace Orbiters.MyAvatar.Editor
         private async Task StartPlacement(MyAvatar.AccessoryNote note, OrbitersAttachment attachment)
         {
             string question = AccessoryFit.IsQuestion(note) ? note.fit : AccessoryFit.Refit;
-            placement?.Dispose();
-            placement = null;
+            AccessoryFit.Placement.Active?.Dispose();
             BeginWork(attachment, "Preparing the original body…");
             ReportWork(0.35f, "Preparing the original body…");
             await Task.Yield();
             try
             {
-                placement = await AccessoryFit.PlaceAsync(avatar, attachment);
+                await AccessoryFit.PlaceAsync(avatar, attachment);
                 EndWork();
                 UpdateFit(note, n => { n.fitNext = question; n.fit = AccessoryFit.Place; });
             }
@@ -287,16 +284,15 @@ namespace Orbiters.MyAvatar.Editor
             var attachment = note.accessory as OrbitersAttachment;
             if (!attachment) return;
             // The preview is gone (a script reload): show it again first.
-            if (placement == null || placement.Attachment != attachment) { Act(note, AccessoryFit.Place); return; }
+            var placement = AccessoryFit.Placement.For(attachment);
+            if (placement == null) { Act(note, AccessoryFit.Place); return; }
             var original = placement.Take();
-            placement = null;
             _ = host.Run(() => RunFit(note, attachment, RefitMode.Fit, original));
         }
 
         private void CancelPlacement(MyAvatar.AccessoryNote note)
         {
-            placement?.Dispose();
-            placement = null;
+            AccessoryFit.Placement.For(note.accessory as OrbitersAttachment)?.Dispose();
             UpdateFit(note, n => n.fit = string.IsNullOrEmpty(n.fitNext) || n.fitNext == AccessoryFit.Place ? AccessoryFit.Ask : n.fitNext);
         }
 
@@ -307,10 +303,16 @@ namespace Orbiters.MyAvatar.Editor
             await Task.Yield();
             try
             {
-                var result = await AccessoryFit.RunAsync(avatar, attachment, mode, original, ReportWork, CancellationToken.None);
+                var result = await AccessoryFit.RunAsync(avatar, attachment, mode, original, note.fitShapeNames, ReportWork, CancellationToken.None);
                 var failed = result.Failed;
                 ReportWork(1f, "Done");
                 EndWork();
+                // Nothing was refitted and nothing failed: it already had every shape. No question left, no false "done".
+                if (result.Refitted == 0 && failed.Count == 0)
+                {
+                    RemoveFitNote(attachment);
+                    return;
+                }
                 UpdateFit(note, n =>
                 {
                     if (result.Refitted == 0 && failed.Count > 0)
@@ -333,7 +335,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Dismiss(MyAvatar.AccessoryNote note)
         {
             var attachment = note.accessory as OrbitersAttachment;
-            if (placement != null && placement.Attachment == attachment) { placement.Dispose(); placement = null; }
+            AccessoryFit.Placement.For(attachment)?.Dispose();
             if (attachment && !string.IsNullOrEmpty(note.fitKey))
             {
                 string key = AccessoryFit.DismissKey(attachment, note.fitKey);

@@ -82,19 +82,23 @@ namespace Orbiters.MyAvatar.Editor
         /// fits every mesh from the original base first. Each mesh only gets the shapes near it.
         /// </summary>
         internal static async Task<RefitBatchResult> RunAsync(MyAvatar avatar, OrbitersAttachment attachment, RefitMode mode, CustomBaseOriginal original,
-            Action<float, string> progress, CancellationToken cancellation)
+            IList<string> asked, Action<float, string> progress, CancellationToken cancellation)
         {
             var state = await CustomBaseDetection.DetectAsync(avatar.transform);
             if (state == null || !state.Known) throw new InvalidOperationException("My Avatar does not recognise this avatar's custom base any more.");
             if (!attachment) throw new InvalidOperationException("This accessory was removed.");
             var suggestion = await FitCheck.CheckAsync(attachment.gameObject, state, cancellation);
-            var meshes = mode == RefitMode.Fit ? RefitCandidates.Meshes(attachment.gameObject, state.Info.Body) : suggestion.Meshes;
+            // What the user answered for: the shapes of the question, even when the accessory moved since (a pose preview).
+            bool checkedAgain = suggestion.Missing.Count > 0;
+            var meshes = mode == RefitMode.Fit || !checkedAgain ? RefitCandidates.Meshes(attachment.gameObject, state.Info.Body) : suggestion.Meshes;
             var batch = new RefitBatch
             {
                 Avatar = RefitRecords.AvatarRoot(attachment.transform), Body = state.Info.Body, Renderers = meshes, Mode = mode, Original = original,
                 BaseKey = state.Info.Key, BaseName = state.Info.Name, Tool = Tool, Tightness = RefitPreferences.Tightness,
             };
-            foreach (var mesh in meshes) batch.ShapesByRenderer[mesh] = suggestion.Missing.TryGetValue(mesh, out var shapes) ? shapes : new List<string>();
+            foreach (var mesh in meshes)
+                batch.ShapesByRenderer[mesh] = suggestion.Missing.TryGetValue(mesh, out var shapes) ? shapes
+                    : !checkedAgain && asked != null ? asked.ToList() : new List<string>();
             var result = meshes.Count == 0 ? new RefitBatchResult() : await RefitRunner.RunAsync(batch, progress, cancellation);
             if (attachment) Results[attachment.GetInstanceID()] = result;
             return result;
@@ -126,12 +130,45 @@ namespace Orbiters.MyAvatar.Editor
 
         // ---- Lining up with the original base -------------------------------------------------------------------------
 
-        /// <summary>The original base shown over the body while the user lines the accessory up with it.</summary>
+        /// <summary>
+        /// The original base shown over the body while the user lines the accessory up with it, with a move handle on the
+        /// accessory in the Scene view: nothing is selected, so My Avatar stays in the Inspector. One at a time, kept for the
+        /// session (not by the Inspector, which may close meanwhile) until refitted, cancelled or its accessory is gone.
+        /// </summary>
         internal sealed class Placement : IDisposable
         {
             public OrbitersAttachment Attachment;
             public CustomBaseOriginal Original;
             public RefitGhost Ghost;
+
+            internal static Placement Active { get; private set; }
+
+            internal static Placement For(OrbitersAttachment attachment) =>
+                Active != null && attachment && Active.Attachment == attachment ? Active : null;
+
+            internal void Activate()
+            {
+                if (Active != null && Active != this) Active.Dispose();
+                Active = this;
+                SceneView.duringSceneGui += Handle;
+                AssemblyReloadEvents.beforeAssemblyReload += Dispose;
+                SceneView.RepaintAll();
+            }
+
+            // A move handle on the accessory, without selecting it.
+            private void Handle(SceneView view)
+            {
+                if (!Attachment) { Dispose(); return; }
+                var t = Attachment.transform;
+                var rotation = Tools.pivotRotation == PivotRotation.Local ? t.rotation : Quaternion.identity;
+                EditorGUI.BeginChangeCheck();
+                var position = Handles.PositionHandle(t.position, rotation);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(t, "Move " + Attachment.name);
+                    t.position = position;
+                }
+            }
 
             /// <summary>Hands the original over to the refit, which disposes it; the preview goes away.</summary>
             public CustomBaseOriginal Take()
@@ -144,6 +181,10 @@ namespace Orbiters.MyAvatar.Editor
 
             public void Dispose()
             {
+                SceneView.duringSceneGui -= Handle;
+                AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+                if (Active == this) Active = null;
+                SceneView.RepaintAll();
                 Ghost?.Dispose();
                 Ghost = null;
                 Original?.Dispose();
@@ -162,8 +203,9 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var ghost = RefitGhost.Show(original.Avatar, original.Body, state.Info.Body);
                 LineUp(attachment, ghost);
-                Selection.activeGameObject = attachment.gameObject;
-                return new Placement { Attachment = attachment, Original = original, Ghost = ghost };
+                var placement = new Placement { Attachment = attachment, Original = original, Ghost = ghost };
+                placement.Activate();
+                return placement;
             }
             catch
             {

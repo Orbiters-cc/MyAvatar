@@ -105,7 +105,9 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var item = new VisualElement(); item.AddToClassList("posing-item");
                 var dot = new VisualElement(); dot.AddToClassList("posing-item__dot"); dot.EnableInClassList("partial", accessory.Reason != null || accessory.Following < accessory.Total / 2); item.Add(dot);
-                var name = new Label(accessory.Name); name.AddToClassList("posing-item__name"); item.Add(name);
+                // The accessory's short name when My Avatar has one (Orbiters AI), as in its accessory list.
+                var attachment = accessory.Root ? accessory.Root.GetComponent<Orbiters.Toolkit.VRChat.OrbitersAttachment>() : null;
+                var name = new Label(attachment ? attachment.DisplayName : accessory.Name); name.AddToClassList("posing-item__name"); item.Add(name);
                 var count = new Label(accessory.Total <= 1 ? accessory.Rule : $"{accessory.Rule} · {accessory.Following}/{accessory.Total} bones"); count.AddToClassList("posing-item__count"); item.Add(count);
                 var target = accessory.Root;
                 item.RegisterCallback<PointerDownEvent>(_ => { Selection.activeTransform = target; EditorGUIUtility.PingObject(target); });

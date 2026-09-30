@@ -219,10 +219,15 @@
 .accessory-list__cost { font-size: 10px; color: #7a7a7a; margin: 6px 2px 0 2px; white-space: normal; }
 .accessory-entry { margin-top: 4px; border-radius: 12px; background-color: #2a2a2a; }
 .accessory-item { flex-direction: row; align-items: center; min-height: 30px; padding: 0 6px 0 10px; }
+.accessory-item__picture { width: 72px; height: 72px; margin: 6px 12px 6px -4px; flex-shrink: 0; border-radius: 12px; overflow: hidden; background-color: #212123; opacity: 0.35; transition-property: opacity; transition-duration: 0.3s; }
+.accessory-item__picture.orb-thumbnail--shown { opacity: 1; }
 .accessory-entry__notes { padding: 0 6px 6px 6px; }
 .accessory-entry__notes > .accessory-note { margin-top: 2px; background-color: #232323; }
-.accessory-item__name { font-size: 12px; color: #ffffff; flex-shrink: 1; }
-.accessory-item__how { flex-grow: 1; flex-shrink: 1; font-size: 11px; color: #9a9a9a; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; }
+.accessory-item__body { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.accessory-item__top { flex-direction: row; align-items: center; min-height: 24px; }
+.accessory-item__spacer { flex-grow: 1; min-width: 4px; }
+.accessory-item__name { font-size: 12px; -unity-font-style: bold; color: #ffffff; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accessory-item__how { margin-top: 4px; font-size: 11px; color: #9a9a9a; white-space: normal; }
 .accessory-button { height: 22px; min-width: 0; padding: 0 8px; margin: 0 0 0 4px; font-size: 11px; flex-shrink: 0; }
 .accessory-choice__row--wrap { flex-wrap: wrap; }
 .accessory-choice__row--wrap > .mcb-button { flex-grow: 0; margin: 3px; }
@@ -235,3 +240,8 @@
 /* Undo and Save fold away once the set is saved, and come back with the next change. */
 .drop-zone__actions { opacity: 1; scale: 1 1; transition-property: opacity, scale; transition-duration: 0.18s; transition-timing-function: ease-out; }
 .drop-zone__actions--hiding { opacity: 0; scale: 0.96 0.96; }
+
+/* Tools: one tile per tool, like the photoshoot's buttons. */
+.tools-row { flex-direction: row; }
+.tools-tile { margin: 0 8px 0 0; }
+.tools-tile__badge { position: absolute; top: 6px; right: 6px; padding: 1px 6px; border-radius: 8px; font-size: 9px; -unity-font-style: bold; color: #00DA6D; background-color: rgba(0, 218, 109, 0.14); }
