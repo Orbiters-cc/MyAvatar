@@ -23,6 +23,8 @@ namespace Orbiters.MyAvatar
         [HideInInspector] public string accessoryStatus, accessoryChoice;
         [HideInInspector] public bool accessoryWarning;
         [HideInInspector] public List<AccessoryNote> accessoryNotes = new List<AccessoryNote>();
+        /// <summary>Accessories whose custom base question was answered "Not now", with the custom base asked about.</summary>
+        [HideInInspector] public List<string> fitDismissed = new List<string>();
 
         // One line under the accessory drop field: something done, or a manual step with the object to look at.
         [Serializable]
@@ -31,6 +33,18 @@ namespace Orbiters.MyAvatar
             public UnityEngine.Object target, accessory;
             public string text, duplicate;
             public bool warning, modularAvatar, vrcFury;
+            /// <summary>
+            /// The accessory against the avatar's custom base: "ask" (does it fit?), "shapes" (add the missing blendshapes),
+            /// "refit" (made for the original base), "place" (being lined up with the original base), "install" (waiting for
+            /// ReFit, then <see cref="fitNext"/>), "done" or "failed". Empty for other notes.
+            /// </summary>
+            public string fit, fitNext;
+            /// <summary>The custom base's name, version and key when asked, and the blendshapes the accessory lacks.</summary>
+            public string fitBase, fitVersion, fitKey;
+            public int fitShapes;
+            public List<string> fitShapeNames = new List<string>();
+            /// <summary>The refit has spots a creator could fit better by hand.</summary>
+            public bool fitRough;
         }
     }
 

@@ -5,9 +5,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.Editor.Vpm;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEngine;
@@ -16,8 +18,9 @@ using UnityEngine.UIElements;
 namespace Orbiters.MyAvatar.Editor
 {
     // Clothes and accessories (alpha): a drop field like the texture one, the one question it may ask (which hand), what
-    // needs a manual step, and the accessories on the avatar with their bone and a Remove button.
-    internal sealed class AccessoriesSection : AvatarSection
+    // needs a manual step, and the accessories on the avatar with their bone and a Remove button. On a custom base, each
+    // accessory's fit question lives in its entry (AccessoriesSection.Fit.cs).
+    internal sealed partial class AccessoriesSection : AvatarSection
     {
         internal const string Feature = "myavatar.accessories";
 
@@ -72,6 +75,9 @@ namespace Orbiters.MyAvatar.Editor
             EditorApplication.hierarchyChanged += Schedule;
             Undo.undoRedoPerformed += Schedule;
             OrbitersFeatures.Changed += FeatureChanged;
+            CustomBaseDetection.Changed += BaseChanged;
+            RefitRecords.Changed += RecordChanged;
+            RefitEngine.Changed += Schedule;
             RegisterCallback<DetachFromPanelEvent>(_ => Detach());
             FeatureChanged(Feature);
         }
@@ -80,6 +86,8 @@ namespace Orbiters.MyAvatar.Editor
         {
             AccessoryService.Changed -= Changed; EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
             OrbitersFeatures.Changed -= FeatureChanged; CancelAi();
+            CustomBaseDetection.Changed -= BaseChanged; RefitRecords.Changed -= RecordChanged; RefitEngine.Changed -= Schedule;
+            DetachFit();
         }
 
         internal DropZone Zone => zone;
@@ -142,6 +150,8 @@ namespace Orbiters.MyAvatar.Editor
             }
             finally { foreach (var staging in outcomes.Select(o => o.staging).Distinct()) AccessoryService.Release(avatar, staging); }
             if (host.AiOn()) _ = AskAiAsync(outcomes.Where(o => o.attachment != null && o.plan != null).ToList(), revision);
+            // Every drop asks again: on a custom base, does it fit?
+            _ = CheckFitsAsync(outcomes.Where(o => o.attachment).Select(o => o.attachment).ToList(), dropped: true);
         }
 
         // A drop Unity finished after reloading its scripts: its images and AI help, as after any drop.
@@ -241,6 +251,7 @@ namespace Orbiters.MyAvatar.Editor
             RefreshChoice();
             RefreshNotes();
             RefreshList();
+            RefreshFit();
         }
 
         private void RefreshChoice()
@@ -273,6 +284,7 @@ namespace Orbiters.MyAvatar.Editor
 
         private void AddNote(VisualElement parent, MyAvatar.AccessoryNote note)
         {
+            if (!string.IsNullOrEmpty(note.fit)) { FitCard(parent, note); return; }
             var row = new VisualElement(); row.AddToClassList("accessory-note"); parent.Add(row);
             var dot = new VisualElement(); dot.AddToClassList("accessory-note__dot"); dot.EnableInClassList("warning", note.warning); row.Add(dot);
             var text = new Label(note.text); text.AddToClassList("accessory-note__text"); row.Add(text);
@@ -302,6 +314,7 @@ namespace Orbiters.MyAvatar.Editor
                 var entry = new VisualElement(); entry.AddToClassList("accessory-entry"); list.Add(entry);
                 var row = new VisualElement(); row.AddToClassList("accessory-item"); entry.Add(row);
                 var name = new Label(attachment.name); name.AddToClassList("accessory-item__name"); row.Add(name);
+                var status = FitStatus(attachment); if (status != null) row.Add(status);
                 var how = new Label(AccessoryService.Describe(attachment)); how.AddToClassList("accessory-item__how"); row.Add(how);
                 var item = attachment;
                 if (attachment.mode == OrbitersAttachment.AttachMode.Parent)

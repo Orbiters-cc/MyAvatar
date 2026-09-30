@@ -70,6 +70,34 @@ for Modular Avatar, and VRCFury itself, can be installed from there. `.blend`, `
 Each accessory is one Undo step; **Remove** in the list deletes it. Packages with scripts
 make Unity recompile: the drop continues after it, even without the Inspector open.
 
+### On a custom base
+
+When the avatar uses a custom base, My Avatar finds out which one in the background when its
+Inspector opens: from the avatar's MCB component (the exact version applied), or, without
+MCB, from its body's model file, which Orbiters recognises (only a hash of the file is sent).
+For each accessory then, only the meshes lying close to skin that the custom base's
+blendshapes move count (its declared shapes and every flexing shape); shoes far from flexing
+arms, rigid props and accessories that already have the shapes are left alone, without a
+question. Each drop asks again; accessories already on the avatar are checked once per custom
+base version.
+
+- **Does it fit your body?** **Yes** adds the blendshapes it lacks, so it flexes and moves
+  with the body, including every animation of those shapes once built. Shapes its creator
+  already made stay as they are. **No, ReFit it** shows the original base see-through over
+  the body and lines the accessory up with it (its hips on the original's, when a little
+  off): move it if it is still off, choose how tight it should fit, then **ReFit**. This
+  step needs MCB on the avatar, which provides the original body.
+- An accessory that already has some of the custom base's shapes, or whose creator marked it
+  with **Orbiters › Fit Info** as made for the custom base, is only offered the missing shapes;
+  one marked as made for the original base goes straight to **ReFit it**.
+- ReFit is installed with one click the first time an answer needs it; the answer continues
+  on its own once Unity has reloaded.
+- The result says how many shapes now follow the body, with **Restore original**. When some
+  spots could not be fitted exactly, **Ask a creator** opens ReFit's commission page on it.
+- **Not now** stops asking about that accessory for this custom base version. MCB keeps the
+  refits per custom base version: switching versions puts back those made for it, and
+  accessories lacking the new version's shapes are asked about again.
+
 With AI help on (the robot of this field, the same account setting), what the rules
 could not decide is asked in the background: which of two items to use, the bone a prop
 goes to when only its position suggests one, clothing bones nothing matched, and manual
