@@ -95,6 +95,7 @@ namespace Orbiters.MyAvatar.Editor
             {
                 Avatar = RefitRecords.AvatarRoot(attachment.transform), Body = state.Info.Body, Renderers = meshes, Mode = mode, Original = original,
                 BaseKey = state.Info.Key, BaseName = state.Info.Name, Tool = Tool, Tightness = RefitPreferences.Tightness,
+                CoverDifferentBaseBody = mode == RefitMode.Fit && ClothingCoverage.Eligible(attachment, suggestion.MadeForOriginal),
             };
             foreach (var mesh in meshes)
                 batch.ShapesByRenderer[mesh] = suggestion.Missing.TryGetValue(mesh, out var shapes) ? shapes
