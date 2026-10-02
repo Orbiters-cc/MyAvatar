@@ -331,7 +331,7 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static string FitText(string name, AttachmentFit.Measure fit) =>
             name + " was made for another body: " + (fit.Segments > 0 && Mathf.Abs(fit.Scale - 1f) > 0.005f ? (fit.Scale > 1f ? "enlarged" : "shrunk") + " to " +
-            Mathf.RoundToInt(fit.Scale * 100f) + "% and " : "") + "moved onto this avatar's armature.";
+            Mathf.RoundToInt(fit.Scale * 100f) + "% and " : "") + "aligned to this avatar's armature and pose.";
 
         // A copy of the item the avatar already wears without My Avatar: an outermost prefab instance under the avatar made
         // of the same model or prefab, outside every accessory My Avatar placed.

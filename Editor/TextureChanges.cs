@@ -27,6 +27,41 @@ namespace Orbiters.MyAvatar.Editor
         /// <summary>The slots of the current texture set: the whole avatar, or the objects its drop was limited to.</summary>
         internal static List<TextureSlot> Slots(MyAvatar avatar) => Scoped(TextureMatching.Slots(avatar), avatar.batchScope);
 
+        // Copy on write even for generated materials: another accessory or avatar may share them.
+        // Renderer assignments are the Undo record, leaving the source material and texture assets untouched.
+        internal static void RemoveSlot(MyAvatar avatar, Transform item, Material material, string property, string folder = null)
+        {
+            if (!avatar || !item || !item.IsChildOf(avatar.transform) || !material || !material.HasProperty(property)) return;
+            var renderers = item.GetComponentsInChildren<Renderer>(true).Where(r => r.sharedMaterials.Contains(material)).ToArray();
+            if (renderers.Length == 0 || !material.GetTexture(property)) return;
+            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
+                throw new InvalidOperationException("Edit textures on an avatar in an open scene, outside Play Mode.");
+            folder = folder ?? "Assets/Orbiters/MyAvatar/MaterialEdits";
+            TextureImport.EnsureFolder(folder);
+            var copy = new Material(material) { name = material.name };
+            copy.SetTexture(property, null);
+            string keyword = Keyword(property);
+            if (keyword != null) copy.DisableKeyword(keyword);
+            if (property == "_EmissionMap")
+            {
+                if (copy.HasProperty("_EmissionColor")) copy.SetColor("_EmissionColor", Color.black);
+                copy.globalIlluminationFlags |= MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+            }
+            AssetDatabase.CreateAsset(copy, AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafeName(copy.name) + ".mat"));
+            Undo.IncrementCurrentGroup();
+            int group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("Remove " + property + " from " + item.name);
+            Undo.RecordObjects(renderers.Cast<UnityEngine.Object>().ToArray(), "Remove texture");
+            foreach (var renderer in renderers)
+            {
+                renderer.sharedMaterials = renderer.sharedMaterials.Select(m => m == material ? copy : m).ToArray();
+                PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
+            }
+            Dirty(avatar);
+            Undo.CollapseUndoOperations(group);
+            SceneView.RepaintAll();
+        }
+
         // Applies pending entries. Applying again to the same batch extends the same logical operation: its generated
         // materials are reused and the Undo/Redo snapshot keeps the state from before the batch. A new batch passes its scope.
         internal static int Apply(MyAvatar avatar, List<TextureEntry> entries, string folder, List<Transform> scope = null, bool splitShared = true)

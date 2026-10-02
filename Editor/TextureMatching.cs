@@ -29,7 +29,7 @@ namespace Orbiters.MyAvatar.Editor
         internal const string MissingSlotReason = "The rest of this texture set matched ";
         internal const string NoClearMatchReason = "No clear material and texture-slot match.";
 
-        internal static List<TextureSlot> Slots(MyAvatar avatar)
+        internal static List<TextureSlot> Slots(MyAvatar avatar, bool includeAll = false)
         {
             var result = new List<TextureSlot>();
             var byMaterial = new Dictionary<Material, List<TextureSlot>>();
@@ -60,8 +60,8 @@ namespace Orbiters.MyAvatar.Editor
                     string shaderName = ShaderName(material);
                     for (int i = 0; i < shader.GetPropertyCount(); i++)
                     {
-                        if (shader.GetPropertyType(i) != ShaderPropertyType.Texture || shader.GetPropertyTextureDimension(i) != TextureDimension.Tex2D ||
-                            (shader.GetPropertyFlags(i) & ShaderPropertyFlags.HideInInspector) != 0) continue;
+                        if (shader.GetPropertyType(i) != ShaderPropertyType.Texture || !includeAll && (shader.GetPropertyTextureDimension(i) != TextureDimension.Tex2D ||
+                            (shader.GetPropertyFlags(i) & ShaderPropertyFlags.HideInInspector) != 0)) continue;
                         string property = shader.GetPropertyName(i), description = CleanDescription(shader.GetPropertyDescription(i));
                         var texture = material.GetTexture(property);
                         var slot = new TextureSlot { id = "s" + result.Count, material = material, materialName = material.name,

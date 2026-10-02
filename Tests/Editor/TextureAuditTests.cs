@@ -63,6 +63,34 @@ namespace Orbiters.MyAvatar.Editor.Tests
             return root.AddComponent<MyAvatar>();
         }
 
+        [Test] public void RemovingEmissionIsScopedAndUndoRestoresTheOriginalMaterial()
+        {
+            var avatar = Avatar();
+            var hoodie = Own(new GameObject("Hoodie")); hoodie.transform.SetParent(avatar.transform);
+            var other = Own(new GameObject("Other garment")); other.transform.SetParent(avatar.transform);
+            var worn = hoodie.AddComponent<MeshRenderer>();
+            var neighbour = other.AddComponent<MeshRenderer>();
+            var material = Own(new Material(Shader.Find("Standard")));
+            var folder = Folder();
+            var texture = Png(folder, "emission", 2, (x, y) => new Color32(255, 255, 255, 255));
+            material.SetTexture("_EmissionMap", texture); material.SetColor("_EmissionColor", Color.white); material.EnableKeyword("_EMISSION");
+            material.SetTexture("_BumpMap", texture);
+            worn.sharedMaterial = neighbour.sharedMaterial = material;
+            TextureChanges.RemoveSlot(avatar, hoodie.transform, material, "_EmissionMap", folder);
+            Assert.AreSame(material, neighbour.sharedMaterial);
+            Assert.AreSame(texture, material.GetTexture("_EmissionMap"));
+            Assert.AreNotSame(material, worn.sharedMaterial);
+            Assert.IsNull(worn.sharedMaterial.GetTexture("_EmissionMap"));
+            Assert.False(worn.sharedMaterial.IsKeywordEnabled("_EMISSION"));
+            Assert.AreEqual(Color.black, worn.sharedMaterial.GetColor("_EmissionColor"));
+            Assert.AreSame(texture, worn.sharedMaterial.GetTexture("_BumpMap"));
+            Undo.FlushUndoRecordObjects(); Undo.PerformUndo();
+            Assert.AreSame(material, worn.sharedMaterial);
+            Undo.PerformRedo();
+            Assert.IsNull(worn.sharedMaterial.GetTexture("_EmissionMap"));
+            Undo.ClearUndo(worn);
+        }
+
         private static GameObject Child(Component parent, string name) { var child = new GameObject(name); child.transform.SetParent(parent.transform, false); return child; }
 
         private Material Standard(string name) => Own(new Material(Shader.Find("Standard")) { name = name });

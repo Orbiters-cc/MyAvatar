@@ -370,6 +370,7 @@ namespace Orbiters.MyAvatar.Editor
                     AttachmentInstaller.Remove(item);
                     AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n.accessory != item).ToList());
                 }));
+                TextureCard(entry, item);
                 var own = avatar.accessoryNotes.Where(n => n.accessory == item).ToList();
                 if (own.Count == 0) continue;
                 var box = new VisualElement(); box.AddToClassList("accessory-entry__notes"); entry.Add(box);

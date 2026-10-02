@@ -224,6 +224,13 @@
 .accessory-item__picture { width: 72px; height: 72px; margin: 6px 12px 6px -4px; flex-shrink: 0; border-radius: 12px; overflow: hidden; background-color: #212123; opacity: 0.35; transition-property: opacity; transition-duration: 0.3s; }
 .accessory-item__picture.orb-thumbnail--shown { opacity: 1; }
 .accessory-entry__notes { padding: 0 6px 6px 6px; }
+.accessory-textures { margin: 0 10px 8px 10px; color: #bcbcbc; }
+.accessory-textures__material { font-size: 10px; color: #969696; margin-top: 5px; margin-bottom: 3px; }
+.accessory-textures__row { flex-direction: row; align-items: center; padding: 5px; margin-bottom: 3px; border-radius: 8px; background-color: #232323; }
+.accessory-textures__image { width: 32px; height: 32px; margin-right: 8px; flex-shrink: 0; }
+.accessory-textures__text { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.accessory-textures__role { font-size: 11px; color: #eeeeee; }
+.accessory-textures__name { font-size: 10px; color: #999999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .accessory-entry__notes > .accessory-note { margin-top: 2px; background-color: #232323; }
 .accessory-item__body { flex-grow: 1; flex-shrink: 1; min-width: 0; }
 .accessory-item__top { flex-direction: row; align-items: center; min-height: 24px; }
