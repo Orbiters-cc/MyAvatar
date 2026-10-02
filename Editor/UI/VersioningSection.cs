@@ -2,7 +2,9 @@
 using System;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
+using Orbiters.Toolkit.Editor.Processes;
 using Orbiters.Toolkit.Editor;
 using Orbiters.UnitGit.Editor;
 using UnityEditor;
@@ -20,6 +22,9 @@ namespace Orbiters.MyAvatar.Editor
         private readonly Label note;
         private readonly VisualElement summary, graph, setup;
         private bool loading, working, linkOpen;
+        private bool refreshQueued;
+        private int readGeneration;
+        private CancellationTokenSource historyRead;
         private UnitGitSummary current;
         // The outcome of the last action, kept while the history is read again.
         private string message; private bool messageWarning;
@@ -39,24 +44,79 @@ namespace Orbiters.MyAvatar.Editor
             setup = new VisualElement(); Body.Add(setup);
             note = new Label(); note.AddToClassList("avatar-section__note"); Body.Add(note);
 
-            UnitGitOverview.Changed += Load;
-            EditorApplication.focusChanged += OnFocus;
-            RegisterCallback<DetachFromPanelEvent>(_ => { UnitGitOverview.Changed -= Load; EditorApplication.focusChanged -= OnFocus; });
-            Load();
+            RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                UnitGitOverview.Changed -= Load;
+                UnitGitOverview.Changed += Load;
+                EditorApplication.focusChanged -= OnFocus;
+                EditorApplication.focusChanged += OnFocus;
+                Load();
+            });
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                UnitGitOverview.Changed -= Load;
+                EditorApplication.focusChanged -= OnFocus;
+                EditorApplication.update -= StartQueuedLoad;
+                refreshQueued = false;
+                readGeneration++;
+                historyRead?.Cancel();
+                historyRead?.Dispose();
+                historyRead = null;
+                loading = false;
+            });
         }
 
         // Coming back to Unity after committing in a terminal or on the website: read it again.
         private void OnFocus(bool focused) { if (focused) Load(); }
 
-        private async void Load()
+        private void Load()
         {
-            if (loading || working) return;
+            if (refreshQueued || EditorProcessRunner.IsStopping) return;
+            refreshQueued = true;
+            EditorApplication.update += StartQueuedLoad;
+        }
+
+        private void StartQueuedLoad()
+        {
+            if (EditorProcessRunner.IsStopping)
+            {
+                EditorApplication.update -= StartQueuedLoad;
+                refreshQueued = false;
+                return;
+            }
+            if (panel == null || loading || working || EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+            EditorApplication.update -= StartQueuedLoad;
+            refreshQueued = false;
+            ReadHistory();
+        }
+
+        private async void ReadHistory()
+        {
             loading = true;
+            int generation = ++readGeneration;
+            var read = historyRead = new CancellationTokenSource();
+            CancellationToken token = read.Token;
             if (current == null) SetNote("Reading the history…", false);
-            try { current = await UnitGitOverview.LoadAsync(CommitCount); }
-            catch (Exception ex) { current = null; SetNote(ex.Message, true); }
-            finally { loading = false; }
-            if (current != null && panel != null) Show(current);
+            try
+            {
+                var result = await UnitGitOverview.LoadAsync(CommitCount, token);
+                if (generation == readGeneration && panel != null && !token.IsCancellationRequested && !EditorProcessRunner.IsStopping)
+                {
+                    current = result;
+                    Show(current);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (generation == readGeneration && panel != null && !EditorProcessRunner.IsStopping)
+                { current = null; SetNote(ex.Message, true); }
+            }
+            finally
+            {
+                if (generation == readGeneration) { loading = false; historyRead = null; }
+                read.Dispose();
+            }
         }
 
         private void Show(UnitGitSummary git)

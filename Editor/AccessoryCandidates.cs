@@ -21,13 +21,15 @@ namespace Orbiters.MyAvatar.Editor
             public int score, renderers;
             public Hand hand;
             public bool vrcFury;
+            /// <summary>Named as something worn with another item ("Extra Tentacles", "Hoodie add-on").</summary>
+            public bool addon;
         }
 
         internal sealed class Choice
         {
             public readonly List<Candidate> all = new List<Candidate>();
             public Candidate best, left, right;
-            /// <summary>Other items as good as the best one: an AI opinion for one, the user's pick for a collection.</summary>
+            /// <summary>Other items as good as the best one: the user picks among them.</summary>
             public readonly List<Candidate> rivals = new List<Candidate>();
             public bool NeedsHand => left != null && right != null;
         }
@@ -37,6 +39,7 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly string[] Manual = { "manual", "novrcfury", "nonvrcfury", "withoutvrcfury", "legacy" };
         private static readonly string[] Examples = { "example", "sample", "demo", "preview", "showcase", "customization", "customisation", "optional" };
         private static readonly string[] Helpers = { "world", "bullet", "projectile", "placement", "reference", "helper", "target", "constraint", "raycast" };
+        private static readonly string[] Addons = { "extra", "extras", "addon", "addons", "additional", "bonus" };
 
         internal static Choice Choose(IEnumerable<string> assetPaths)
         {
@@ -59,6 +62,7 @@ namespace Orbiters.MyAvatar.Editor
                 {
                     path = path, asset = asset, name = asset.name, renderers = renderers,
                     vrcFury = VrcFury.Features(asset).Any(), hand = HandOf(words),
+                    addon = IsAddon(asset.name),
                 };
                 bool Has(IEnumerable<string> list) => list.Any(w => words.Contains(w) || string.Concat(words).Contains(w));
                 candidate.score = (candidate.vrcFury ? 3 : 0) + (Has(Mobile) == mobile ? 0 : -3) + (Has(Manual) ? -2 : 0) +
@@ -79,6 +83,26 @@ namespace Orbiters.MyAvatar.Editor
                 choice.right = sided.FirstOrDefault(c => c.hand == Hand.Right);
             }
             return choice;
+        }
+
+        /// <summary>
+        /// What an item is made from: the model a prefab variant is built on, else the prefab or model itself. A prefab and
+        /// the model it is made of are one item; two prefabs made of the same model are two variants of one item.
+        /// </summary>
+        internal static string Origin(GameObject item)
+        {
+            if (item == null) return null;
+            var source = EditorUtility.IsPersistent(item) ? PrefabUtility.GetCorrespondingObjectFromOriginalSource(item)
+                : PrefabUtility.IsAnyPrefabInstanceRoot(item) ? PrefabUtility.GetCorrespondingObjectFromOriginalSource(item) : null;
+            string path = source != null ? AssetDatabase.GetAssetPath(source) : null;
+            return string.IsNullOrEmpty(path) ? null : path;
+        }
+
+        // "Extra Tentacles", "Hoodie_AddOn": "add on" counts as one word.
+        internal static bool IsAddon(string name)
+        {
+            var words = Separators.Split(name.ToLowerInvariant()).Where(w => w.Length > 0).ToList();
+            return words.Any(w => Addons.Contains(w)) || words.Zip(words.Skip(1), (a, b) => a == "add" && b == "on").Any(x => x);
         }
 
         private static List<string> Words(string path)

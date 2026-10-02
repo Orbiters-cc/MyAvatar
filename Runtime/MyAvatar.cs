@@ -33,6 +33,8 @@ namespace Orbiters.MyAvatar
             public UnityEngine.Object target, accessory;
             public string text, duplicate;
             public bool warning, modularAvatar, vrcFury;
+            /// <summary>The accessory's armature was fitted to the avatar's (made for another body): offers to cancel it.</summary>
+            public bool armatureFit;
             /// <summary>
             /// The accessory against the avatar's custom base: "ask" (does it fit?), "shapes" (add the missing blendshapes),
             /// "refit" (made for the original base), "place" (being lined up with the original base), "install" (waiting for

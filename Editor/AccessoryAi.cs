@@ -11,12 +11,12 @@ using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Asks Orbiters AI what local rules could not decide for an accessory: which variant, which bone a prop goes to, where
+    // Asks Orbiters AI what local rules could not decide for an accessory: which bone a prop goes to, where
     // unmatched clothing bones belong and what needs a manual step. Names, paths inside the accessory and the avatar,
     // component types and the drop's text documentation are sent; no images and no computer paths.
     internal static class AccessoryAi
     {
-        [Serializable] private sealed class Answer { public string candidate, target; public LinkAnswer[] links; public SetupAnswer[] setup; public string[] warnings; }
+        [Serializable] private sealed class Answer { public string target; public LinkAnswer[] links; public SetupAnswer[] setup; public string[] warnings; }
         [Serializable] private sealed class LinkAnswer { public string bone, avatarBone; public float confidence; }
         [Serializable] private sealed class SetupAnswer { public string @object, reason; }
 
@@ -25,13 +25,11 @@ namespace Orbiters.MyAvatar.Editor
             public object payload;
             public readonly Dictionary<string, Transform> avatarBones = new Dictionary<string, Transform>(), bones = new Dictionary<string, Transform>();
             public readonly Dictionary<string, GameObject> objects = new Dictionary<string, GameObject>();
-            public readonly Dictionary<string, AccessoryCandidates.Candidate> candidates = new Dictionary<string, AccessoryCandidates.Candidate>();
             public bool worthAsking;
         }
 
         internal sealed class Result
         {
-            public AccessoryCandidates.Candidate candidate;
             public Transform target;
             public readonly List<(Transform from, Transform to)> links = new List<(Transform, Transform)>();
             public readonly List<(GameObject target, string reason)> setup = new List<(GameObject, string)>();
@@ -39,27 +37,6 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         private static readonly Type[] Plain = { typeof(Transform), typeof(MeshFilter), typeof(MeshRenderer), typeof(SkinnedMeshRenderer) };
-
-        /// <summary>Before anything is installed: only which of several equally good variants to use.</summary>
-        internal static Request ForCandidates(Transform avatarRoot, AccessoryCandidates.Choice choice, List<AccessoryImport.Doc> docs)
-        {
-            var request = new Request();
-            var list = new[] { choice.best }.Concat(choice.rivals).ToList();
-            for (int i = 0; i < list.Count && i < 24; i++) request.candidates["c" + i] = list[i];
-            request.worthAsking = request.candidates.Count > 1;
-            request.payload = new
-            {
-                avatar = new { bones = AvatarBones(avatarRoot, null, request) },
-                accessory = new
-                {
-                    name = choice.best.name,
-                    candidates = request.candidates.Select(p => Candidate(p.Key, p.Value)).ToArray(),
-                    selected = (string)null, rigid = false,
-                },
-                docs = Docs(docs),
-            };
-            return request;
-        }
 
         /// <summary>After the local install: the bone a guessed prop goes to, unmatched or ambiguous clothing bones and manual steps.</summary>
         internal static Request ForPlan(AttachmentPlan plan, AccessoryCandidates.Candidate installed, List<AccessoryImport.Doc> docs)
@@ -123,24 +100,38 @@ namespace Orbiters.MyAvatar.Editor
         internal static async Task<Dictionary<OrbitersAttachment, string>> NamesAsync(string token, IReadOnlyList<OrbitersAttachment> attachments,
             string avatarBase, CancellationToken cancellation)
         {
-            var byId = new Dictionary<string, OrbitersAttachment>();
-            var items = new List<object>();
-            foreach (var attachment in attachments.Where(a => a).Take(16))
+            var asked = attachments.Where(a => a).Take(MaxNames).ToList();
+            var names = await NamesAsync(token, asked.Select(a => (a.name, a.variant)).ToList(), avatarBase, cancellation);
+            return names.ToDictionary(pair => asked[pair.Key], pair => pair.Value);
+        }
+
+        /// <summary>
+        /// The same for items not on the avatar yet (those a drop offers), by their name and asset path: the index of each
+        /// named item in <paramref name="items"/> and its name. At most <see cref="MaxNames"/> items are asked about.
+        /// </summary>
+        internal static async Task<Dictionary<int, string>> NamesAsync(string token, IReadOnlyList<(string name, string path)> items,
+            string avatarBase, CancellationToken cancellation)
+        {
+            var byId = new Dictionary<string, int>();
+            var sent = new List<object>();
+            for (int i = 0; i < items.Count && i < MaxNames; i++)
             {
-                string id = "a" + byId.Count;
-                byId[id] = attachment;
-                string path = attachment.variant ?? "";
+                string id = "a" + i;
+                byId[id] = i;
+                string path = items[i].path ?? "";
                 if (path.StartsWith("Assets/", StringComparison.Ordinal)) path = path.Substring(7);
-                items.Add(new { id, name = Clip(attachment.name, 200), path = Clip(path, 200), avatarBase = string.IsNullOrEmpty(avatarBase) ? null : Clip(avatarBase, 80) });
+                sent.Add(new { id, name = Clip(items[i].name, 200), path = Clip(path, 200), avatarBase = string.IsNullOrEmpty(avatarBase) ? null : Clip(avatarBase, 80) });
             }
-            var result = new Dictionary<OrbitersAttachment, string>();
-            if (items.Count == 0) return result;
-            var answer = await OrbitersApi.SendAsync<NameAnswer>(OrbitersEnvironment.ApiUrl("myavatar/accessory-name"), token, new { names = items }, cancellation);
+            var result = new Dictionary<int, string>();
+            if (sent.Count == 0) return result;
+            var answer = await OrbitersApi.SendAsync<NameAnswer>(OrbitersEnvironment.ApiUrl("myavatar/accessory-name"), token, new { names = sent }, cancellation);
             foreach (var item in answer?.names ?? Array.Empty<NameItem>())
-                if (item?.id != null && byId.TryGetValue(item.id, out var attachment) && !string.IsNullOrWhiteSpace(item.displayName))
-                    result[attachment] = item.displayName.Trim();
+                if (item?.id != null && byId.TryGetValue(item.id, out int index) && !string.IsNullOrWhiteSpace(item.displayName))
+                    result[index] = item.displayName.Trim();
             return result;
         }
+
+        internal const int MaxNames = 16;
 
         private static string Clip(string value, int length) => value == null ? "" : value.Length <= length ? value : value.Substring(0, length);
 
@@ -150,7 +141,6 @@ namespace Orbiters.MyAvatar.Editor
             var result = new Result { warnings = answer?.warnings ?? Array.Empty<string>() };
             if (answer == null) return result;
             // Only ids this request offered are trusted; the server checks the same.
-            if (answer.candidate != null && request.candidates.TryGetValue(answer.candidate, out var candidate)) result.candidate = candidate;
             if (answer.target != null && request.avatarBones.TryGetValue(answer.target, out var target)) result.target = target;
             foreach (var link in answer.links ?? Array.Empty<LinkAnswer>())
                 if (link.confidence >= .8f && request.bones.TryGetValue(link.bone ?? "", out var from) && request.avatarBones.TryGetValue(link.avatarBone ?? "", out var to))

@@ -37,6 +37,8 @@ namespace Orbiters.MyAvatar.Editor
             public DropZone Zone;
             /// <summary>True while the drop field shows the accessories' progress and status (the last drop was one).</summary>
             public Func<bool> OwnsZone = () => true;
+            /// <summary>The field shows the accessories from now on: called before any accessory progress is shown in it.</summary>
+            public Action ClaimZone = () => { };
         }
 
         private readonly MyAvatar avatar;
@@ -100,16 +102,18 @@ namespace Orbiters.MyAvatar.Editor
 
         internal async Task Drop(string[] paths)
         {
-            if (AccessoryService.Busy(avatar)) return;
+            host.ClaimZone();
+            if (AccessoryService.Busy(avatar)) { zone.ShowDone("Still adding the previous accessory: drop again once it is on.", true); return; }
             CancelAi();
             zone.ShowProgress(.02f, "Opening…");
-            await Report(async () => await FollowUp(await AccessoryService.DropAsync(avatar, paths, PickRivalAsync, (value, text) => zone.ShowProgress(value, text), CancellationToken.None)));
+            await Report(async () => await FollowUp(await AccessoryService.DropAsync(avatar, paths, (value, text) => zone.ShowProgress(value, text), CancellationToken.None)));
         }
 
         private async Task Choose(string answer)
         {
             if (AccessoryService.Busy(avatar)) return;
             CancelAi();
+            host.ClaimZone();
             zone.ShowProgress(.7f, "Attaching…");
             await Report(async () => await FollowUp(await AccessoryService.ChooseAsync(avatar, answer, (value, text) => zone.ShowProgress(value, text), CancellationToken.None)));
         }
@@ -167,25 +171,6 @@ namespace Orbiters.MyAvatar.Editor
         private static (OrbitersAttachment.AttachMode mode, Transform parent, string links, Transform owner, Vector3 position, Quaternion rotation, Vector3 scale) Placement(OrbitersAttachment attachment) =>
             (attachment.mode, attachment.parent, string.Join(",", attachment.links.Select(l => (l.from ? l.from.GetInstanceID() : 0) + ">" + (l.to ? l.to.GetInstanceID() : 0))),
                 attachment.transform.parent, attachment.transform.localPosition, attachment.transform.localRotation, attachment.transform.localScale);
-
-        // Several equally good variants of different items: one quick question before anything is installed.
-        private async Task<AccessoryCandidates.Candidate> PickRivalAsync(AccessoryCandidates.Choice choice, List<AccessoryImport.Doc> docs)
-        {
-            string token = Token();
-            if (!host.AiOn() || string.IsNullOrEmpty(token)) return null;
-            var request = AccessoryAi.ForCandidates(avatar.transform, choice, docs);
-            if (!request.worthAsking) return null;
-            zone.ShowProgress(.8f, "Asking Orbiters AI which one to use…");
-            var source = ai = new CancellationTokenSource();
-            int started = revision;
-            try
-            {
-                var candidate = (await RequestAi(token, request, source.Token)).candidate;
-                return Current(started, token) ? candidate : null;
-            }
-            catch (Exception) { return null; }
-            finally { if (ai == source) ai = null; source.Dispose(); }
-        }
 
         // After the local install: a guessed bone, unmatched clothing bones and manual steps, answered in the background.
         private async Task AskAiAsync(List<AccessoryService.Outcome> outcomes, int started)
@@ -256,17 +241,56 @@ namespace Orbiters.MyAvatar.Editor
             var options = AccessoryService.PendingOptions(avatar, out bool hands);
             choice.style.display = options.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             if (options.Count == 0) return;
-            var title = new Label(hands ? "This accessory comes for each hand. Which one should hold it?" : "Choose what to add; the others stay here until you are done.");
-            title.AddToClassList("accessory-choice__title"); choice.Add(title);
-            var row = new VisualElement(); row.AddToClassList("accessory-choice__row"); row.EnableInClassList("accessory-choice__row--wrap", !hands); choice.Add(row);
+            if (hands)
+            {
+                Title("This accessory comes for each hand. Which one should hold it?");
+                var row = new VisualElement(); row.AddToClassList("accessory-choice__row"); choice.Add(row);
+                foreach (var (label, value) in options)
+                {
+                    var answer = value;
+                    var button = Small(label, () => { choice.style.display = DisplayStyle.None; _ = host.Run(() => Choose(answer)); });
+                    button.RemoveFromClassList("accessory-button");
+                    row.Add(button);
+                }
+                return;
+            }
+            // Each item with its picture and, with AI help on, a clean name; an add-on ("Extra Tentacles") is offered together
+            // with the item it goes with.
+            _ = NameOptionsAsync(options);
+            var addons = options.Where(o => AccessoryCandidates.IsAddon(o.label)).ToList();
+            bool together = addons.Count > 0 && addons.Count < options.Count;
+            string Names(IEnumerable<(string label, string value)> items, string separator) => string.Join(separator, items.Select(o => OptionName(o.value, o.label)));
+            Title(together ? $"{Names(addons, " and ")} look{(addons.Count == 1 ? "s" : "")} like an add-on of {Names(options.Except(addons), " or ")}: add them together, or pick."
+                : $"This drop holds {options.Count} different items: choose what to add. The others stay here until you are done.");
+            var cards = new VisualElement(); cards.AddToClassList("accessory-choice__cards"); choice.Add(cards);
+            // As wide as the field allows, same margins left and right, like MCB's asset gallery; the picture stays square.
+            CardGrid.Attach(cards, 112f, 8f, (card, width) =>
+            {
+                var picture = card.Q(className: "accessory-option__picture");
+                if (picture != null) picture.style.height = width - 12f;
+            });
             foreach (var (label, value) in options)
             {
                 var answer = value;
-                var button = Small(label, () => { if (hands) choice.style.display = DisplayStyle.None; _ = host.Run(() => Choose(answer)); });
-                button.RemoveFromClassList("accessory-button");
-                row.Add(button);
+                var card = new VisualElement { tooltip = label + "\n" + value }; card.AddToClassList("accessory-option"); cards.Add(card);
+                var asset = AssetDatabase.LoadAssetAtPath<GameObject>(value);
+                string key = ModelThumbnails.KeyFor(value);
+                var picture = new AssetThumbnail(() => ModelThumbnails.Get(asset, key), asset != null);
+                picture.AddToClassList("accessory-option__picture"); card.Add(picture);
+                var name = new Label(OptionName(value, label)); name.AddToClassList("accessory-option__name"); card.Add(name);
+                var add = Small("Add", () => { card.style.display = DisplayStyle.None; _ = host.Run(() => Choose(answer)); });
+                add.AddToClassList("accessory-option__button"); card.Add(add);
             }
-            if (!hands) row.Add(Small("Done", () => AccessoryService.DismissChoice(avatar)));
+            var actions = new VisualElement(); actions.AddToClassList("accessory-choice__actions"); choice.Add(actions);
+            var all = Small(options.Count == 2 ? "Add both" : "Add all", () => { choice.style.display = DisplayStyle.None; _ = host.Run(() => Choose(AccessoryService.AllOptions)); });
+            if (together) all.AddToClassList("mcb-button--primary");
+            actions.Add(all);
+            actions.Add(Small("Done", () => AccessoryService.DismissChoice(avatar)));
+        }
+
+        private void Title(string text)
+        {
+            var title = new Label(text); title.AddToClassList("accessory-choice__title"); choice.Add(title);
         }
 
         // Notes about an accessory on the avatar go in its entry of the list; the rest (refused files, errors) stay here.
@@ -274,6 +298,9 @@ namespace Orbiters.MyAvatar.Editor
         {
             notes.Clear();
             var installed = AttachmentInstaller.Installed(avatar.transform);
+            // A fit question is about one accessory: once it is off the avatar (removed, undone), the question goes too.
+            if (avatar.accessoryNotes.RemoveAll(n => !string.IsNullOrEmpty(n.fit) && !(n.accessory is OrbitersAttachment a && installed.Contains(a))) > 0)
+                EditorUtility.SetDirty(avatar);
             foreach (var note in avatar.accessoryNotes.Where(n => !(n.accessory is OrbitersAttachment a && installed.Contains(a))))
                 AddNote(notes, note);
         }
@@ -289,13 +316,22 @@ namespace Orbiters.MyAvatar.Editor
             if (!string.IsNullOrEmpty(note.duplicate))
             {
                 var path = note.duplicate;
-                row.Add(Small("Replace", () => _ = host.Run(() => Replace(note.accessory as OrbitersAttachment, path))));
+                var target = note.target as GameObject;
+                row.Add(Small("Replace", () => _ = host.Run(() => Replace(note.accessory as OrbitersAttachment, target, path))));
                 row.Add(Small("Add another", () => _ = host.Run(() => AddAnother(path))));
             }
             if (note.target != null)
             {
                 var target = note.target;
                 row.Add(Small("Select", () => Select(target)));
+            }
+            if (note.armatureFit && note.accessory is OrbitersAttachment fitted)
+            {
+                row.Add(Small("Cancel", () =>
+                {
+                    AttachmentFit.Cancel(fitted);
+                    AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n != note).ToList());
+                }));
             }
         }
 
@@ -365,9 +401,11 @@ namespace Orbiters.MyAvatar.Editor
             menu.ShowAsContext();
         }
 
-        private Task Replace(OrbitersAttachment existing, string path)
+        // The copy on the avatar goes first: one My Avatar placed is removed as such, one put on by hand is deleted (Undo).
+        private Task Replace(OrbitersAttachment existing, GameObject worn, string path)
         {
             if (existing != null) AttachmentInstaller.Remove(existing);
+            else if (worn != null) Undo.DestroyObjectImmediate(worn);
             return AddAnother(path);
         }
 

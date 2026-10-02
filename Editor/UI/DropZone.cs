@@ -8,8 +8,8 @@ using UnityEngine.UIElements;
 namespace Orbiters.MyAvatar.Editor
 {
     // A file input: an empty drop field, a progress bar while a drop is applied, then the result with its actions (Undo and
-    // Save for textures). The field morphs between states with a slightly bouncy height spring and crossfaded contents; it
-    // keeps accepting drops in the empty and result states.
+    // Save for textures). The field morphs between states with a slightly bouncy height spring and crossfaded contents. Every
+    // drop reaches the owner, also while a drop is applied (the owner queues it): a drop is never ignored without a word.
     internal sealed class DropZone : VisualElement
     {
         private enum State { Idle, Working, Done }
@@ -56,7 +56,7 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly Color Green = new Color(0f, .855f, .427f), Amber = new Color(1f, .69f, .13f), Dash = new Color(.48f, .48f, .48f);
         private readonly Action<string[]> dropped;
         private readonly VisualElement idle, working, done, fill, shimmer, statusDot, backgroundDot, actions;
-        private readonly Label progressLabel, statusLabel, backgroundLabel, idleMessage;
+        private readonly Label progressLabel, statusLabel, backgroundLabel, idleMessage, queuedLabel;
         private State state = State.Idle;
         private VisualElement outgoing;
         private readonly Action<bool> aiToggled;
@@ -88,6 +88,7 @@ namespace Orbiters.MyAvatar.Editor
             fill = new VisualElement(); fill.AddToClassList("drop-zone__fill"); track.Add(fill);
             shimmer = new VisualElement(); shimmer.AddToClassList("drop-zone__shimmer"); track.Add(shimmer);
             progressLabel = new Label(); progressLabel.AddToClassList("drop-zone__progress-label"); track.Add(progressLabel);
+            queuedLabel = new Label(); queuedLabel.AddToClassList("drop-zone__queued"); queuedLabel.style.display = DisplayStyle.None; working.Add(queuedLabel);
 
             done = Layer("drop-zone__done");
             var status = new VisualElement(); status.AddToClassList("drop-zone__status"); done.Add(status);
@@ -118,19 +119,21 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var layer in new[] { idle, working, done }) layer.RegisterCallback<GeometryChangedEvent>(_ => Retarget());
             generateVisualContent += DrawBorder;
             RegisterCallback<DragUpdatedEvent>(e => {
-                DragAndDrop.visualMode = state == State.Working || !enabledInHierarchy ? DragAndDropVisualMode.Rejected : DragAndDropVisualMode.Copy;
-                if (state != State.Working) AddToClassList("drag-over");
+                DragAndDrop.visualMode = !enabledInHierarchy ? DragAndDropVisualMode.Rejected : DragAndDropVisualMode.Copy;
+                if (enabledInHierarchy) AddToClassList("drag-over");
                 MarkDirtyRepaint(); e.StopPropagation(); });
             RegisterCallback<DragLeaveEvent>(_ => Leave());
             RegisterCallback<DragExitedEvent>(_ => Leave());
             RegisterCallback<DragPerformEvent>(e => {
-                if (state == State.Working || !enabledInHierarchy) return;
+                if (!enabledInHierarchy) return;
                 var paths = DragAndDrop.paths.Concat(DragAndDrop.objectReferences.Select(AssetDatabase.GetAssetPath)).Where(p => !string.IsNullOrEmpty(p)).Distinct().ToArray();
                 DragAndDrop.AcceptDrag(); Leave(); dropped(paths); e.StopPropagation(); });
             RegisterCallback<AttachToPanelEvent>(_ => { lastTick = EditorApplication.timeSinceStartup; ticker = schedule.Execute(Tick).Every(16); });
             RegisterCallback<DetachFromPanelEvent>(_ => { ticker?.Pause(); ticker = null; });
             Show(idle, instant: true);
         }
+
+        internal bool Working => state == State.Working;
 
         internal void ShowIdle(string message = null, bool warning = false)
         {
@@ -173,6 +176,14 @@ namespace Orbiters.MyAvatar.Editor
             statusLabel.text = status;
             statusDot.style.backgroundColor = warning ? Amber : Green;
             Enter(State.Done, done);
+        }
+
+        // Under the progress bar: the drop waiting for this one to finish.
+        internal void SetQueued(string text)
+        {
+            queuedLabel.text = text ?? "";
+            queuedLabel.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+            Retarget();
         }
 
         // A quiet second line for background work, such as Orbiters AI resolving the remaining textures.

@@ -20,6 +20,8 @@ namespace Orbiters.MyAvatar.Editor
     internal static class AccessoryService
     {
         internal const string JobKey = "Orbiters.MyAvatar.AccessoryJobs";
+        /// <summary>The answer that adds every item a drop offered.</summary>
+        internal const string AllOptions = "*";
         internal const string CodeMessage = "Orbiters does not control the content of this package or its scripts. Unity compiles and runs code as soon as it is imported.";
 
         // JsonUtility writes null strings as "": test hand and pick with IsNullOrEmpty.
@@ -47,6 +49,8 @@ namespace Orbiters.MyAvatar.Editor
             public List<string> images;
             /// <summary>The drop's opened archives, released once its images are applied.</summary>
             public string staging;
+            /// <summary>The avatar already wore this item (put on by hand): My Avatar took it over instead of adding a copy.</summary>
+            public bool adopted;
             internal string followUp;
         }
 
@@ -65,8 +69,7 @@ namespace Orbiters.MyAvatar.Editor
             return AccessoryFollowUps.Take(avatar);
         }
 
-        internal static Task<List<Outcome>> DropAsync(MyAvatar avatar, string[] paths, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
-            Action<float, string> progress, CancellationToken cancellation) => Locked(avatar, async () =>
+        internal static Task<List<Outcome>> DropAsync(MyAvatar avatar, string[] paths, Action<float, string> progress, CancellationToken cancellation) => Locked(avatar, async () =>
         {
             var job = new Job { avatar = GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString(), instance = avatar.GetInstanceID(), batch = Guid.NewGuid().ToString("N").Substring(0, 12) };
             progress(.05f, "Opening the drop…");
@@ -74,11 +77,11 @@ namespace Orbiters.MyAvatar.Editor
             var keep = KeptStaging();
             try
             {
-                job.drop = await Task.Run(() => { AccessoryImport.SweepStaging(staging, keep); return AccessoryImport.Expand(paths, root, folder); }, cancellation);
+                job.drop = await DedicatedTask.Run(() => { AccessoryImport.SweepStaging(staging, keep); return AccessoryImport.Expand(paths, root, folder); }, cancellation);
                 if (!await ReviewPackagesAsync(avatar, job, progress, cancellation)) { AccessoryImport.DeleteStaging(folder); return new List<Outcome>(); }
                 cancellation.ThrowIfCancellationRequested();
                 job.drop.assets.AddRange(AccessoryImport.CopyModels(job.drop, job.batch));
-                return await RunAsync(avatar, job, pickRival, progress, cancellation);
+                return await RunAsync(avatar, job, progress, cancellation);
             }
             catch { AccessoryImport.DeleteStaging(folder); throw; }
         });
@@ -129,11 +132,15 @@ namespace Orbiters.MyAvatar.Editor
             return result;
         }
 
-        /// <summary>Continues a drop that waited for the user: a hand, or one of several items (the others stay offered).</summary>
+        /// <summary>
+        /// Continues a drop that waited for the user: a hand, one of several items (the others stay offered) or all of them
+        /// (<see cref="AllOptions"/>).
+        /// </summary>
         internal static Task<List<Outcome>> ChooseAsync(MyAvatar avatar, string answer, Action<float, string> progress, CancellationToken cancellation) => Locked(avatar, () =>
         {
             var job = Pending(avatar) ?? throw new InvalidOperationException("This choice is no longer pending.");
             if (job.options.Count == 0) { job.hand = answer; avatar.accessoryChoice = null; }
+            else if (answer == AllOptions) { job.pick = AllOptions; avatar.accessoryChoice = null; }
             else
             {
                 job.pick = answer;
@@ -141,7 +148,7 @@ namespace Orbiters.MyAvatar.Editor
                 avatar.accessoryChoice = job.options.Count > 0 ? JsonUtility.ToJson(new Job { avatar = job.avatar, instance = job.instance, batch = job.batch, drop = job.drop, guids = job.guids, nextPackage = job.nextPackage, options = job.options }) : null;
             }
             Dirty(avatar);
-            return RunAsync(avatar, job, null, progress, cancellation);
+            return RunAsync(avatar, job, progress, cancellation);
         });
 
         internal static void DismissChoice(MyAvatar avatar)
@@ -170,8 +177,7 @@ namespace Orbiters.MyAvatar.Editor
             finally { Running.Remove(id); Changed?.Invoke(avatar); }
         }
 
-        private static async Task<List<Outcome>> RunAsync(MyAvatar avatar, Job job, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
-            Action<float, string> progress, CancellationToken cancellation)
+        private static async Task<List<Outcome>> RunAsync(MyAvatar avatar, Job job, Action<float, string> progress, CancellationToken cancellation)
         {
             // Saved before each import: a package with scripts reloads the domain, and the job resumes from the next package.
             // Anything that ends the job here (done, failed, cancelled) forgets it; a domain reload does not.
@@ -191,11 +197,10 @@ namespace Orbiters.MyAvatar.Editor
                 while (EditorApplication.isCompiling || EditorApplication.isUpdating) await Task.Delay(100, cancellation);
             }
             finally { Forget(job); }
-            return await InstallAsync(avatar, job, pickRival, progress);
+            return InstallAll(avatar, job, progress);
         }
 
-        private static async Task<List<Outcome>> InstallAsync(MyAvatar avatar, Job job, Func<AccessoryCandidates.Choice, List<AccessoryImport.Doc>, Task<AccessoryCandidates.Candidate>> pickRival,
-            Action<float, string> progress)
+        private static List<Outcome> InstallAll(MyAvatar avatar, Job job, Action<float, string> progress)
         {
             var outcomes = new List<Outcome>();
             if (!avatar) return outcomes;
@@ -216,8 +221,8 @@ namespace Orbiters.MyAvatar.Editor
                 Status(avatar, "Left hand, right hand or both?", false, notes);
                 return outcomes;
             }
-            // Several different items of equal standing (a clothing collection): the user picks, one or more.
-            if (string.IsNullOrEmpty(job.pick) && !choice.NeedsHand && choice.rivals.Count >= 2)
+            // Several different items of equal standing (a collection, or an item and its add-on): the user picks, one or more.
+            if (string.IsNullOrEmpty(job.pick) && !choice.NeedsHand && choice.rivals.Count >= 1)
             {
                 job.options = new[] { choice.best }.Concat(choice.rivals).Select(c => c.path).ToList();
                 avatar.accessoryChoice = JsonUtility.ToJson(job); Dirty(avatar);
@@ -225,18 +230,14 @@ namespace Orbiters.MyAvatar.Editor
                 return outcomes;
             }
             var chosen = new List<AccessoryCandidates.Candidate>();
-            if (!string.IsNullOrEmpty(job.pick)) chosen.AddRange(choice.all.Where(c => c.path == job.pick));
+            if (job.pick == AllOptions) chosen.AddRange(choice.all.Where(c => job.options.Contains(c.path)));
+            else if (!string.IsNullOrEmpty(job.pick)) chosen.AddRange(choice.all.Where(c => c.path == job.pick));
             else if (choice.NeedsHand)
             {
                 if (job.hand != "right") chosen.Add(choice.left);
                 if (job.hand != "left") chosen.Add(choice.right);
             }
-            else
-            {
-                var best = choice.best;
-                if (choice.rivals.Count > 0 && pickRival != null) best = await pickRival(choice, job.drop.docs) ?? best;
-                chosen.Add(best);
-            }
+            else chosen.Add(choice.best);
             progress(.9f, "Attaching " + string.Join(" and ", chosen.Select(c => c.name)) + "…");
             foreach (var candidate in chosen)
             {
@@ -249,7 +250,9 @@ namespace Orbiters.MyAvatar.Editor
             }
             // Without images to apply nothing reads the opened archives any more.
             if (outcomes.Count == 0 || job.drop.images.Count == 0) Release(avatar, job.drop.staging);
-            Status(avatar, Summary(outcomes, choice.all.Count - chosen.Count), notes.Any(n => n.warning), notes);
+            // Variants left out: not the items still offered for a later pick.
+            int leftOut = choice.all.Count(c => !chosen.Contains(c) && (job.pick == AllOptions || !job.options.Contains(c.path)));
+            Status(avatar, Summary(outcomes, leftOut), notes.Any(n => n.warning), notes);
             return outcomes;
         }
 
@@ -268,26 +271,52 @@ namespace Orbiters.MyAvatar.Editor
         private static Outcome Install(MyAvatar avatar, AccessoryCandidates.Candidate candidate, List<MyAvatar.AccessoryNote> notes, bool allowDuplicate = false)
         {
             string guid = AssetDatabase.AssetPathToGUID(candidate.path);
-            var existing = allowDuplicate ? null : AttachmentInstaller.Installed(avatar.transform).FirstOrDefault(a => a.source == guid && a.variant == candidate.path);
+            string origin = AccessoryCandidates.Origin(candidate.asset);
+            // The same item, also when it came as its model before (or its prefab now): one prefab and the model it is made of.
+            var existing = allowDuplicate ? null : AttachmentInstaller.Installed(avatar.transform)
+                .FirstOrDefault(a => a.source == guid && a.variant == candidate.path || origin != null && AccessoryCandidates.Origin(a.gameObject) == origin);
             if (existing != null)
             {
                 notes.Add(new MyAvatar.AccessoryNote { target = existing.gameObject, accessory = existing, text = candidate.name + " is already on this avatar.", duplicate = candidate.path });
                 return null;
             }
+            // Put on by hand before: the very same prefab is taken over (no second copy); another prefab of the same model
+            // is asked about.
+            var worn = allowDuplicate ? null : Worn(avatar.transform, origin);
+            if (worn != null && Source(worn) != candidate.path)
+            {
+                notes.Add(new MyAvatar.AccessoryNote { target = worn, text = candidate.name + " looks like “" + worn.name + "”, already on this avatar.", duplicate = candidate.path });
+                return null;
+            }
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("My Avatar: add " + candidate.name);
-            var instance = (GameObject)PrefabUtility.InstantiatePrefab(candidate.asset, avatar.transform);
-            Undo.RegisterCreatedObjectUndo(instance, "Add " + candidate.name);
+            GameObject instance;
+            if (worn != null)
+            {
+                Undo.SetCurrentGroupName("My Avatar: take over " + worn.name);
+                instance = worn;
+            }
+            else
+            {
+                Undo.SetCurrentGroupName("My Avatar: add " + candidate.name);
+                instance = (GameObject)PrefabUtility.InstantiatePrefab(candidate.asset, avatar.transform);
+                Undo.RegisterCreatedObjectUndo(instance, "Add " + candidate.name);
+            }
             var plan = AttachmentPlanner.Analyze(instance, avatar.transform);
             if (plan.Kind == AttachmentKind.Empty)
             {
-                Undo.DestroyObjectImmediate(instance);
+                if (worn == null) Undo.DestroyObjectImmediate(instance);
                 notes.Add(new MyAvatar.AccessoryNote { text = candidate.name + " has nothing to show on the avatar.", warning = true });
                 Undo.CollapseUndoOperations(group);
                 return null;
             }
+            // A copy taken over counts as placed by My Avatar: dropping the item again handed it over, and Remove takes it off.
             var attachment = AttachmentInstaller.Install(plan, new AttachmentOptions { Created = true, Source = guid, Variant = candidate.path });
+            // Clothing made for another body (its hips at the avatar's chest, another height): resized and moved onto this
+            // avatar's armature, said in its entry with a way back. One put on by hand stays where its owner placed it.
+            if (worn == null && (plan.Kind == AttachmentKind.Clothing || plan.Kind == AttachmentKind.Configured) &&
+                AttachmentFit.Fit(attachment, avatar.transform) is AttachmentFit.Measure fit)
+                notes.Add(new MyAvatar.AccessoryNote { accessory = attachment, armatureFit = true, text = FitText(candidate.name, fit) });
             foreach (var note in plan.Notes)
                 notes.Add(new MyAvatar.AccessoryNote { target = note.Target, accessory = attachment, text = note.Reason, warning = true, modularAvatar = plan.NeedsModularAvatar && note.Target == instance });
             if (!VrcFury.Installed && plan.Kind != AttachmentKind.Configured)
@@ -297,13 +326,38 @@ namespace Orbiters.MyAvatar.Editor
             // would otherwise take the accessory away right after it was added.
             Undo.IncrementCurrentGroup();
             EditorGUIUtility.PingObject(instance);
-            return new Outcome { attachment = attachment, plan = plan, candidate = candidate };
+            return new Outcome { attachment = attachment, plan = plan, candidate = candidate, adopted = worn != null };
+        }
+
+        internal static string FitText(string name, AttachmentFit.Measure fit) =>
+            name + " was made for another body: " + (fit.Segments > 0 && Mathf.Abs(fit.Scale - 1f) > 0.005f ? (fit.Scale > 1f ? "enlarged" : "shrunk") + " to " +
+            Mathf.RoundToInt(fit.Scale * 100f) + "% and " : "") + "moved onto this avatar's armature.";
+
+        // A copy of the item the avatar already wears without My Avatar: an outermost prefab instance under the avatar made
+        // of the same model or prefab, outside every accessory My Avatar placed.
+        private static GameObject Worn(Transform avatarRoot, string origin)
+        {
+            if (string.IsNullOrEmpty(origin)) return null;
+            foreach (var t in avatarRoot.GetComponentsInChildren<Transform>(true))
+            {
+                var go = t.gameObject;
+                if (t == avatarRoot || !PrefabUtility.IsOutermostPrefabInstanceRoot(go) || go.GetComponentInParent<OrbitersAttachment>(true) != null) continue;
+                if (AccessoryCandidates.Origin(go) == origin) return go;
+            }
+            return null;
+        }
+
+        private static string Source(GameObject instance)
+        {
+            var source = PrefabUtility.GetCorrespondingObjectFromSource(instance);
+            return source != null ? AssetDatabase.GetAssetPath(source) : null;
         }
 
         private static string Summary(List<Outcome> outcomes, int leftOut)
         {
             if (outcomes.Count == 0) return "Nothing new was added.";
-            var parts = outcomes.Where(o => o.attachment != null).Select(o => o.attachment.name + " " + Describe(o.attachment, o.plan)).ToList();
+            var parts = outcomes.Where(o => o.attachment != null)
+                .Select(o => o.attachment.name + (o.adopted ? " was already on the avatar: My Avatar manages it now and " : " ") + Describe(o.attachment, o.plan)).ToList();
             string skipped = leftOut > 0 ? $" · {leftOut} other variant{(leftOut == 1 ? "" : "s")} left out" : "";
             return string.Join(" · ", parts) + skipped;
         }
@@ -398,7 +452,7 @@ namespace Orbiters.MyAvatar.Editor
             try
             {
                 Status(avatar, "Finishing the accessory import…", false, null);
-                var outcomes = await Locked(avatar, () => RunAsync(avatar, job, null, (_, __) => { }, CancellationToken.None));
+                var outcomes = await Locked(avatar, () => RunAsync(avatar, job, (_, __) => { }, CancellationToken.None));
                 if (outcomes.Count > 0 && avatar) { AccessoryFollowUps.Save(avatar, outcomes); Changed?.Invoke(avatar); }
             }
             catch (Exception ex) { AccessoryImport.DeleteStaging(job.drop.staging); Status(avatar, ex.Message, true, null); }

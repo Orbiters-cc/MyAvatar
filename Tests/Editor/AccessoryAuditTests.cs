@@ -244,7 +244,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var file = Package("Tail", (code, "class Setup {}"), ("Assets/Tail/Readme.md", "A tail."));
             UntrustedCodeDialog.Request asked = null;
             AccessoryService.ConfirmCode = request => { asked = request; return false; };
-            var drop = AccessoryService.DropAsync(avatar, new[] { file }, null, (_, __) => { }, CancellationToken.None);
+            var drop = AccessoryService.DropAsync(avatar, new[] { file }, (_, __) => { }, CancellationToken.None);
             yield return Wait(drop);
             Assert.That(asked, Is.Not.Null);
             Assert.That(asked.Files, Is.EqualTo(new[] { code }));
@@ -261,7 +261,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var avatar = Avatar();
             var file = Package("Evil", ("Assets/../../evil.txt", "x"));
             AccessoryService.ConfirmCode = _ => throw new AssertionException("Nothing with code here.");
-            var drop = AccessoryService.DropAsync(avatar, new[] { file }, null, (_, __) => { }, CancellationToken.None);
+            var drop = AccessoryService.DropAsync(avatar, new[] { file }, (_, __) => { }, CancellationToken.None);
             yield return Wait(drop);
             Assert.That(avatar.accessoryNotes.Any(n => n.text.Contains("outside Assets and Packages")), Is.True);
             Assert.That(drop.Result, Is.Empty);
@@ -290,7 +290,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 Assert.That(ModelCopied(), Is.False, "Even a loose model must wait for the nested package's consent.");
                 return false;
             };
-            var task = AccessoryService.DropAsync(avatar, new[] { outer }, null, (_, __) => { }, CancellationToken.None);
+            var task = AccessoryService.DropAsync(avatar, new[] { outer }, (_, __) => { }, CancellationToken.None);
             yield return Wait(task);
             Assert.That(asked, Is.True);
             Assert.That(task.Result, Is.Empty);

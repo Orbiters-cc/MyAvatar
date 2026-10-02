@@ -56,7 +56,8 @@ namespace Orbiters.MyAvatar.Editor
             string.IsNullOrEmpty(entry.suggestedMaterialName) || (entry.reason ?? "").StartsWith(TextureMatching.NoClearMatchReason, System.StringComparison.Ordinal)
                 ? null : entry.suggestedMaterialName;
 
-        // Under a material's heading the best guess just says "Use": the heading already names the material.
+        // Under a material's heading the best guess just says "Use": the heading already names the material. The name and the
+        // reason take the card's width; the buttons go on their own line below them, so narrow Inspectors never squeeze them.
         private static VisualElement Card(TextureEntry entry, List<TextureSlot> slots, MyAvatar avatar, System.Action edited, System.Action apply, System.Action dismiss, bool underTarget)
         {
             var card = new VisualElement(); card.AddToClassList("texture-card");
@@ -64,6 +65,7 @@ namespace Orbiters.MyAvatar.Editor
             var text = new VisualElement(); text.AddToClassList("texture-text"); card.Add(text);
             var filename = new Label(entry.fileName); filename.AddToClassList("filename"); text.Add(filename);
             var reason = new Label(entry.reason) { tooltip = entry.reason }; reason.AddToClassList("reason"); text.Add(reason);
+            var actions = new VisualElement(); actions.AddToClassList("texture-actions"); text.Add(actions);
             void Choose(TextureSlot slot)
             {
                 edited(); Undo.RecordObject(avatar, "My Avatar: choose slot");
@@ -83,11 +85,11 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var use = MyAvatarEditor.Button(underTarget ? "Use" : "Use on " + suggested[0].materialName, () => Choose(suggested[0]));
                 use.tooltip = "Use on " + suggested[0].Label;
-                use.AddToClassList("texture-choose"); card.Add(use);
+                use.AddToClassList("texture-choose"); actions.Add(use);
             }
             var button = MyAvatarEditor.Button(suggested.Length == 1 ? "Other…" : "Choose slot…", Menu);
             button.tooltip = "Pick the material slot for this texture.";
-            button.AddToClassList("texture-choose"); card.Add(button);
+            button.AddToClassList("texture-choose"); actions.Add(button);
             card.Add(Close("Dismiss this image", dismiss));
             return card;
         }

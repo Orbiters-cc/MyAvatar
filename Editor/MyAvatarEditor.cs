@@ -31,6 +31,9 @@ namespace Orbiters.MyAvatar.Editor
         [NonSerialized] private bool saved;
         // The drop field shows what the last drop was: textures (their status, Undo and Save) or an accessory.
         [NonSerialized] private bool accessoryDrop;
+        // A drop made while another is applied: it runs right after, never dropped silently.
+        [NonSerialized] private string[] queuedDrop;
+        private IVisualElementScheduledItem queuedPoll;
         internal Func<string, object, List<TextureEntry>, List<TextureSlot>, CancellationToken, Task<TextureAi.Result>> RequestAi = TextureAi.RequestAsync;
         private void OnEnable()
         {
@@ -98,7 +101,7 @@ namespace Orbiters.MyAvatar.Editor
                 : "Save the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint.";
             save.AddToClassList("mcb-button--primary");
             undo.AddToClassList("drop-zone__undo"); save.AddToClassList("drop-zone__save");
-            zone = new DropZone(AccessoriesSection.Enabled ? DropZone.Anything : DropZone.Textures, paths => _ = Run(() => DropAnything(paths)),
+            zone = new DropZone(AccessoriesSection.Enabled ? DropZone.Anything : DropZone.Textures, Drop,
                 new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
             zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
@@ -111,6 +114,7 @@ namespace Orbiters.MyAvatar.Editor
                 Background = status => zone.SetBackground(status),
                 Zone = zone,
                 OwnsZone = () => accessoryDrop,
+                ClaimZone = () => { accessoryDrop = true; zone.SetActionsShown(false); },
             });
             content.Add(accessories);
             content.Add(new ThumbnailSection(avatar, photoshoot));
@@ -120,7 +124,7 @@ namespace Orbiters.MyAvatar.Editor
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
-            content.Add(new ToolsSection());
+            content.Add(new ToolsSection(avatar));
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
@@ -129,12 +133,41 @@ namespace Orbiters.MyAvatar.Editor
             return root;
         }
 
+        // A drop answers at once: the field shows progress before anything is read. One made while another drop (or an
+        // accessory job resumed after a reload) is running waits for it, and the field says so.
+        private void Drop(string[] paths)
+        {
+            if (!active || !avatar || paths == null || paths.Length == 0) return;
+            if (busy || Running.Contains(avatar.GetInstanceID()) || AccessoryService.Busy(avatar))
+            {
+                queuedDrop = paths;
+                zone.SetQueued("Next: " + DropName(paths) + ", once this is done");
+                queuedPoll ??= root.schedule.Execute(StartQueuedDrop).Every(150);
+                return;
+            }
+            zone.ShowProgress(.02f, "Opening " + DropName(paths) + "…");
+            _ = Run(() => DropAnything(paths));
+        }
+
+        private void StartQueuedDrop()
+        {
+            if (queuedDrop == null || !active || !avatar) { queuedPoll?.Pause(); queuedPoll = null; return; }
+            if (busy || Running.Contains(avatar.GetInstanceID()) || AccessoryService.Busy(avatar)) return;
+            var paths = queuedDrop; queuedDrop = null;
+            queuedPoll?.Pause(); queuedPoll = null;
+            zone.SetQueued(null);
+            Drop(paths);
+        }
+
+        private static string DropName(string[] paths) =>
+            paths.Length == 1 ? "“" + System.IO.Path.GetFileName(paths[0].TrimEnd('/', '\\')) + "”" : paths.Length + " files";
+
         // One field for everything: a drop holding a package, archive, prefab or model is an accessory (its images go to it);
         // anything else is a texture set.
         private async Task DropAnything(string[] paths)
         {
             string root = AccessoryImport.ProjectRoot;
-            if (AccessoriesSection.Enabled && await Task.Run(() => AccessoryImport.HoldsAccessory(paths, root)))
+            if (AccessoriesSection.Enabled && await Orbiters.Toolkit.Editor.DedicatedTask.Run(() => AccessoryImport.HoldsAccessory(paths, root)))
             {
                 accessoryDrop = true;
                 zone.SetActionsShown(false);
@@ -152,7 +185,7 @@ namespace Orbiters.MyAvatar.Editor
             int started = revision;
             note = null; results.Clear();
             zone.ShowProgress(.04f, "Finding textures…");
-            var files = await Task.Run(() => TextureImport.Expand(paths), cancellation);
+            var files = await Orbiters.Toolkit.Editor.DedicatedTask.Run(() => TextureImport.Expand(paths), cancellation);
             cancellation.ThrowIfCancellationRequested();
             var scoped = scope?.Where(t => t).ToList() ?? new List<Transform>();
             var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar), scoped);

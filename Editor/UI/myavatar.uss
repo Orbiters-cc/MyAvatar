@@ -19,6 +19,7 @@
 .drop-zone__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 16px; background-color: #00DA6D; }
 .drop-zone__shimmer { position: absolute; top: 0; bottom: 0; width: 30%; background-color: rgba(255, 255, 255, 0.07); border-radius: 16px; }
 .drop-zone__progress-label { -unity-text-align: middle-center; color: #ffffff; -unity-font-style: bold; font-size: 12px; }
+.drop-zone__queued { margin-top: 8px; font-size: 11px; color: #9a9a9a; -unity-text-align: middle-center; white-space: normal; }
 
 .drop-zone__done { padding: 16px 16px 12px 16px; }
 .drop-zone__status, .drop-zone__background { flex-direction: row; align-items: center; }
@@ -50,12 +51,13 @@
 .mcb-button.texture-dismiss:hover { background-color: rgba(255, 255, 255, 0.08); }
 .texture-dismiss__icon { width: 12px; height: 12px; --icon-color: #7a7a7a; }
 .mcb-button.texture-dismiss:hover .texture-dismiss__icon { --icon-color: #e6e6e6; }
-.texture-card { flex-direction: row; align-items: center; background-color: #212121; border-radius: 12px; padding: 8px 6px 8px 8px; margin-bottom: 6px; }
-.texture-preview { width: 34px; height: 34px; margin-right: 10px; flex-shrink: 0; border-radius: 8px; }
-.texture-text { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 8px; }
+.texture-card { flex-direction: row; align-items: flex-start; background-color: #212121; border-radius: 12px; padding: 8px 6px 8px 8px; margin-bottom: 6px; }
+.texture-preview { width: 40px; height: 40px; margin-right: 10px; flex-shrink: 0; border-radius: 8px; }
+.texture-text { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 4px; }
 .filename { white-space: normal; color: #ffffff; -unity-font-style: bold; font-size: 12px; }
 .reason { white-space: normal; color: #8c8c8c; font-size: 10px; margin-top: 2px; max-height: 26px; overflow: hidden; }
-.texture-choose { flex-shrink: 0; max-width: 150px; }
+.texture-actions { flex-direction: row; flex-wrap: wrap; margin-top: 6px; }
+.mcb-button.texture-choose { flex-shrink: 1; max-width: 220px; margin: 0 6px 0 0; }
 
 /* Quick optimization: the offer or the result, then the d4rkAvatarOptimizer suggestion. */
 .optimize-card { background-color: #212121; border-radius: 16px; margin-bottom: 10px; }
@@ -229,8 +231,14 @@
 .accessory-item__name { font-size: 12px; -unity-font-style: bold; color: #ffffff; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .accessory-item__how { margin-top: 4px; font-size: 11px; color: #9a9a9a; white-space: normal; }
 .accessory-button { height: 22px; min-width: 0; padding: 0 8px; margin: 0 0 0 4px; font-size: 11px; flex-shrink: 0; }
-.accessory-choice__row--wrap { flex-wrap: wrap; }
-.accessory-choice__row--wrap > .mcb-button { flex-grow: 0; margin: 3px; }
+.accessory-choice__cards { flex-direction: row; flex-wrap: wrap; }
+.accessory-option { margin-top: 4px; margin-bottom: 4px; padding: 6px; border-radius: 12px; background-color: #232323; align-items: stretch; }
+.accessory-option__picture { height: 100px; border-radius: 10px; overflow: hidden; background-color: #212123; opacity: 0.35; transition-property: opacity; transition-duration: 0.3s; }
+.accessory-option__picture.orb-thumbnail--shown { opacity: 1; }
+.accessory-option__name { margin: 6px 2px 6px 2px; font-size: 11px; color: #ffffff; white-space: normal; -unity-text-align: middle-center; }
+.accessory-button.accessory-option__button { margin: 0; }
+.accessory-choice__actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 8px; }
+.accessory-choice__actions > .mcb-button { height: 24px; min-height: 24px; padding: 0 12px; margin: 0 0 0 6px; border-radius: 12px; }
 
 /* One corner radius for every frame of the window: 16 px for frames (sign-in, drop fields, cards, stages), 12 px for
    rows inside them. The shared sign-in card and photoshoot studio follow here. */
@@ -242,6 +250,6 @@
 .drop-zone__actions--hiding { opacity: 0; scale: 0.96 0.96; }
 
 /* Tools: one tile per tool, like the photoshoot's buttons. */
-.tools-row { flex-direction: row; }
-.tools-tile { margin: 0 8px 0 0; }
+.tools-row { flex-direction: row; flex-wrap: wrap; margin-bottom: -8px; }
+.tools-tile { flex-grow: 0; flex-basis: auto; width: 104px; margin: 0 8px 8px 0; }
 .tools-tile__badge { position: absolute; top: 6px; right: 6px; padding: 1px 6px; border-radius: 8px; font-size: 9px; -unity-font-style: bold; color: #00DA6D; background-color: rgba(0, 218, 109, 0.14); }
