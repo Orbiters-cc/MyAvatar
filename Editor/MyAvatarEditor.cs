@@ -121,6 +121,7 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new PosingSection(avatar));
             content.Add(new PhysicsSection(avatar));
             content.Add(new ParametersSection(avatar));
+            content.Add(new DrawingPenSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
@@ -189,6 +190,7 @@ namespace Orbiters.MyAvatar.Editor
             cancellation.ThrowIfCancellationRequested();
             var scoped = scope?.Where(t => t).ToList() ?? new List<Transform>();
             var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar), scoped);
+            foreach (var slot in slots) slot.fillOnly = scoped.Count > 0;
             if (slots.Count == 0) throw new InvalidOperationException("No editable texture slots were found below this avatar.");
             if (slots.Count > 512) throw new InvalidOperationException("This avatar has more than 512 texture slots. Place My Avatar on a smaller avatar root.");
             string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
@@ -207,7 +209,7 @@ namespace Orbiters.MyAvatar.Editor
             var unmatched = entries.Where(e => !e.material && !(e.reason ?? "").StartsWith(TextureMatching.MissingSlotReason, StringComparison.Ordinal)).ToList();
             // Slots filled by this drop's local matches are left out, so an answer cannot displace them. Effect renderers
             // (particles, trails) and secondary layers (detail, matcap, rim...) stay available in the manual slot menu only.
-            var open = slots.Where(s => !s.secondary && s.rendererKind != "effect" && unmatched.Any(e => TextureMatching.Compatible(e.role, s.role)) &&
+            var open = slots.Where(s => !s.secondary && s.rendererKind != "effect" && unmatched.Any(e => TextureMatching.Compatible(e.role, s) && TextureMatching.CanAutoAssign(e, s)) &&
                 !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
             bool ask = unmatched.Count > 0 && open.Count > 0 && !string.IsNullOrEmpty(token) && aiEnabled;
             object payload = ask ? TextureAi.Payload(unmatched, open, stats) : null;

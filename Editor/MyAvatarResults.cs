@@ -107,8 +107,8 @@ namespace Orbiters.MyAvatar.Editor
         // image must already be packed for them), and materials that share a name told apart by their object's path.
         internal static List<(string path, TextureSlot slot)> MenuItems(TextureEntry entry, List<TextureSlot> slots)
         {
-            bool Packed(TextureSlot s) => TextureMatching.Packed(entry.role, s.role);
-            var offered = slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s.role) || Packed(s))
+            bool Packed(TextureSlot s) => TextureMatching.Packed(entry.role, s.role) && !MaterialSurfaceMaps.CanAssign(entry.role, s.property);
+            var offered = slots.Where(s => entry.role == "unknown" || s.role == "unknown" || TextureMatching.Compatible(entry.role, s) || Packed(s))
                 .OrderBy(s => !s.active).ThenBy(Packed).ThenBy(s => s.secondary).ThenBy(s => s.materialName).ToList();
             var names = new Dictionary<Material, string>();
             foreach (var same in offered.GroupBy(s => s.material).Select(g => g.First()).GroupBy(s => s.materialName))

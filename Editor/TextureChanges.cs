@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Orbiters.Toolkit.Editor;
 #if MYAVATAR_UNITGIT
 using Orbiters.UnitGit.Editor;
 #endif
@@ -39,6 +40,7 @@ namespace Orbiters.MyAvatar.Editor
             folder = folder ?? "Assets/Orbiters/MyAvatar/MaterialEdits";
             TextureImport.EnsureFolder(folder);
             var copy = new Material(material) { name = material.name };
+            MaterialSurfaceMaps.MakeEditable(copy);
             copy.SetTexture(property, null);
             string keyword = Keyword(property);
             if (keyword != null) copy.DisableKeyword(keyword);
@@ -47,6 +49,8 @@ namespace Orbiters.MyAvatar.Editor
                 if (copy.HasProperty("_EmissionColor")) copy.SetColor("_EmissionColor", Color.black);
                 copy.globalIlluminationFlags |= MaterialGlobalIlluminationFlags.EmissiveIsBlack;
             }
+            Orbiters.Toolkit.Editor.MaterialRepair.ConfigureTextureFeatures(copy);
+            MaterialSurfaceMaps.DefaultRough(copy);
             AssetDatabase.CreateAsset(copy, AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafeName(copy.name) + ".mat"));
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();
@@ -83,7 +87,7 @@ namespace Orbiters.MyAvatar.Editor
             var slots = Scoped(TextureMatching.Slots(avatar), scope);
             var applicable = entries.Where(e => !e.applied && e.texture && e.material && slots.Any(s => s.material == e.material && s.property == e.property)).ToList();
             if (applicable.Count == 0) return 0;
-            if (applicable.GroupBy(e => (e.material, e.property)).Any(g => g.Count() > 1))
+            if (applicable.GroupBy(e => (e.material, e.property)).Any(g => g.Count() > 1 && !MaterialSurfaceMaps.CanCombine(g.Key.property, g.Select(e => e.role).ToArray())))
                 throw new InvalidOperationException("Choose only one texture for each material slot.");
             TextureImport.EnsureFolder(folder + "/Materials");
             var replacements = new Dictionary<Material, Material>();
@@ -97,7 +101,7 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var group in applicable.Where(e => !reusable.Contains(e.material)).GroupBy(e => e.material))
                 {
                     var copy = new Material(group.Key) { name = group.Key.name };
-                    foreach (var entry in group) Assign(copy, entry.property, entry.texture);
+                    foreach (var entry in group) Assign(copy, entry, folder);
                     string name = SafeName(copy.name), path = folder + "/Materials/" + name + ".mat";
                     for (int i = 1; File.Exists(path) || !paths.Add(path); i++) path = folder + "/Materials/" + name + " " + i + ".mat";
                     created.Add((copy, path)); replacements.Add(group.Key, copy);
@@ -110,7 +114,7 @@ namespace Orbiters.MyAvatar.Editor
                 Undo.IncrementCurrentGroup(); int groupId = Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName("My Avatar: apply textures");
                 Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(renderers).Concat(reused).ToArray(), "My Avatar: apply textures");
-                foreach (var entry in applicable.Where(e => reusable.Contains(e.material))) Assign(entry.material, entry.property, entry.texture);
+                foreach (var entry in applicable.Where(e => reusable.Contains(e.material))) Assign(entry.material, entry, folder);
                 foreach (var renderer in renderers)
                 {
                     var current = renderer.sharedMaterials;
@@ -127,13 +131,14 @@ namespace Orbiters.MyAvatar.Editor
                     if (!extend)
                     {
                         entry.appliedBeforeLast = entry.applied;
+                        entry.appliedTextureBeforeLast = entry.appliedTexture;
                         entry.materialBeforeLast = entry.material;
                         entry.propertyBeforeLast = entry.property;
                         entry.reasonBeforeLast = entry.reason;
                     }
                     if (entry.material && replacements.TryGetValue(entry.material, out var replacement)) entry.material = replacement;
-                    if (applicable.Contains(entry)) entry.applied = true;
-                    else if (entry.applied && entry.material && entry.material.GetTexture(entry.property) != entry.texture)
+                    if (applicable.Contains(entry)) { entry.applied = true; entry.appliedTexture = entry.material.GetTexture(entry.property) as Texture2D; }
+                    else if (entry.applied && entry.material && entry.material.GetTexture(entry.property) != (entry.appliedTexture ? entry.appliedTexture : entry.texture))
                     {
                         entry.applied = false; entry.material = null; entry.property = null;
                         entry.reason = "Another texture was chosen for this slot.";
@@ -207,6 +212,11 @@ namespace Orbiters.MyAvatar.Editor
             int accepted = 0;
             foreach (var change in changes.Where(c => !c.entry.dismissed))
             {
+                if (!TextureMatching.CanAutoAssign(change.entry, change.slot))
+                {
+                    change.entry.reason = "Kept the accessory's existing texture. Choose a slot to replace it deliberately.";
+                    continue;
+                }
                 var occupant = entries.FirstOrDefault(e => e != change.entry && e.material && Original(e.material) == change.slot.material && e.property == change.slot.property);
                 // Choices the user confirmed in an earlier apply outrank the model.
                 if (change.entry.reason == TextureMatching.RememberedReason || occupant?.reason == TextureMatching.RememberedReason) continue;
@@ -249,14 +259,16 @@ namespace Orbiters.MyAvatar.Editor
                     if (copy.HasProperty("_EmissionColor")) copy.SetColor("_EmissionColor", original.GetColor("_EmissionColor"));
                     copy.globalIlluminationFlags = original.globalIlluminationFlags;
                 }
+                Orbiters.Toolkit.Editor.MaterialRepair.ConfigureTextureFeatures(copy);
                 EditorUtility.SetDirty(copy);
             }
             entry.applied = false; entry.material = null; entry.property = null; entry.confidence = 0;
         }
 
-        private static void Assign(Material copy, string property, Texture texture)
+        private static void Assign(Material copy, TextureEntry entry, string folder)
         {
-            copy.SetTexture(property, texture);
+            string property = entry.property;
+            MaterialSurfaceMaps.Assign(copy, property, entry.texture, entry.role, entry.fileName, folder + "/SurfaceMaps");
             string keyword = Keyword(property);
             if (keyword != null) copy.EnableKeyword(keyword);
             if (property == "_EmissionMap")
@@ -264,6 +276,8 @@ namespace Orbiters.MyAvatar.Editor
                 if (copy.HasProperty("_EmissionColor") && copy.GetColor("_EmissionColor").maxColorComponent == 0) copy.SetColor("_EmissionColor", Color.white);
                 copy.globalIlluminationFlags &= ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
             }
+            Orbiters.Toolkit.Editor.MaterialRepair.ConfigureTextureFeatures(copy);
+            MaterialSurfaceMaps.DefaultRough(copy);
             EditorUtility.SetDirty(copy);
         }
 
@@ -296,6 +310,8 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var material = entry.material; var property = entry.property;
                 var reason = entry.reason; bool applied = entry.applied;
+                var appliedTexture = entry.appliedTexture;
+                entry.appliedTexture = entry.appliedTextureBeforeLast; entry.appliedTextureBeforeLast = appliedTexture;
                 entry.material = entry.materialBeforeLast; entry.property = entry.propertyBeforeLast;
                 entry.reason = entry.reasonBeforeLast; entry.applied = entry.appliedBeforeLast;
                 entry.materialBeforeLast = material; entry.propertyBeforeLast = property;

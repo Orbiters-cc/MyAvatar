@@ -1,7 +1,7 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "unity": "2022.3",
   "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, pose it with symmetry and a clothing preview, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
@@ -13,8 +13,8 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.3.9 <0.4.0",
-    "orbiters.xraygizmos": ">=0.2.6 <0.3.0",
+    "orbiters.toolkit": ">=0.3.10 <0.4.0",
+    "orbiters.xraygizmos": ">=0.2.7 <0.3.0",
     "com.vrchat.avatars": ">=3.7.0 <4.0.0"
   },
   "orbiters": {
@@ -67,7 +67,7 @@
         "reason": "Merges meshes and materials and removes unused blendshapes and bones at build time, for a better performance rank without touching your avatar."
       },
       "orbiters.refit": {
-        "version": ">=0.5.2 <1.0.0",
+        "version": ">=0.5.3 <1.0.0",
         "displayName": "ReFit",
         "reason": "Fits clothing and accessories to your avatar's custom base and gives them its blendshapes, so they flex and move with your body."
       },
@@ -81,7 +81,7 @@
         "reason": "Keeps checkpoints and the history of the project; Save also records one."
       },
       "orbiters.mcb": {
-        "version": ">=1.10.0 <2.0.0",
+        "version": ">=1.10.4 <2.0.0",
         "displayName": "MCB",
         "reason": "My Custom Base: shape the avatar's body and publish it as a custom base."
       },
@@ -91,5 +91,5 @@
       }
     }
   },
-  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.8.4/MyAvatar-0.8.4.zip"
+  "url": "https://github.com/Orbiters-cc/MyAvatar/releases/download/0.8.5/MyAvatar-0.8.5.zip"
 }

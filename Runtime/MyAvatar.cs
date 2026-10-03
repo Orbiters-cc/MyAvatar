@@ -55,6 +55,8 @@ namespace Orbiters.MyAvatar
     {
         public string sourceKey;
         public Texture2D texture;
+        // Generated channel-packed/inverted map; the source texture remains available for reassignment.
+        public Texture2D appliedTexture, appliedTextureBeforeLast;
         public string fileName;
         public string role;
         public string reason;

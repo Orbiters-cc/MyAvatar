@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Orbiters.Toolkit.Editor;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -19,6 +20,8 @@ namespace Orbiters.MyAvatar.Editor
         // Renderer and material index (= submesh) pairs that draw this material, for UV layout comparison.
         public List<(Renderer renderer, int index)> parts = new List<(Renderer, int)>();
         public bool secondary, active;
+        // Images bundled with an accessory fill gaps; they are not a request to replace its setup.
+        public bool fillOnly;
         public string Label => materialName + " / " + description + " (" + property + ") · " + rendererPath;
     }
 
@@ -28,6 +31,10 @@ namespace Orbiters.MyAvatar.Editor
         internal const string ChosenReason = "Chosen by you.";
         internal const string MissingSlotReason = "The rest of this texture set matched ";
         internal const string NoClearMatchReason = "No clear material and texture-slot match.";
+
+        internal static bool CanAutoAssign(TextureEntry entry, TextureSlot slot) => !slot.fillOnly ||
+            slot.existing && slot.existing == entry.texture ||
+            !slot.existing && !slot.secondary && (entry.role == slot.role || entry.role == "unknown" || MaterialSurfaceMaps.CanAssign(entry.role, slot.property));
 
         internal static List<TextureSlot> Slots(MyAvatar avatar, bool includeAll = false)
         {
@@ -115,6 +122,7 @@ namespace Orbiters.MyAvatar.Editor
         // Role of an incoming image, from its filename tokens; the last role word wins ("Normal_Emission" → emission).
         internal static string FileRole(string fileName)
         {
+            if (MaterialSurfaceMaps.IsPackedFile(fileName)) return "metallic";
             var tokens = Tokens(System.IO.Path.GetFileNameWithoutExtension(fileName ?? ""), stem: false);
             string role = "unknown"; int position = -1;
             foreach (var (candidate, words) in RoleWords)
@@ -171,6 +179,8 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         internal static bool Compatible(string textureRole, string slotRole) => !double.IsNaN(RoleFit(textureRole, slotRole));
+        internal static bool Compatible(string role, TextureSlot slot) => !double.IsNaN(RoleFit(role, slot));
+        private static double RoleFit(string role, TextureSlot slot) => MaterialSurfaceMaps.CanAssign(role, slot.property) ? 0 : RoleFit(role, slot.role);
 
         // A metallic slot packs several maps in its channels (Standard: metallic in red, smoothness in alpha), so a single
         // roughness, smoothness, specular or occlusion image put there as it is renders wrong. Never chosen automatically;
@@ -260,7 +270,8 @@ namespace Orbiters.MyAvatar.Editor
                 var ranked = new List<Candidate>();
                 foreach (var slot in slots)
                 {
-                    double fit = RoleFit(texture.role, slot.role);
+                    if (!CanAutoAssign(texture, slot)) continue;
+                    double fit = RoleFit(texture.role, slot);
                     if (double.IsNaN(fit)) continue;
                     double evidence = Evidence(slotBag[slot]) * 3 + Evidence(nameBag[slot.material]) * 3 + Evidence(contextBag[slot.material]) * 1.5 + Evidence(meshBag[slot.material]);
                     if (slot.existingName.ToLowerInvariant() == plainName) evidence += 10;
@@ -303,9 +314,9 @@ namespace Orbiters.MyAvatar.Editor
                 // Siblings on several materials must be one layout group (see above); otherwise the set's home is unclear.
                 var home = slots.First(s => s.material == siblings[0]);
                 if (siblings.Skip(1).Any(m => !layout.Siblings(home, slots.First(s => s.material == m)))) continue;
-                var targets = siblings.Select(m => slots.Where(s => s.material == m && Compatible(texture.role, s.role) && !textures.Concat(grouped).Any(t => t.material == s.material && t.property == s.property))
-                    .OrderByDescending(s => RoleFit(texture.role, s.role) + Preference(texture, s)).FirstOrDefault())
-                    .Where(t => t != null && RoleFit(texture.role, t.role) + Preference(texture, t) > -1).ToList();
+                var targets = siblings.Select(m => slots.Where(s => s.material == m && CanAutoAssign(texture, s) && Compatible(texture.role, s) && !textures.Concat(grouped).Any(t => t.material == s.material && t.property == s.property))
+                    .OrderByDescending(s => RoleFit(texture.role, s) + Preference(texture, s)).FirstOrDefault())
+                    .Where(t => t != null && RoleFit(texture.role, t) + Preference(texture, t) > -1).ToList();
                 if (targets.Count > 0)
                 {
                     Assign(texture, targets[0], .93f, "Same texture set as the other " + string.Join(" ", identities[texture]) + " files on " + targets[0].materialName + ".");
@@ -327,6 +338,7 @@ namespace Orbiters.MyAvatar.Editor
                 var slot = slots.FirstOrDefault(s => s.material == texture.material && s.property == texture.property);
                 if (slot?.existing == null) continue;
                 foreach (var other in slots.Where(s => s != slot && s.existing == slot.existing && s.role == slot.role &&
+                    CanAutoAssign(texture, s) &&
                     !textures.Concat(linked).Any(t => t.material == s.material && t.property == s.property)))
                     linked.Add(Link(texture, other, "Replaces " + slot.existingName + " here too, like on " + slot.materialName + "."));
             }
@@ -444,7 +456,7 @@ namespace Orbiters.MyAvatar.Editor
                 if (emissive.Count != 1) continue;
                 var other = group.First(t => t != emissive[0]);
                 if (!stats.TryGetValue(other.texture, out var otherStats) || otherStats.black > .3f) continue;
-                var target = slots.Where(s => s.material == group.Key.material && s.role == "emission" && !textures.Any(t => t.material == s.material && t.property == s.property))
+                var target = slots.Where(s => s.material == group.Key.material && s.role == "emission" && CanAutoAssign(emissive[0], s) && !textures.Any(t => t.material == s.material && t.property == s.property))
                     .OrderByDescending(s => Preference(emissive[0], s)).FirstOrDefault();
                 if (target == null) continue;
                 Assign(emissive[0], target, .92f, "Mostly black with bright details: matched as " + target.materialName + " / " + target.description + ".");
@@ -453,7 +465,8 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static void RejectConflicts(List<TextureEntry> textures)
         {
-            foreach (var conflict in textures.Where(t => t.material && !t.applied).GroupBy(t => (t.material, t.property)).Where(g => g.Count() > 1))
+            foreach (var conflict in textures.Where(t => t.material && !t.applied).GroupBy(t => (t.material, t.property))
+                .Where(g => g.Count() > 1 && !MaterialSurfaceMaps.CanCombine(g.Key.property, g.Select(e => e.role).ToArray())))
                 foreach (var entry in conflict) { entry.material = null; entry.property = null; entry.confidence = 0;
                     entry.reason = "Several images point at " + entry.suggestedMaterialName + " / " + entry.suggestedProperty + ". Choose the target below."; }
         }

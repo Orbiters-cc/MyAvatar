@@ -70,7 +70,8 @@ namespace Orbiters.MyAvatar.Editor
                 var slot = slots.FirstOrDefault(s => s.id == match.slotId);
                 var entry = textures[index];
                 if (slot == null) continue;
-                if (!TextureMatching.Compatible(entry.role, slot.role)) continue;
+                if (!TextureMatching.Compatible(entry.role, slot)) continue;
+                if (!TextureMatching.CanAutoAssign(entry, slot)) continue;
                 result.changes.Add(new TextureChanges.Change { entry = entry, slot = slot, confidence = match.confidence, reason = match.reason });
             }
             return result;

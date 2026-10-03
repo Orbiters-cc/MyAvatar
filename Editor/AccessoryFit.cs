@@ -95,11 +95,13 @@ namespace Orbiters.MyAvatar.Editor
             {
                 Avatar = RefitRecords.AvatarRoot(attachment.transform), Body = state.Info.Body, Renderers = meshes, Mode = mode, Original = original,
                 BaseKey = state.Info.Key, BaseName = state.Info.Name, Tool = Tool, Tightness = RefitPreferences.Tightness,
-                CoverDifferentBaseBody = mode == RefitMode.Fit && ClothingCoverage.Eligible(attachment, suggestion.MadeForOriginal),
             };
             foreach (var mesh in meshes)
+            {
+                batch.CoverageByRenderer[mesh] = mode == RefitMode.Fit && ClothingCoverage.Eligible(attachment, mesh, suggestion.MadeForOriginal);
                 batch.ShapesByRenderer[mesh] = suggestion.Missing.TryGetValue(mesh, out var shapes) ? shapes
                     : !checkedAgain && asked != null ? asked.ToList() : new List<string>();
+            }
             var result = meshes.Count == 0 ? new RefitBatchResult() : await RefitRunner.RunAsync(batch, progress, cancellation);
             if (attachment) Results[attachment.GetInstanceID()] = result;
             return result;
@@ -113,21 +115,46 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (!attachment) return;
             foreach (var record in attachment.GetComponentsInChildren<OrbitersRefit>(true)) RefitRecords.Remove(record);
+            Results.Remove(attachment.GetInstanceID());
+        }
+
+        internal static MyAvatar.AccessoryNote CompletedNote(OrbitersAttachment attachment)
+        {
+            if (!attachment) return null;
+            var records = attachment.GetComponentsInChildren<OrbitersRefit>(true).Where(r => r.Applied).ToList();
+            if (records.Count == 0) return null;
+            return new MyAvatar.AccessoryNote { accessory = attachment, fit = Done, fitBase = records[0].baseName,
+                fitKey = records[0].baseKey, fitShapes = records.Sum(r => r.shapes.Count) };
         }
 
         internal static bool CanCommission(OrbitersAttachment attachment) =>
-            RefitEngine.Available && attachment && Results.TryGetValue(attachment.GetInstanceID(), out var result) && Commissionable(result) != null;
+            RefitEngine.Available && CommissionItem(attachment) != null;
 
         /// <summary>Opens ReFit's window on the roughest mesh of the accessory's last refit, to ask a creator.</summary>
         internal static void Commission(OrbitersAttachment attachment)
         {
-            if (!attachment || !Results.TryGetValue(attachment.GetInstanceID(), out var result)) return;
-            var item = Commissionable(result);
+            var item = CommissionItem(attachment);
             if (item != null) RefitEngine.Current?.OpenCommission(item.Job, item.Outcome);
         }
 
-        private static RefitItemResult Commissionable(RefitBatchResult result) =>
-            result.Items.FirstOrDefault(i => i.Job != null && i.Outcome != null && !i.Outcome.Cancelled && (i.Outcome.Rough || !i.Outcome.Success));
+        internal static RefitItemResult CommissionItem(OrbitersAttachment attachment)
+        {
+            if (!attachment) return null;
+            if (Results.TryGetValue(attachment.GetInstanceID(), out var result))
+            {
+                var item = result.Items.Where(i => i.Renderer != null && i.Job != null && i.Outcome != null && !i.Outcome.Cancelled)
+                    .OrderByDescending(i => i.Outcome.Rough || !i.Outcome.Success).FirstOrDefault();
+                if (item != null) return item;
+            }
+            // Saved refit records remain available after reload and when a cached mesh was used.
+            var record = attachment.GetComponentsInChildren<OrbitersRefit>(true).FirstOrDefault(r => r.Applied && r.body != null);
+            if (record == null) return null;
+            var renderer = record.GetComponent<SkinnedMeshRenderer>();
+            return new RefitItemResult { Renderer = renderer, Record = record,
+                Job = new RefitJob { Renderer = renderer, Avatar = RefitRecords.AvatarRoot(attachment.transform).gameObject,
+                    Body = record.body, Mode = RefitMode.Fit, Shapes = record.shapes.Select(s => s.source).ToList() },
+                Outcome = new RefitOutcome { Success = true, Mesh = renderer.sharedMesh, MeshPath = record.meshPath } };
+        }
 
         // ---- Lining up with the original base -------------------------------------------------------------------------
 
@@ -193,16 +220,33 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
-        internal static async Task<Placement> PlaceAsync(MyAvatar avatar, OrbitersAttachment attachment)
+        internal static async Task<Placement> PlaceAsync(MyAvatar avatar, OrbitersAttachment attachment,
+            Action<float, string> progress = null, CancellationToken cancellation = default)
         {
-            var state = await CustomBaseDetection.DetectAsync(avatar.transform);
-            if (state?.Info == null || !state.Info.CanFit)
+            cancellation.ThrowIfCancellationRequested();
+            progress?.Invoke(.1f, "Finding the original base…");
+            // Placement needs the source body, not the complete blendshape proximity map.
+            var info = CustomBases.Describe(avatar.transform);
+            if (info == null)
+            {
+                var detection = CustomBaseDetection.DetectAsync(avatar.transform);
+                if (await Task.WhenAny(detection, Task.Delay(TimeSpan.FromSeconds(20), cancellation)) != detection)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    throw new TimeoutException("Finding the original base took more than 20 seconds. Check that MCB has a base model assigned, then try again.");
+                }
+                info = (await detection)?.Info;
+            }
+            if (info == null || !info.CanFit)
                 throw new InvalidOperationException("Refitting from the original base needs MCB on the avatar: it provides the original body.");
             if (!attachment) throw new InvalidOperationException("This accessory was removed.");
-            var original = state.Info.ResolveOriginal();
+            cancellation.ThrowIfCancellationRequested();
+            progress?.Invoke(.4f, "Loading the original body…");
+            var original = info.ResolveOriginal();
             try
             {
-                var ghost = RefitGhost.Show(original.Avatar, original.Body, state.Info.Body);
+                progress?.Invoke(.8f, "Aligning the body preview…");
+                var ghost = RefitGhost.Show(original.Avatar, original.Body, info.Body);
                 LineUp(attachment, ghost);
                 var placement = new Placement { Attachment = attachment, Original = original, Ghost = ghost };
                 placement.Activate();

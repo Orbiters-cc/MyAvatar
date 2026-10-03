@@ -20,6 +20,8 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed partial class AccessoriesSection
     {
         private CancellationTokenSource fitChecks;
+        private CancellationTokenSource workCancellation;
+        private double workStartedAt;
         private bool detecting, resuming;
         // A failed detection (no connection, an unreadable body) is tried again after a while, not on every refresh.
         private double detectAgainAt;
@@ -185,6 +187,7 @@ namespace Orbiters.MyAvatar.Editor
                 Error = note.text, Shapes = note.fitShapes, ShapeNames = note.fitShapeNames ?? new List<string>(), Rough = note.fitRough,
                 CanCommission = attachment && AccessoryFit.CanCommission(attachment), Animate = animate,
                 Running = running, Progress = workProgress, ProgressText = workText,
+                StartedAt = workStartedAt,
             };
             var actions = attachment ? new FitCard.Actions
             {
@@ -196,6 +199,7 @@ namespace Orbiters.MyAvatar.Editor
                 Restore = () => RestoreFit(note),
                 Commission = () => AccessoryFit.Commission(attachment),
                 Retry = string.IsNullOrEmpty(note.fitNext) ? null : (Action)(() => Act(note, note.fitNext)),
+                Stop = () => { ReportWork(workProgress, "Cancelling…"); workCancellation?.Cancel(); },
                 Dismiss = () => RemoveFitNote(attachment),
                 Install = card =>
                 {
@@ -229,6 +233,8 @@ namespace Orbiters.MyAvatar.Editor
         private void BeginWork(OrbitersAttachment attachment, string text)
         {
             working = attachment; workProgress = 0.02f; workText = text; workCard = null;
+            workCancellation = new CancellationTokenSource();
+            workStartedAt = UnityEditor.EditorApplication.timeSinceStartup;
             Refresh();
         }
 
@@ -241,6 +247,7 @@ namespace Orbiters.MyAvatar.Editor
         private void EndWork()
         {
             working = null; workCard = null;
+            workCancellation?.Dispose(); workCancellation = null;
         }
 
         // ---- Answers --------------------------------------------------------------------------------------------------
@@ -264,13 +271,17 @@ namespace Orbiters.MyAvatar.Editor
             string question = AccessoryFit.IsQuestion(note) ? note.fit : AccessoryFit.Refit;
             AccessoryFit.Placement.Active?.Dispose();
             BeginWork(attachment, "Preparing the original body…");
-            ReportWork(0.35f, "Preparing the original body…");
             await Task.Yield();
             try
             {
-                await AccessoryFit.PlaceAsync(avatar, attachment);
+                await AccessoryFit.PlaceAsync(avatar, attachment, ReportWork, workCancellation.Token);
                 EndWork();
                 UpdateFit(note, n => { n.fitNext = question; n.fit = AccessoryFit.Place; });
+            }
+            catch (OperationCanceledException)
+            {
+                EndWork();
+                UpdateFit(note, n => n.fit = question);
             }
             catch (Exception ex)
             {
@@ -303,10 +314,15 @@ namespace Orbiters.MyAvatar.Editor
             await Task.Yield();
             try
             {
-                var result = await AccessoryFit.RunAsync(avatar, attachment, mode, original, note.fitShapeNames, ReportWork, CancellationToken.None);
+                var result = await AccessoryFit.RunAsync(avatar, attachment, mode, original, note.fitShapeNames, ReportWork, workCancellation.Token);
                 var failed = result.Failed;
                 ReportWork(1f, "Done");
                 EndWork();
+                if (result.Cancelled)
+                {
+                    CancelledFit(note, attachment);
+                    return;
+                }
                 // Nothing was refitted and nothing failed: it already had every shape. No question left, no false "done".
                 if (result.Refitted == 0 && failed.Count == 0)
                 {
@@ -324,12 +340,24 @@ namespace Orbiters.MyAvatar.Editor
                     n.fit = AccessoryFit.Done; n.fitShapes = result.Shapes; n.fitRough = result.Rough || failed.Count > 0; n.warning = n.fitRough;
                 });
             }
+            catch (OperationCanceledException)
+            {
+                EndWork();
+                CancelledFit(note, attachment);
+            }
             catch (Exception ex)
             {
                 EndWork();
                 UpdateFit(note, n => { n.fit = AccessoryFit.Failed; n.fitNext = action; n.text = ex.Message; n.warning = true; });
             }
             finally { original?.Dispose(); }
+        }
+
+        private void CancelledFit(MyAvatar.AccessoryNote note, OrbitersAttachment attachment)
+        {
+            var completed = AccessoryFit.CompletedNote(attachment);
+            UpdateFit(note, n => { n.fit = completed != null ? AccessoryFit.Done : AccessoryFit.Ask;
+                n.fitShapes = completed != null ? completed.fitShapes : 0; });
         }
 
         private void Dismiss(MyAvatar.AccessoryNote note)

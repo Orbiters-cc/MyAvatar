@@ -88,7 +88,6 @@ namespace Orbiters.MyAvatar.Editor
         private void FeatureChanged(string key)
         {
             if (key != Feature) return;
-            style.display = OrbitersFeatures.IsEnabled(Feature) ? DisplayStyle.Flex : DisplayStyle.None;
             Refresh();
         }
 
@@ -133,6 +132,16 @@ namespace Orbiters.MyAvatar.Editor
             var images = outcomes.SelectMany(o => o.images ?? new List<string>()).Distinct().Where(File.Exists).ToArray();
             try
             {
+                foreach (var outcome in outcomes.Where(o => o.attachment))
+                {
+                    try
+                    {
+                        int repaired = AccessoryMaterials.Repair(avatar, outcome.attachment);
+                        if (repaired > 0) AddNotes(new MyAvatar.AccessoryNote { accessory = outcome.attachment,
+                            text = $"Prepared {repaired} material(s): repaired broken imports and defaulted missing surface maps to matte. Undo restores the original materials." });
+                    }
+                    catch (Exception ex) { AddNotes(new MyAvatar.AccessoryNote { accessory = outcome.attachment, text = ex.Message, warning = true }); }
+                }
                 if (images.Length > 0)
                 {
                     var scope = outcomes.Where(o => o.attachment != null).Select(o => o.attachment.transform).ToArray();
@@ -220,7 +229,11 @@ namespace Orbiters.MyAvatar.Editor
 
         private void Refresh()
         {
-            if (!avatar || style.display == DisplayStyle.None) return;
+            if (!avatar || !Enabled) { style.display = DisplayStyle.None; return; }
+            // Keep an active drop's choices reachable, but leave no empty heading on an avatar.
+            bool hasContent = AttachmentInstaller.Installed(avatar.transform).Count > 0 ||
+                AccessoryService.PendingOptions(avatar, out _).Count > 0;
+            style.display = hasContent ? DisplayStyle.Flex : DisplayStyle.None;
             if (AccessoryService.Busy(avatar)) return;
             if (AccessoryService.HasFollowUp(avatar)) schedule.Execute(ResumeFollowUp);
             if (host.OwnsZone())
@@ -348,7 +361,8 @@ namespace Orbiters.MyAvatar.Editor
                 // What it looks like as worn (its refit included), rendered in the background and kept.
                 var worn = attachment.gameObject;
                 string look = ModelThumbnails.KeyFor(attachment.variant) + "|" + attachment.name + "|" + string.Join(",",
-                    attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh ? r.sharedMesh.GetInstanceID() : 0));
+                    attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh ? r.sharedMesh.GetInstanceID() : 0)) + "|" + string.Join(",",
+                    attachment.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials).Select(m => m ? m.GetInstanceID() : 0));
                 var picture = new AssetThumbnail(() => ModelThumbnails.Get(worn, look));
                 picture.AddToClassList("accessory-item__picture"); row.Add(picture);
                 // Beside the picture: its name, fit and buttons, then how it is attached on a second line.
@@ -372,6 +386,11 @@ namespace Orbiters.MyAvatar.Editor
                 }));
                 TextureCard(entry, item);
                 var own = avatar.accessoryNotes.Where(n => n.accessory == item).ToList();
+                if (!own.Any(n => !string.IsNullOrEmpty(n.fit)))
+                {
+                    var completed = AccessoryFit.CompletedNote(item);
+                    if (completed != null) own.Add(completed);
+                }
                 if (own.Count == 0) continue;
                 var box = new VisualElement(); box.AddToClassList("accessory-entry__notes"); entry.Add(box);
                 foreach (var note in own) AddNote(box, note);

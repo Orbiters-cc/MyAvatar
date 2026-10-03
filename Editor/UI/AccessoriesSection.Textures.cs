@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.VRChat;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -12,6 +13,25 @@ namespace Orbiters.MyAvatar.Editor
 
         private void TextureCard(VisualElement entry, OrbitersAttachment item)
         {
+            var broken = item.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials)
+                .Where(m => MaterialRepair.Reason(m) != null).Distinct().ToArray();
+            if (broken.Length > 0)
+            {
+                var repairRow = new VisualElement(); repairRow.AddToClassList("accessory-note"); entry.Add(repairRow);
+                var label = new Label("Material needs repair") { tooltip = string.Join("\n", broken.Select(m => m.name + ": " + MaterialRepair.Reason(m))) };
+                label.AddToClassList("accessory-note__text"); repairRow.Add(label);
+                var repair = Small("Repair material", () =>
+                {
+                    label.text = "Repairing material…"; repairRow.SetEnabled(false);
+                    schedule.Execute(() =>
+                    {
+                        try { AccessoryMaterials.Repair(avatar, item); RefreshList(); }
+                        catch (System.Exception ex) { label.text = ex.Message; repairRow.SetEnabled(true); }
+                    });
+                });
+                repair.tooltip = "Rebuild with VRChat Toon Standard and keep the texture maps. Undo restores the original.";
+                repairRow.Add(repair);
+            }
             var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar, includeAll: true), new List<Transform> { item.transform })
                 .Where(s => s.existing).ToList();
             if (slots.Count == 0) return;

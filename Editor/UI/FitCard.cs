@@ -30,16 +30,19 @@ namespace Orbiters.MyAvatar.Editor
             public bool Running;
             public float Progress;
             public string ProgressText;
+            public double StartedAt;
         }
 
         internal sealed class Actions
         {
-            public Action Fits, Refit, NotNow, Confirm, Cancel, Restore, Commission, Retry, Dismiss;
+            public Action Fits, Refit, NotNow, Confirm, Cancel, Restore, Commission, Retry, Dismiss, Stop;
             public Action<VisualElement> Install;
         }
 
         private VisualElement fill, shimmer;
         private Label progressLabel;
+        private string progressText;
+        private double startedAt;
         private IVisualElementScheduledItem ticker;
 
         internal FitCard(Model model, Actions actions)
@@ -48,7 +51,7 @@ namespace Orbiters.MyAvatar.Editor
             if (sheet) styleSheets.Add(sheet);
             AddToClassList("fit-card");
             string baseName = string.IsNullOrEmpty(model.Base) ? "your custom base" : model.Base;
-            if (model.Running) BuildProgress(model, baseName);
+            if (model.Running) BuildProgress(model, actions);
             else switch (model.Fit)
             {
                 case AccessoryFit.Ask:
@@ -88,12 +91,14 @@ namespace Orbiters.MyAvatar.Editor
                     break;
                 case AccessoryFit.Done:
                     Header(model.Rough ? FitIcon.Glyph.Alert : FitIcon.Glyph.Check, model.Rough ? Amber : Green,
-                        model.Item + " moves with your body", model, actions.Dismiss, pop: model.Animate);
-                    Detail($"{Count(model.Shapes)} now follow {baseName}, in the editor and in every animation once uploaded.");
+                        "Check your fit", model, null, pop: model.Animate);
+                    Detail($"{model.Item} has been fitted to {baseName}. Look it over from every side and try your body sliders.");
                     if (model.Rough) Callout("A few spots could not be fitted exactly and may clip at full flex. A creator can refit it by hand.");
                     var done = Row("fit-card__actions");
-                    if (model.Rough && model.CanCommission) done.Add(Button("Ask a creator", "fit-btn--primary", actions.Commission));
-                    done.Add(Button("Restore original", "fit-btn--ghost", actions.Restore));
+                    if (model.CanCommission) done.Add(Button("Ask a creator", "fit-btn--primary", actions.Commission));
+                    var restore = Button("Cancel refit", "fit-btn--ghost", actions.Restore);
+                    restore.tooltip = "Restore the clothing's mesh and pose from before this refit.";
+                    done.Add(restore);
                     break;
                 case AccessoryFit.Failed:
                     Header(FitIcon.Glyph.Alert, Red, "Couldn't refit " + model.Item, model, actions.NotNow);
@@ -129,19 +134,33 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (fill == null) return;
             fill.style.width = Length.Percent(Mathf.Clamp01(value) * 100f);
-            if (!string.IsNullOrEmpty(text)) progressLabel.text = text;
+            if (!string.IsNullOrEmpty(text)) progressText = text;
+            UpdateElapsed();
+        }
+
+        private void UpdateElapsed()
+        {
+            int seconds = Math.Max(0, (int)(EditorApplication.timeSinceStartup - startedAt));
+            progressLabel.text = progressText + (seconds > 0 ? $" · {seconds}s" : "");
         }
 
         // ---- Parts ----------------------------------------------------------------------------------------------------
 
-        private void BuildProgress(Model model, string baseName)
+        private void BuildProgress(Model model, Actions actions)
         {
+            startedAt = model.StartedAt > 0 ? model.StartedAt : EditorApplication.timeSinceStartup;
             AddToClassList("fit-card--running");
             var header = Row("fit-card__header");
             var spinner = new FitIcon(FitIcon.Glyph.Spinner, Green); spinner.AddToClassList("fit-card__spinner");
             var badge = new VisualElement(); badge.AddToClassList("fit-card__badge"); badge.Add(spinner); header.Add(badge);
             var title = new Label("Fitting " + model.Item); title.AddToClassList("fit-card__title"); header.Add(title);
             header.Add(BasePill(model));
+            if (actions.Stop != null)
+            {
+                var cancel = Button("Cancel", "fit-btn--ghost", actions.Stop);
+                cancel.tooltip = "Stop fitting; keep completed meshes and leave the current mesh unchanged.";
+                header.Add(cancel);
+            }
             var track = new VisualElement(); track.AddToClassList("fit-card__track"); Add(track);
             fill = new VisualElement(); fill.AddToClassList("fit-card__fill"); track.Add(fill);
             shimmer = new VisualElement { pickingMode = PickingMode.Ignore }; shimmer.AddToClassList("fit-card__shimmer"); fill.Add(shimmer);
@@ -152,6 +171,7 @@ namespace Orbiters.MyAvatar.Editor
             ticker = schedule.Execute(() =>
             {
                 float t = (float)(EditorApplication.timeSinceStartup - start);
+                UpdateElapsed();
                 spinner.style.rotate = new Rotate(new Angle(t * 360f % 360f, AngleUnit.Degree));
                 float width = fill.resolvedStyle.width;
                 if (width > 0) shimmer.style.left = (t * 160f) % (width + 60f) - 60f;

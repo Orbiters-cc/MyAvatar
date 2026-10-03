@@ -11,6 +11,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor.Tests
 {
@@ -51,6 +52,66 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(AccessoryFit.IsQuestion(note), Is.False);
             note.fit = AccessoryFit.Failed; note.text = "No body.";
             Assert.That(AccessoryFit.Text(note, "Hoodie"), Is.EqualTo("No body."));
+        }
+
+        [Test] public void CompletedFitAlwaysOffersCommissionAndCancelWithoutAWarning()
+        {
+            var card = new FitCard(new FitCard.Model { Fit = AccessoryFit.Done, Item = "Jacket", CanCommission = true }, new FitCard.Actions());
+            var buttons = card.Query<Button>().ToList().Select(b => b.text).ToList();
+            Assert.That(buttons, Does.Contain("Ask a creator").And.Contain("Cancel refit"));
+            Assert.That(card.Query(className: "fit-card__close").ToList(), Is.Empty, "Fit actions must stay reachable.");
+        }
+
+        [Test] public void RunningFitShowsElapsedTimeAndCancelControl()
+        {
+            var card = new FitCard(new FitCard.Model { Running = true, Item = "Jacket", ProgressText = "Transferring 2/8",
+                StartedAt = UnityEditor.EditorApplication.timeSinceStartup - 12 },
+                new FitCard.Actions { Stop = () => { } });
+            Assert.That(card.Query<Label>().ToList().Any(l => l.text.Contains("Transferring 2/8") && l.text.Contains("12s")), Is.True);
+            var button = card.Query<Button>().ToList().Single(b => b.text == "Cancel");
+            Assert.That(button.enabledInHierarchy, Is.True);
+        }
+
+        [Test] public void OriginalBodyPlacementDoesNotWaitForTheBlendshapeMap()
+        {
+            var (avatar, attachment) = Setup();
+            var body = avatar.transform.Find("Body").GetComponent<SkinnedMeshRenderer>();
+            provider = new Provider { Avatar = avatar.transform, Info = new CustomBaseInfo
+            {
+                Key = "test:placement", Body = body, Shapes = new List<string> { "Flex arms" },
+                ResolveOriginal = () => new CustomBaseOriginal { Avatar = avatar.gameObject, Body = body }
+            } };
+            CustomBases.Register(provider);
+            var stages = new List<string>();
+            var task = AccessoryFit.PlaceAsync(avatar, attachment, (p, label) => stages.Add(label));
+            try
+            {
+                Assert.That(task.IsCompleted && !task.IsFaulted, Is.True, "Provider placement must not await the shape map.");
+                Assert.That(CustomBaseDetection.Current(avatar.transform), Is.Null);
+                Assert.That(stages.Count, Is.EqualTo(3));
+            }
+            finally { if (task.Status == TaskStatus.RanToCompletion) task.Result.Dispose(); }
+        }
+
+        [Test] public void SavedRefitRestoresItsCardAndCommissionWithoutSessionResults()
+        {
+            var (avatar, attachment) = Setup();
+            var renderer = attachment.GetComponentInChildren<SkinnedMeshRenderer>();
+            var record = renderer.gameObject.AddComponent<OrbitersRefit>();
+            record.mesh = renderer.sharedMesh;
+            record.body = avatar.transform.Find("Body").GetComponent<SkinnedMeshRenderer>();
+            record.baseName = "UltiPaw";
+            record.shapes.Add(new RefitShape("Flex arms", "Flex arms"));
+            var note = AccessoryFit.CompletedNote(attachment);
+            Assert.That(note.fit, Is.EqualTo(AccessoryFit.Done));
+            Assert.That(note.fitShapes, Is.EqualTo(1));
+            var commission = AccessoryFit.CommissionItem(attachment);
+            Assert.That(commission.Job.Renderer, Is.SameAs(renderer));
+            Assert.That(commission.Job.Body, Is.SameAs(record.body));
+            Assert.That(commission.Outcome.Success, Is.True);
+            record.mesh = null;
+            Assert.That(AccessoryFit.CompletedNote(attachment), Is.Null);
+            Assert.That(AccessoryFit.CommissionItem(attachment), Is.Null);
         }
 
         [UnityTest] public IEnumerator AnAvatarWithoutAKnownCustomBaseAsksNothing()

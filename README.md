@@ -1,5 +1,12 @@
 # My Avatar
 
+## 0.8.5 — 2026-10-03
+
+- Improve cross-base clothing fitting and restore completed-fit review, cancellation and creator commission actions.
+- Repair broken clothing materials, default missing roughness maps to matte and preserve creator-authored packed-map channels and inversion.
+- Skip already-uploaded thumbnails when preparing the VRChat SDK, so an unchanged image cannot block the new avatar bundle.
+- Add Drawing pen after Parameters and hide the empty clothes-and-accessories section while keeping drop choices reachable.
+
 Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing, physics and tools, with an optional Orbiters account.
 
 ## Get started
