@@ -41,8 +41,8 @@ namespace Orbiters.MyAvatar.Editor
             add.style.display = installed ? DisplayStyle.None : DisplayStyle.Flex;
             remove.style.display = installed ? DisplayStyle.Flex : DisplayStyle.None;
             description.text = installed
-                ? "In VRChat: Drawing pen → Enable pen. Grab it, then make a fist to draw. Guests draw while grabbing. Release to leave it in place. Disable the pen to erase everything, or use Clear drawing.\nGuests need avatar interactions enabled. Ink is not replayed to late joiners."
-                : "A shared pen that appears in front of you. Draw with a fist, let friends grab it, and leave it in the world. Turning it off clears the drawing.";
+                ? "In VRChat: Drawing pen → Enable pen. Grab it, then squeeze your fist to draw. Relax your squeeze to stop ink; fully open your hand or choose Drop pen to leave it in place. Guests draw while grabbing. Disable the pen to erase everything, or use Clear drawing.\nGuests need avatar interactions enabled. Ink is not replayed to late joiners."
+                : "A shared pen that appears in front of you. Grab it, squeeze to draw, and open your hand to drop it. Friends can draw while grabbing. Turning it off clears the drawing.";
         }
 
         private void AddPen()
