@@ -2,8 +2,8 @@
 
 ## 0.9.1 — 2026-10-05
 
-- The Parameters section becomes Avatar budget: parameters, bones, PhysBones and contacts against VRChat's PC limits, with the share of the avatar's custom base. MCB shows the same panel.
-- Requires Orbiters Toolkit 0.3.13.
+- The Parameters section is removed: XRay Gizmos 0.2.8 shows the avatar budget over the Scene view, with parameters as built (after VRCFury's compression), bones, PhysBones and contacts against VRChat's PC limits.
+- Requires Orbiters Toolkit 0.3.13 and XRay Gizmos 0.2.8.
 
 ## 0.9.0 — 2026-10-05
 
@@ -238,19 +238,8 @@ avatar, with settings suited to the part and the part's current permissions.
 
 ## Avatar budget
 
-Where the avatar stands against VRChat's limits, estimated without building:
-
-- **Parameters**: how many of the 256 bits of synced parameters the avatar will use once
-  VRCFury has built it (its own expression parameters, VRCFury toggles, sliders and full
-  controllers), before compression, and what is left.
-- **Bones**, **PhysBones** and **Contacts**: the counts that most often set an avatar's PC
-  performance rank, with the rank each reaches. Tick marks show the Excellent, Good, Medium
-  and Poor limits, taken from the VRChat SDK. Players who hide Very Poor avatars see none of
-  their PhysBones, colliders and contacts.
-
-On a custom base (MCB), each bar shows the custom base's share apart from the avatar's,
-counted as built: PhysBones its build adds and bones it removes are included. The counts
-update as the hierarchy changes; MCB shows the same panel in its version options.
+XRay Gizmos shows where the avatar stands against VRChat's limits in a panel over the Scene view: synced
+parameters as built (after VRCFury's compression), bones, PhysBones and contacts, with a custom base's share.
 
 ## Tools
 

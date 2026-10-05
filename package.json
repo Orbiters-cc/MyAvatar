@@ -3,7 +3,7 @@
   "displayName": "My Avatar",
   "version": "0.9.1",
   "unity": "2022.3",
-  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, pose it with symmetry and a clothing preview, set who can grab, pose and stretch its hair, tail and toes, and check its synced parameters. Save also records a Unit Git checkpoint when Unit Git is installed.",
+  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, pose it with symmetry and a clothing preview, and set who can grab, pose and stretch its hair, tail and toes. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
     "name": "Orbiters",
     "url": "https://orbiters.cc",
@@ -14,7 +14,7 @@
   },
   "vpmDependencies": {
     "orbiters.toolkit": ">=0.3.13 <0.4.0",
-    "orbiters.xraygizmos": ">=0.2.7 <0.3.0",
+    "orbiters.xraygizmos": ">=0.2.8 <0.3.0",
     "com.vrchat.avatars": ">=3.7.0 <4.0.0"
   },
   "orbiters": {
