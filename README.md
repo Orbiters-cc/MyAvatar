@@ -1,5 +1,10 @@
 # My Avatar
 
+## 0.9.1 — 2026-10-05
+
+- The Parameters section becomes Avatar budget: parameters, bones, PhysBones and contacts against VRChat's PC limits, with the share of the avatar's custom base. MCB shows the same panel.
+- Requires Orbiters Toolkit 0.3.13.
+
 ## 0.9.0 — 2026-10-05
 
 - Asset gallery: clothes and accessories from Orbiters creators, filtered for the avatar's base and platform, added in one click. Paid assets list every store selling them with the creator's preferred one first, then turn into a license key field; purchases are recognised from your Gumroad or Jinxxy email. Access from a tier, a Discord role or testing shows "Included".
@@ -231,13 +236,21 @@ avatar's own armature named like a part but driven by no PhysBone are offered un
 **Add physics**, which adds a PhysBone per chain under `PhysBones/<Part>` on the
 avatar, with settings suited to the part and the part's current permissions.
 
-## Parameters
+## Avatar budget
 
-How many of VRChat's 256 bits of synced parameters the avatar will use once VRCFury
-has built it, estimated without building: the avatar's own expression parameters,
-what VRCFury toggles, sliders and full controllers add, and what is left. The count
-updates as the hierarchy changes. **Compress parameters** adds or removes VRCFury's
-Parameter Compressor on the avatar and shows how many bits it saves or would save.
+Where the avatar stands against VRChat's limits, estimated without building:
+
+- **Parameters**: how many of the 256 bits of synced parameters the avatar will use once
+  VRCFury has built it (its own expression parameters, VRCFury toggles, sliders and full
+  controllers), before compression, and what is left.
+- **Bones**, **PhysBones** and **Contacts**: the counts that most often set an avatar's PC
+  performance rank, with the rank each reaches. Tick marks show the Excellent, Good, Medium
+  and Poor limits, taken from the VRChat SDK. Players who hide Very Poor avatars see none of
+  their PhysBones, colliders and contacts.
+
+On a custom base (MCB), each bar shows the custom base's share apart from the avatar's,
+counted as built: PhysBones its build adds and bones it removes are included. The counts
+update as the hierarchy changes; MCB shows the same panel in its version options.
 
 ## Tools
 

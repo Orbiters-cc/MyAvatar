@@ -156,16 +156,6 @@
 .physics-missing__text { flex-grow: 1; flex-shrink: 1; font-size: 11px; color: #bdbdbd; white-space: normal; }
 .mcb-button.physics-missing__button { height: 26px; min-height: 26px; margin: 0 0 0 8px; padding: 0 12px; border-radius: 13px; font-size: 11px; flex-shrink: 0; }
 /* Parameters */
-.parameters-headline { flex-direction: row; align-items: flex-end; margin-bottom: 10px; }
-.parameters-total { font-size: 30px; -unity-font-style: bold; color: #ffffff; margin: 0; padding: 0; height: 36px; -unity-text-align: lower-left; }
-.parameters-total.warning { color: #ffb020; }
-.parameters-unit { flex-grow: 1; margin: 0 0 6px 6px; padding: 0; font-size: 11px; color: #8c8c8c; }
-.parameters-chip { margin: 0 0 6px 0; padding: 2px 9px; border-radius: 10px; font-size: 11px; -unity-font-style: bold; color: #00DA6D; background-color: rgba(0, 218, 109, 0.12); }
-.parameters-chip.warning { color: #ffb020; background-color: rgba(255, 176, 32, 0.14); }
-.parameters-compression { flex-direction: row; align-items: center; margin-top: 14px; padding-top: 12px; border-top-width: 1px; border-color: #2e2e2e; }
-.parameters-compression__texts { flex-grow: 1; flex-shrink: 1; margin-right: 12px; }
-.parameters-compression__title { font-size: 12px; -unity-font-style: bold; color: #ffffff; }
-.parameters-compression__text { margin-top: 2px; font-size: 11px; color: #9a9a9a; white-space: normal; }
 /* Footer */
 .myavatar-credit { margin: 4px 0 14px 0; }
 .drop-zone__ai { position: absolute; top: 6px; right: 8px; width: 28px; height: 28px; border-radius: 14px; align-items: center; justify-content: center; transition-property: background-color, scale; transition-duration: 0.14s, 0.2s; transition-timing-function: ease-out, ease-out-back; }
