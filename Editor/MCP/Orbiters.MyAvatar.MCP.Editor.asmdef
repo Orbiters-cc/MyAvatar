@@ -1,0 +1,11 @@
+{
+  "name": "Orbiters.MyAvatar.MCP.Editor",
+  "rootNamespace": "Orbiters.MyAvatar.Editor.MCP",
+  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "Orbiters.Toolkit", "Orbiters.Toolkit.Editor", "MCPForUnity.Editor"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["Newtonsoft.Json.dll"],
+  "autoReferenced": true,
+  "defineConstraints": ["MYAVATAR_MCP"],
+  "versionDefines": [{ "name": "com.coplaydev.unity-mcp", "expression": "9.7.1", "define": "MYAVATAR_MCP" }]
+}

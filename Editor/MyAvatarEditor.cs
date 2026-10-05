@@ -15,7 +15,7 @@ namespace Orbiters.MyAvatar.Editor
     {
         private static readonly HashSet<int> Running = new HashSet<int>();
         private MyAvatar avatar;
-        private VisualElement root, content, results;
+        private VisualElement root, content, results, page;
         private DropZone zone;
         private AccessoriesSection accessories;
         private Button undo, save;
@@ -105,6 +105,13 @@ namespace Orbiters.MyAvatar.Editor
                 new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
             zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
+            // The way into the asset gallery; it hides while clothes and accessories are switched off.
+            var hero = new Gallery.GalleryHero(avatar, OpenGallery);
+            content.Add(hero);
+            void ShowHero(string key) { if (key == AccessoriesSection.Feature) hero.style.display = AccessoriesSection.Enabled ? DisplayStyle.Flex : DisplayStyle.None; }
+            ShowHero(AccessoriesSection.Feature);
+            Orbiters.Toolkit.Editor.OrbitersFeatures.Changed += ShowHero;
+            hero.RegisterCallback<DetachFromPanelEvent>(_ => Orbiters.Toolkit.Editor.OrbitersFeatures.Changed -= ShowHero);
             accessories = new AccessoriesSection(avatar, new AccessoriesSection.Host
             {
                 Run = work => Run(work),
@@ -121,7 +128,6 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new PosingSection(avatar));
             content.Add(new PhysicsSection(avatar));
             content.Add(new ParametersSection(avatar));
-            content.Add(new DrawingPenSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
@@ -129,9 +135,53 @@ namespace Orbiters.MyAvatar.Editor
             RefreshResults();
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorUtility.IsPersistent(avatar))
             { content.SetEnabled(false); root.Add(new OrbitersNoticeElement("Use My Avatar on a scene avatar outside Play Mode.", HelpBoxMessageType.Info)); }
+            content.AddToClassList("myavatar-page");
             var credit = new Orbiters.Toolkit.Editor.SupportCredit(); credit.AddToClassList("myavatar-credit"); root.Add(credit);
             var toolbar = new IMGUIContainer(DrawToolbar); toolbar.AddToClassList("myavatar-toolbar"); root.Add(toolbar);
+            if (AccessoriesSection.Enabled && content.enabledSelf && SessionState.GetBool(PageKey, false)) ShowPage(GalleryPage(), instant: true);
             return root;
+        }
+
+        // ---- Pages: the main page and the asset gallery slide into each other ----
+
+        // The open page survives the Inspector being rebuilt (selecting something else, then the avatar again).
+        private string PageKey => "Orbiters.MyAvatar.GalleryOpen." + (avatar ? GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString() : "");
+        private Gallery.AssetGalleryPage GalleryPage() => new Gallery.AssetGalleryPage(avatar, CloseGallery, () => Gallery.GalleryCreatorWindow.Open(avatar));
+        private void OpenGallery() { SessionState.SetBool(PageKey, true); ShowPage(GalleryPage()); }
+        private void CloseGallery() { SessionState.EraseBool(PageKey); ShowPage(null); }
+
+        private void ShowPage(VisualElement next, bool instant = false)
+        {
+            var leaving = page ?? content;
+            var entering = next ?? content;
+            if (leaving == entering || root == null) return;
+            if (instant)
+            {
+                entering.AddToClassList("myavatar-page");
+                if (entering != content) { entering.AddToClassList("content"); root.Insert(root.IndexOf(content) + 1, entering); }
+                entering.style.display = DisplayStyle.Flex;
+                if (leaving == content) content.style.display = DisplayStyle.None; else leaving.RemoveFromHierarchy();
+                page = next;
+                return;
+            }
+            bool forward = next != null && (page == null || !(next is Gallery.AssetGalleryPage));
+            entering.AddToClassList("myavatar-page");
+            entering.EnableInClassList("myavatar-page--right", forward);
+            entering.EnableInClassList("myavatar-page--left", !forward);
+            if (entering != content) { entering.AddToClassList("content"); root.Insert(root.IndexOf(content) + 1, entering); }
+            entering.style.display = DisplayStyle.Flex;
+            leaving.EnableInClassList(forward ? "myavatar-page--left" : "myavatar-page--right", true);
+            // The outgoing page fades out as the incoming one slides in; then the outgoing one leaves the layout.
+            entering.schedule.Execute(() => { entering.RemoveFromClassList("myavatar-page--right"); entering.RemoveFromClassList("myavatar-page--left"); });
+            leaving.schedule.Execute(() =>
+            {
+                if (leaving == content) content.style.display = DisplayStyle.None; else leaving.RemoveFromHierarchy();
+                leaving.RemoveFromClassList("myavatar-page--left"); leaving.RemoveFromClassList("myavatar-page--right");
+            }).StartingIn(140);
+            leaving.style.position = Position.Absolute;
+            leaving.schedule.Execute(() => leaving.style.position = Position.Relative).StartingIn(150);
+            page = next;
+            root.schedule.Execute(() => root.GetFirstAncestorOfType<ScrollView>()?.ScrollTo(root));
         }
 
         // A drop answers at once: the field shows progress before anything is read. One made while another drop (or an

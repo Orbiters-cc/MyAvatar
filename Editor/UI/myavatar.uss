@@ -260,3 +260,11 @@
 .tools-row { flex-direction: row; flex-wrap: wrap; margin-bottom: -8px; }
 .tools-tile { flex-grow: 0; flex-basis: auto; width: 104px; margin: 0 8px 8px 0; }
 .tools-tile__badge { position: absolute; top: 6px; right: 6px; padding: 1px 6px; border-radius: 8px; font-size: 9px; -unity-font-style: bold; color: #00DA6D; background-color: rgba(0, 218, 109, 0.14); }
+
+/* Pages: the main page and the asset gallery slide into each other (MyAvatarEditor.ShowPage). */
+.myavatar-page { opacity: 1; translate: 0 0; transition-property: opacity, translate; transition-duration: 0.22s; transition-timing-function: ease-out; }
+.myavatar-page--left { opacity: 0; translate: -28px 0; }
+.myavatar-page--right { opacity: 0; translate: 28px 0; }
+
+/* Gallery assets in "On this avatar" */
+.accessory-item__gallery { margin: 0 0 0 6px; padding: 1px 7px; border-radius: 9px; font-size: 10px; -unity-font-style: bold; color: #b9b1ff; background-color: rgba(138, 125, 255, 0.14); flex-shrink: 0; }

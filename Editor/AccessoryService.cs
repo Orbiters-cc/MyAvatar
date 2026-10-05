@@ -61,7 +61,10 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly HashSet<int> Running = new HashSet<int>();
         // Drops finished after a domain reload, waiting for the avatar's Inspector to apply their images and ask AI.
 
-        internal static bool Busy(MyAvatar avatar) => avatar && Running.Contains(avatar.GetInstanceID());
+        internal static bool Busy(MyAvatar avatar) => avatar && (Running.Contains(avatar.GetInstanceID()) || Gallery.GalleryInstaller.Busy(avatar));
+
+        /// <summary>Tells Inspectors the avatar's accessories changed (a gallery installation finished or was removed).</summary>
+        internal static void NotifyChanged(MyAvatar avatar) { if (avatar) Changed?.Invoke(avatar); }
         internal static bool HasFollowUp(MyAvatar avatar) => AccessoryFollowUps.Has(avatar);
 
         internal static List<Outcome> TakeFollowUp(MyAvatar avatar)
@@ -302,6 +305,7 @@ namespace Orbiters.MyAvatar.Editor
                 instance = (GameObject)PrefabUtility.InstantiatePrefab(candidate.asset, avatar.transform);
                 Undo.RegisterCreatedObjectUndo(instance, "Add " + candidate.name);
             }
+            AttachmentHooks.Prepare(instance, avatar.transform);
             var plan = AttachmentPlanner.Analyze(instance, avatar.transform);
             if (plan.Kind == AttachmentKind.Empty)
             {

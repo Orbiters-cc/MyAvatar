@@ -1,5 +1,17 @@
 # My Avatar
 
+## 0.9.0 — 2026-10-05
+
+- Asset gallery: clothes and accessories from Orbiters creators, filtered for the avatar's base and platform, added in one click. Paid assets list every store selling them with the creator's preferred one first, then turn into a license key field; purchases are recognised from your Gumroad or Jinxxy email. Access from a tier, a Discord role or testing shows "Included".
+- Installs check the parameter budget, platform and dependencies first, show what an import would replace before changing anything, resume after an interruption and verify the avatar before reporting Installed. Gallery items in the accessories list show updates and can be removed.
+- Creators publish from My Avatar: prefabs or a `.unitypackage`, packaging rules (no Poiyomi Pro, source files or VPM packages), parameter cost and size, a test install on the current avatar, versions with public, beta or alpha scope and testers, and a rights confirmation.
+- Cleanup (Orbiters settings): frees the files of removed gallery assets that nothing uses, keeps uncertain ones with the reason, and moves files to a restorable quarantine first.
+- Publishing opens its own window, so selecting something else keeps the form; the gallery page stays open when the Inspector is rebuilt.
+- The `myavatar_gallery` MCP tool creates, builds, tests and publishes gallery assets with the same draft; publishing and withdrawing need the user's approval code.
+- The drawing pen is now a free accessory in the gallery instead of a My Avatar section.
+- Clothes and accessories leave alpha and are on by default.
+- Requires Orbiters Toolkit 0.3.12 and the matching Orbiters backend.
+
 ## 0.8.5 — 2026-10-03
 
 - Improve cross-base clothing fitting and restore completed-fit review, cancellation and creator commission actions.

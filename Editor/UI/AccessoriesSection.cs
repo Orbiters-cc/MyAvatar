@@ -17,7 +17,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Clothes and accessories (alpha): a drop field like the texture one, the one question it may ask (which hand), what
+    // Clothes and accessories: a drop field like the texture one, the one question it may ask (which hand), what
     // needs a manual step, and the accessories on the avatar with their bone and a Remove button. On a custom base, each
     // accessory's fit question lives in its entry (AccessoriesSection.Fit.cs).
     internal sealed partial class AccessoriesSection : AvatarSection
@@ -57,7 +57,6 @@ namespace Orbiters.MyAvatar.Editor
         {
             this.avatar = avatar;
             this.host = host;
-            Actions.Add(new StageBadge(FeatureStage.Alpha));
             // The Inspector's one drop field ("Drop anything"): it sends accessory drops here.
             zone = host.Zone ?? new DropZone(DropZone.Anything, _ => { }, Array.Empty<VisualElement>(), host.SetAi);
             choice = new VisualElement(); choice.AddToClassList("accessory-choice"); Body.Add(choice);
@@ -371,6 +370,12 @@ namespace Orbiters.MyAvatar.Editor
                 var name = new Label(attachment.DisplayName) { tooltip = attachment.DisplayName != attachment.name ? attachment.name : null };
                 name.AddToClassList("accessory-item__name"); top.Add(name);
                 var status = FitStatus(attachment); if (status != null) top.Add(status);
+                if (attachment.gallery != null && attachment.gallery.Installed)
+                {
+                    var gallery = new Label("Gallery " + attachment.gallery.version) { tooltip = attachment.gallery.assetName + " " + attachment.gallery.version + " from the asset gallery" +
+                        (string.IsNullOrEmpty(attachment.gallery.creatorName) ? "" : ", by " + attachment.gallery.creatorName) + "." };
+                    gallery.AddToClassList("accessory-item__gallery"); top.Add(gallery);
+                }
                 var spacer = new VisualElement(); spacer.AddToClassList("accessory-item__spacer"); top.Add(spacer);
                 string description = AccessoryService.Describe(attachment);
                 var how = new Label(description) { tooltip = description }; how.AddToClassList("accessory-item__how"); body.Add(how);
@@ -381,6 +386,8 @@ namespace Orbiters.MyAvatar.Editor
                 top.Add(Small("Remove", () =>
                 {
                     entry.style.display = DisplayStyle.None;
+                    // A gallery asset comes off with all its parts; its files stay for Cleanup.
+                    if (item.gallery != null && item.gallery.Installed) { Gallery.GalleryInstaller.Remove(avatar, item.gallery.installId); return; }
                     AttachmentInstaller.Remove(item);
                     AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n.accessory != item).ToList());
                 }));
@@ -455,11 +462,26 @@ namespace Orbiters.MyAvatar.Editor
     [InitializeOnLoad]
     internal static class MyAvatarFeatures
     {
-        static MyAvatarFeatures() => OrbitersFeatures.Register(new OrbitersFeature
+        static MyAvatarFeatures()
+        {
+            OrbitersSettingsWindow.RegisterSection("My Avatar · Asset gallery files", () =>
+            {
+                var box = new VisualElement();
+                var text = new Label("Removing a gallery asset takes it off the avatar; its files stay in the project for other avatars. Cleanup frees those nothing uses any more.");
+                text.AddToClassList("orb-settings__caption"); box.Add(text);
+                var cleanup = MyAvatarEditor.Button("Cleanup…", Gallery.GalleryCleanupWindow.Open);
+                cleanup.style.alignSelf = Align.FlexStart; cleanup.style.marginTop = 8;
+                box.Add(cleanup);
+                return box;
+            });
+            Register();
+        }
+
+        private static void Register() => OrbitersFeatures.Register(new OrbitersFeature
         {
             Key = AccessoriesSection.Feature, Product = "My Avatar", Label = "Clothes and accessories",
-            Description = "Drop clothing and accessory packages on the avatar: My Avatar places them and attaches them without changing the avatar.",
-            Stage = FeatureStage.Alpha, Default = false,
+            Description = "Add clothing and accessories from the asset gallery or drop their packages on the avatar: My Avatar places them and attaches them without changing the avatar.",
+            Stage = FeatureStage.Stable, Default = true,
         });
     }
 }
