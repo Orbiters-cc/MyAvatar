@@ -3,6 +3,7 @@
 ## 0.9.1 — 2026-10-05
 
 - The Parameters section is removed: XRay Gizmos 0.2.8 shows the avatar budget over the Scene view, with parameters as built (after VRCFury's compression), bones, PhysBones and contacts against VRChat's PC limits.
+- Fix an error on every editor update once the avatar shown in the VRChat SDK panel was destroyed (a build copy, a test avatar); it also stopped other tools' update callbacks.
 - Requires Orbiters Toolkit 0.3.13 and XRay Gizmos 0.2.8.
 
 ## 0.9.0 — 2026-10-05

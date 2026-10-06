@@ -37,10 +37,10 @@ namespace Orbiters.MyAvatar.Editor
             if (VRCSdkControlPanel.window == null || !VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var builder)) { if (lastSelected) revision++; lastSelected = null; return; }
             if (pendingSelection)
             {
-                if (builder.SelectedAvatar != pendingSelection) builder.SelectAvatar(pendingSelection);
+                if (Selected(builder) != pendingSelection) builder.SelectAvatar(pendingSelection);
                 pendingSelection = null;
             }
-            var selected = builder.SelectedAvatar;
+            var selected = Selected(builder);
             if (selected != lastSelected) { lastSelected = selected; offered = null; offeredImage = null; selectedAt = EditorApplication.timeSinceStartup; revision++; }
             if (!selected) return;
             if (builder.BuildState == SdkBuildState.Building || builder.UploadState == SdkUploadState.Uploading) return;
@@ -56,6 +56,14 @@ namespace Orbiters.MyAvatar.Editor
             if (EditorApplication.timeSinceStartup - selectedAt < .75 || block?.Thumbnail == null || block.Thumbnail.Loading || block.OnNewThumbnailSelected == null) return;
             offered = key;
             Offer(builder, selected, avatar, block, path, key, ++revision);
+        }
+
+        // The SDK's getter throws once the avatar it shows was destroyed (a build copy or a test avatar it picked up).
+        // Thrown here every frame, it also stopped every update callback registered after this one.
+        private static GameObject Selected(IVRCSdkAvatarBuilderApi builder)
+        {
+            try { return builder.SelectedAvatar; }
+            catch (MissingReferenceException) { return null; }
         }
 
         private static async void Offer(IVRCSdkAvatarBuilderApi builder, GameObject selected, MyAvatar avatar,
@@ -74,7 +82,7 @@ namespace Orbiters.MyAvatar.Editor
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
                     if (await AlreadyUploaded(id, path, timeout.Token)) return;
                 }
-                if (request != revision || edited || !selected || !avatar || builder.SelectedAvatar != selected ||
+                if (request != revision || edited || !selected || !avatar || Selected(builder) != selected ||
                     VRCSdkControlPanel.window == null || VRCSdkControlPanel.window.rootVisualElement.Q<ThumbnailBlock>() != block ||
                     builder.BuildState == SdkBuildState.Building || builder.UploadState == SdkUploadState.Uploading ||
                     path != AvatarThumbnail.FullPath(avatar.thumbnail) ||
