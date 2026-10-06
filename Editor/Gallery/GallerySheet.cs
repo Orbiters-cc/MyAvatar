@@ -3,6 +3,7 @@ using System.Linq;
 using Orbiters.Toolkit.Editor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEngine.UIElements.Experimental;
 
 namespace Orbiters.MyAvatar.Editor.Gallery
 {
@@ -44,14 +45,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             host.pickingMode = PickingMode.Position;
             var start = sheet.Local(origin);
             sheet.Place(start);
-            // Next frame: grow to the middle of what the Inspector shows.
+            // Grows to the middle of what the Inspector shows, animated in code: a USS transition depends on when the
+            // start style was resolved and would sometimes jump straight to the end.
             sheet.schedule.Execute(() =>
             {
+                if (sheet.closing) return;
                 var view = sheet.Visible();
                 float w = Mathf.Min(width, view.width - 24f);
                 sheet.maxHeight = Mathf.Clamp(view.height - 40f, 220f, 680f);
                 sheet.target = new Rect(view.x + (view.width - w) / 2f, view.y + 20f, w, sheet.Fitted());
-                sheet.Place(sheet.target);
+                sheet.Animate(start, 320, Easing.OutBack);
                 sheet.AddToClassList("gallery-sheet--open");
                 sheet.scrim.AddToClassList("gallery-scrim--shown");
                 sheet.Focus();
@@ -61,7 +64,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             {
                 if (sheet.closing || sheet.maxHeight <= 0f) return;
                 sheet.target.height = sheet.Fitted();
-                sheet.Place(sheet.target);
+                // While growing, the animation reaches the new height itself.
+                if (sheet.motion == null || !sheet.motion.isRunning) sheet.Place(sheet.target);
             });
             return sheet;
         }
@@ -73,7 +77,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             AddToClassList("gallery-sheet--closing");
             RemoveFromClassList("gallery-sheet--open");
             scrim.RemoveFromClassList("gallery-scrim--shown");
-            Place(origin != null && origin.panel != null ? Local(origin) : new Rect(layout.center, Vector2.one * 40f));
+            target = origin != null && origin.panel != null ? Local(origin) : new Rect(layout.center, Vector2.one * 40f);
+            Animate(layout, 200, Easing.InQuad);
             schedule.Execute(() =>
             {
                 scrim.RemoveFromHierarchy();
@@ -85,6 +90,19 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private float maxHeight;
         private Rect target;
+
+        private ValueAnimation<float> motion;
+
+        // From a rectangle to the current target, which may still change (the content's height) while it runs.
+        private void Animate(Rect from, int milliseconds, Func<float, float> easing)
+        {
+            motion?.Stop();
+            Place(from);
+            motion = experimental.animation.Start(0f, 1f, milliseconds, (_, t) => Place(Lerp(from, target, t))).Ease(easing).KeepAlive();
+        }
+
+        private static Rect Lerp(Rect a, Rect b, float t) =>
+            new Rect(Mathf.LerpUnclamped(a.x, b.x, t), Mathf.LerpUnclamped(a.y, b.y, t), Mathf.LerpUnclamped(a.width, b.width, t), Mathf.LerpUnclamped(a.height, b.height, t));
 
         private float Fitted() => Mathf.Min(maxHeight, Mathf.Max(120f, Content.layout.height + 2f));
 

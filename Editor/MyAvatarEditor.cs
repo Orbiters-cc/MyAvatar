@@ -164,6 +164,9 @@ namespace Orbiters.MyAvatar.Editor
                 return;
             }
             bool forward = next != null && (page == null || !(next is Gallery.AssetGalleryPage));
+            // Back to the top first, so the whole transition plays where the user looks (the gallery is often opened from
+            // its card further down).
+            root.GetFirstAncestorOfType<ScrollView>()?.ScrollTo(root);
             entering.AddToClassList("myavatar-page");
             entering.EnableInClassList("myavatar-page--right", forward);
             entering.EnableInClassList("myavatar-page--left", !forward);
@@ -177,8 +180,16 @@ namespace Orbiters.MyAvatar.Editor
                 if (leaving == content) content.style.display = DisplayStyle.None; else leaving.RemoveFromHierarchy();
                 leaving.RemoveFromClassList("myavatar-page--left"); leaving.RemoveFromClassList("myavatar-page--right");
             }).StartingIn(140);
+            // Out of the layout while it fades, but pinned where it was: an absolute element without offsets would jump to
+            // the top of the Inspector, behind the banner.
+            var at = leaving.layout;
             leaving.style.position = Position.Absolute;
-            leaving.schedule.Execute(() => leaving.style.position = Position.Relative).StartingIn(150);
+            leaving.style.left = at.x; leaving.style.top = at.y; leaving.style.width = at.width;
+            leaving.schedule.Execute(() =>
+            {
+                leaving.style.position = Position.Relative;
+                leaving.style.left = StyleKeyword.Null; leaving.style.top = StyleKeyword.Null; leaving.style.width = StyleKeyword.Null;
+            }).StartingIn(150);
             page = next;
             root.schedule.Execute(() => root.GetFirstAncestorOfType<ScrollView>()?.ScrollTo(root));
         }
