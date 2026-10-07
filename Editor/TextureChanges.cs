@@ -271,11 +271,7 @@ namespace Orbiters.MyAvatar.Editor
             MaterialSurfaceMaps.Assign(copy, property, entry.texture, entry.role, entry.fileName, folder + "/SurfaceMaps");
             string keyword = Keyword(property);
             if (keyword != null) copy.EnableKeyword(keyword);
-            if (property == "_EmissionMap")
-            {
-                if (copy.HasProperty("_EmissionColor") && copy.GetColor("_EmissionColor").maxColorComponent == 0) copy.SetColor("_EmissionColor", Color.white);
-                copy.globalIlluminationFlags &= ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
-            }
+            if (property == "_EmissionMap") MaterialSurfaceMaps.EnableEmission(copy);
             Orbiters.Toolkit.Editor.MaterialRepair.ConfigureTextureFeatures(copy);
             MaterialSurfaceMaps.DefaultRough(copy);
             EditorUtility.SetDirty(copy);

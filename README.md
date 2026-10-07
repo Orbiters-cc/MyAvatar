@@ -1,5 +1,63 @@
 # My Avatar
 
+## 0.9.5 — 2026-10-07
+
+- **No more "This file was already uploaded"**: the VRChat SDK keeps a pending thumbnail through every reload of the
+  avatar, even when its blueprint ID was cleared meanwhile (VRChat not finding the avatar for a moment). My Avatar now
+  checks its thumbnail again whenever the blueprint ID changes and takes it back when VRChat already has that image.
+- **Thumbnail check before the build**: when the thumbnail waiting in the SDK (from My Avatar or picked in the SDK) is
+  the exact image VRChat already holds, Build & Publish stops at once instead of failing after the whole build and
+  upload. The thumbnail is taken out of the upload; clicking Build & Publish again uploads the avatar.
+- Gallery assets on the avatar no longer list texture slots or material repair: their creator set them up. Their
+  picture shows props hidden until toggled on, such as the drawing pen.
+- **Face tracking**: when the avatar's face has most of the blendshapes face tracking uses (Unified Expressions, ARKit or
+  SRanipal, also under other names such as Rexouium's "LipTrack_JawOpen"), a Face tracking section offers to set it up in
+  one click: Adjerry91's Face Tracking Templates (and VRCFury) are downloaded through VPM when missing and the template for
+  that standard goes on the avatar. At upload, its blendshapes animate the face's own shapes and hand-gesture expressions
+  pause while the face is tracked. The templates' files are never changed.
+- Face tracking moves the mouth like the Ultirex's hand-made setup (OSCmooth) at upload: smiles and frowns are full at
+  0.8 instead of 1 (VRCFaceTracking seldom reports more), smiles, frowns, the lower lip, jaw and tongue are smoothed
+  like the original (70 % of the last frame kept, 30 % before), and a face with its own grin (Rexouium, Ultirex) turns a
+  smile with the upper lip raised into that grin. Rexouium's lip tracking shapes take the original's weights (lower lip
+  20 %, cheek puff 71 %, a pout also narrows the mouth), wide eyes raise the brows and the lids follow the eyes.
+- **Face tracking, redesigned**: a hero with the face's shape coverage and the template, then quick settings stored on
+  the template (one Undo step each, applied to the upload copy only): **Smoothing** (Responsive, Balanced, Smooth: the
+  template's Local Smoothing to start with, and how much slower the mouth follows), **Others see** (eyes, pupils,
+  brows, mouth, tongue, cheeks, with the parameter bits each costs against the avatar's 256: features left out lose
+  their parameters and menu toggles in VRCFury's copy), and the **Expressive mouth** (the Ultirex tuning above, now
+  optional). Every parameter budget (My Avatar, the gallery, the Toolkit) counts the features you keep.
+- **Test live**, without Play Mode: the avatar is built like an upload on a hidden copy (VRCFury, MCB, My Avatar, the
+  Toolkit, with a progress bar the first time; kept for ten minutes so testing again starts at once), then driven every
+  editor frame by an iPhone or a simulator through VRCFaceTracking's own mapping (its iFacialMocap and Live Link modules,
+  correctors, v2 parameters and binary bits) and the built FX and Additive layers, parameter drivers included. A face
+  close-up turns with a drag. Pairing shows this PC's address with copy buttons and each app's steps, remembers the
+  iPhone's address for iFacialMocap, detects which app is sending, and shows the frame rate, the last frame's age and a
+  firewall hint when nothing arrives. "What VRChat receives" shows the values live. Stopping leaves nothing in your scene.
+- **About** in the bottom toolbar: My Avatar's version and the projects it works with, each with its license and credits.
+- **Materials**, folded under the texture optimization: the avatar's materials on Unity's Standard shader (VRChat suggests
+  its Toon Standard) and open surfaces whose back is hidden (a tail of fur cards, feathers: many of their edges belong to a
+  single triangle). Open surfaces show both sides by themselves as soon as My Avatar finds them (on copies, with Undo;
+  a Standard material moves to Toon Standard for it); **Ask me first**, or Orbiters settings, lists them instead.
+  **Use Toon Standard** rebuilds a material with its texture maps, **Fix all** does every suggestion. Transparent and
+  cutout Standard materials stay as they are.
+- **Rexouium** options in their own section below Posing: show or hide each feather group (what the avatar starts with in
+  VRChat, shown in the scene too) and an Ears slider from small to big.
+- Posing no longer lists a custom base's logic (MCB) or the face tracking template among the accessories to pose.
+- Fix emission missing after a drop on materials locked with emission off (Poiyomi keeps only the features that were on
+  when locking): texture slots now come from the material's original shader, so the hair's emission map lands on every
+  hair material, and assigning it also turns on Poiyomi's emission toggle and strength.
+- In a wide Inspector, the thumbnail photoshoot shows the card, Done, the shot and framing on the left and the pose,
+  light, background, expression, effects and text options beside them.
+- **Text on the thumbnail**: one line, right on the card. Hover the card in the photoshoot and press **Add text**, or use
+  the Text tab: drag the text to move it (it snaps to the middle), drag its corner or scroll over it to resize it,
+  double-click it to write. Pick among Unity's default font and eight fonts that ship with My Avatar (each tile shows
+  your own text), a look (clean, outline, shadow or neon glow), colours that read well or are taken from the shot, and a
+  size. Captured thumbnails have it drawn in exactly as on the card; each avatar keeps its text for next time.
+- **Create ref sheet** is a small link under the thumbnail's buttons (and under Take pictures in the gallery's
+  Pictures), hidden while the photoshoot is open: Done closes the thumbnail photoshoot and the ref sheet alike.
+- The photoshoot gets the Toolkit's poses of your own: add humanoid animations from the project to the Pose tab.
+- Requires Orbiters Toolkit 0.3.17.
+
 ## 0.9.4 — 2026-10-07
 
 - **Pictures** in Publish to the gallery: take pictures of the avatar wearing your clothing or accessory with the
@@ -224,6 +282,12 @@ through the SDK's own thumbnail selection, exactly as if you had chosen the file
 treats it as a pending change: review it, and upload or discard as usual. A thumbnail
 you choose in the SDK afterwards is left alone. Nothing is uploaded automatically.
 
+VRChat refuses an image identical to the avatar's current thumbnail, and only says so at the
+end of the upload. My Avatar compares its thumbnail with VRChat's before offering it, again
+whenever the blueprint ID changes, and takes it back if VRChat already has it. If the thumbnail
+waiting in the SDK is still a duplicate when you click **Build & Publish**, the build stops at
+once, the thumbnail is taken out of the upload and the next click uploads the avatar.
+
 ## Posing
 
 Three switches for posing the avatar in the Scene view (hover one for a short
@@ -279,11 +343,33 @@ Buttons for tools that go with My Avatar, each marked **Install** until it is in
 
 An install goes through VPM like any optional dependency; the tool opens once Unity has reloaded.
 
+## Face tracking
+
+When the avatar's face (the mesh lip sync uses) has most of the blendshapes face tracking uses, the **Face tracking**
+section offers **Set up face tracking**. My Avatar works out which standard the face fits best: Unified Expressions,
+ARKit (Perfect Sync) or SRanipal, also when the shapes are named another way (e.g. Rexouium's "LipTrack_JawOpen",
+"Eye_LookUp_L", "EyesWide_L"). One click then:
+
+- downloads Adjerry91's Face Tracking Templates (and VRCFury) through VPM when they are missing; the setup finishes once
+  Unity has reloaded its scripts;
+- puts the template for that standard on the avatar, pointed at the face mesh (one Undo step).
+
+When you upload, after VRCFury has merged the template: blendshapes it animates under the standard's names animate the
+face's own shapes, the avatar's hand-gesture expressions pause while VRCFaceTracking drives the face (and return to rest),
+and blinks the avatar animates itself wait while the eyes are tracked. The templates' files and the avatar's own
+controllers are never changed. The template adds about 140 to 170 parameter bits; VRCFury compresses parameters when the
+avatar goes over 256. **Remove** takes it off again.
+
+Face tracking blendshapes are animated by [Adjerry91's Face Tracking Templates](https://github.com/Adjerry91/VRCFaceTracking-Templates).
+If you sell an avatar that uses them, their author asks for that credit, with the link, on your store or product page.
+
 ## Toolbar
 
 The bottom toolbar opens **Settings** (the Orbiters server: production by default, or a
-local development server, each with its own login) and **Blendshape Links**, which
-still ships with MCB and is available when MCB is installed.
+local development server, each with its own login), **Blendshape Links**, which
+still ships with MCB and is available when MCB is installed, and **About**: My Avatar's
+version and the projects it works with, each with its license and credits
+(`Editor/THIRD_PARTY_NOTICES.md`).
 
 ## What changes
 

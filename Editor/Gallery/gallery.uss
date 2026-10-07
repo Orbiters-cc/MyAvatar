@@ -290,7 +290,7 @@
 .creator-pictures__strip { flex-direction: row; flex-wrap: wrap; }
 .creator-pictures__actions { margin-top: 2px; }
 .creator-actions .mcb-button.creator-pictures__take { padding: 0 16px; }
-.mcb-button.creator-pictures__sheet { height: 28px; min-height: 28px; margin: 8px 0 0 0; padding: 0 12px; border-radius: 14px; font-size: 11px; align-self: flex-start; }
+.mcb-button.gallery-link.creator-pictures__sheet { margin: 6px 0 0 0; align-self: flex-start; }
 .creator-picture { width: 78px; height: 78px; margin: 0 8px 8px 0; border-radius: 12px; overflow: hidden; background-color: #141414; border-width: 2px; border-color: rgba(0, 0, 0, 0); cursor: link; opacity: 1; scale: 1 1; transition-property: scale, opacity, border-color; transition-duration: 0.18s, 0.18s, 0.15s; transition-timing-function: ease-out-back, ease-out, ease-out; }
 .creator-picture:hover { scale: 1.04 1.04; border-color: rgba(255, 255, 255, 0.22); }
 .creator-picture--pressed { scale: 0.95 0.95; }

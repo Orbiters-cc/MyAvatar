@@ -391,7 +391,8 @@ namespace Orbiters.MyAvatar.Editor
                     AttachmentInstaller.Remove(item);
                     AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n.accessory != item).ToList());
                 }));
-                TextureCard(entry, item);
+                // Gallery assets come set up by their creator: no texture slots or material repair to offer.
+                if (item.gallery == null || !item.gallery.Installed) TextureCard(entry, item);
                 var own = avatar.accessoryNotes.Where(n => n.accessory == item).ToList();
                 if (!own.Any(n => !string.IsNullOrEmpty(n.fit)))
                 {

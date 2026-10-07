@@ -105,6 +105,8 @@ namespace Orbiters.MyAvatar.Editor
                 new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
             zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
+            // Materials worth changing, folded under the texture optimization like it.
+            content.Add(new MaterialsSection(avatar));
             // The way into the asset gallery; it hides while clothes and accessories are switched off.
             var hero = new Gallery.GalleryHero(avatar, OpenGallery);
             content.Add(hero);
@@ -126,7 +128,9 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(accessories);
             content.Add(new ThumbnailSection(avatar, photoshoot));
             content.Add(new PosingSection(avatar));
+            content.Add(new RexouiumSection(avatar));
             content.Add(new PhysicsSection(avatar));
+            content.Add(new FaceTrackingSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
@@ -419,6 +423,8 @@ namespace Orbiters.MyAvatar.Editor
                     : "Blendshape Links comes with MCB for now: install My Custom Base to use it.");
                 if (GUILayout.Button(links, EditorStyles.toolbarButton, GUILayout.Width(126f))) EditorApplication.ExecuteMenuItem(BlendShapeLinksMenu);
             }
+            if (GUILayout.Button(new GUIContent("About", "My Avatar's version and the projects it works with, with their licenses and credits."), EditorStyles.toolbarButton, GUILayout.Width(70f)))
+                MyAvatarAboutWindow.Open();
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
         }

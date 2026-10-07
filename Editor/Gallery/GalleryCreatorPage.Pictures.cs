@@ -65,8 +65,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             actions.Add(browse);
             if (avatar)
             {
-                // Under them, the other photoshoot: the avatar wearing it from the front, the back and the side.
-                sheetButton = GalleryUI.Button("Create ref sheet", () => OpenStudio(true), "creator-pictures__sheet");
+                // Under them, a link to the other photoshoot: the avatar wearing it from the front, the back and the side.
+                sheetButton = GalleryUI.Button("Create ref sheet", () => OpenStudio(true), "gallery-link creator-pictures__sheet");
+                sheetButton.tooltip = "The avatar wearing it from the front, the back and the side on one 1920×1080 sheet, for its page.";
                 side.Add(sheetButton);
             }
             RefreshStudioButtons();
@@ -104,20 +105,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return studio;
         }
 
-        // Each button opens its photoshoot (pictures or ref sheet), switches the open one to it, or closes it when shown.
+        // Each button opens its photoshoot (pictures or ref sheet); once one is open, Take pictures (Done) closes it.
         private void OpenStudio(bool sheet)
         {
-            bool sheetShown = photoshoot != null && photoshoot.RefSheetOpen;
-            if (studioOpen && sheetShown == sheet)
+            if (studioOpen)
             {
                 CloseStudio();
                 Build();
-                return;
-            }
-            if (studioOpen && studio != null)
-            {
-                studio.ShowRefSheet(sheet);
-                RefreshStudioButtons();
                 return;
             }
             studioOpen = true;
@@ -130,18 +124,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private void RefreshStudioButtons()
         {
-            bool sheet = studioOpen && photoshoot != null && photoshoot.RefSheetOpen, pictures = studioOpen && !sheet;
+            bool sheet = studioOpen && photoshoot != null && photoshoot.RefSheetOpen;
             if (takeButton != null)
             {
-                takeButton.text = pictures ? "Done" : "Take pictures";
-                takeButton.tooltip = pictures ? "Close the photoshoot." : "Pose, light and frame " + (avatar ? avatar.name : "the avatar") + " wearing it, then capture its pictures.";
+                takeButton.text = studioOpen ? "Done" : "Take pictures";
+                takeButton.tooltip = studioOpen ? (sheet ? "Close the ref sheet." : "Close the photoshoot.")
+                    : "Pose, light and frame " + (avatar ? avatar.name : "the avatar") + " wearing it, then capture its pictures.";
                 takeButton.EnableInClassList("mcb-button--primary", !studioOpen);
             }
-            if (sheetButton != null)
-            {
-                sheetButton.text = sheet ? "Done" : "Create ref sheet";
-                sheetButton.tooltip = sheet ? "Close the ref sheet." : "The avatar wearing it from the front, the back and the side on one 1920×1080 sheet, for its page.";
-            }
+            // Only a way in: the open photoshoot shows no ref sheet link.
+            if (sheetButton != null) sheetButton.style.display = studioOpen ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         private void CloseStudio()

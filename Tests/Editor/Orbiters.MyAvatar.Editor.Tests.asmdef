@@ -4,5 +4,5 @@
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "overrideReferences": true,
-  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll"]
+  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll", "VRCSDK3A.dll"]
 }

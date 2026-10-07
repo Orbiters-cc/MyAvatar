@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Orbiters.Toolkit.Editor.Photoshoot;
 using UnityEditor;
 using UnityEngine;
@@ -5,7 +7,8 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Avatar thumbnail: a compact summary that opens the shared Orbiters photoshoot, thumbnail only, in VRChat's 4:3 format.
+    // Avatar thumbnail: a compact summary that opens the shared Orbiters photoshoot, thumbnail only, in VRChat's 4:3 format,
+    // with an optional line of text placed right on the card.
     internal sealed class ThumbnailSection : VisualElement
     {
         private readonly MyAvatar avatar;
@@ -13,7 +16,7 @@ namespace Orbiters.MyAvatar.Editor
         private readonly VrcAvatarCard card;
         private readonly Label status;
         private readonly Button create, openSdk, refSheet;
-        private readonly VisualElement studio;
+        private readonly VisualElement studio, cardStage, actions;
         private PhotoshootPanel studioPanel;
         private Texture live;
 
@@ -25,18 +28,21 @@ namespace Orbiters.MyAvatar.Editor
 
             // The thumbnail is always shown on the card it will appear on in VRChat, also while it is being made.
             card = new VrcAvatarCard();
-            Add(new VrcCardStage(card));
+            cardStage = new VrcCardStage(card); Add(cardStage);
             // The performance rank walks the whole avatar; it is measured once the Inspector has drawn.
             schedule.Execute(() => { if (avatar) card.ShowPerformance(avatar.gameObject); });
             // Same rhythm as the texture actions above: the secondary button, then the primary one taking two thirds.
-            var actions = new VisualElement(); actions.AddToClassList("thumbnail-actions"); Add(actions);
+            actions = new VisualElement(); actions.AddToClassList("thumbnail-actions"); Add(actions);
             openSdk = MyAvatarEditor.Button("Open in VRChat SDK", () => VrcSdkThumbnail.Open(avatar));
             openSdk.AddToClassList("thumbnail-actions__sdk");
             openSdk.tooltip = "Show the VRChat SDK panel on this avatar with this thumbnail filled in. It is filled in whenever the SDK shows this avatar.";
             actions.Add(openSdk);
             create = MyAvatarEditor.Button("Create thumbnail", () => Open(false)); create.AddToClassList("thumbnail-actions__main"); actions.Add(create);
-            // Under them, the other photoshoot: the avatar from the front, the back and the side on one sheet.
-            refSheet = MyAvatarEditor.Button("Create ref sheet", () => Open(true)); refSheet.AddToClassList("thumbnail-refsheet"); Add(refSheet);
+            // Under them, a link to the other photoshoot: the avatar from the front, the back and the side on one sheet.
+            refSheet = MyAvatarEditor.Button("Create ref sheet", () => Open(true));
+            refSheet.AddToClassList("avatar-link"); refSheet.AddToClassList("thumbnail-refsheet");
+            refSheet.tooltip = "Pose the avatar once and get it from the front, the back and the side on one 1920×1080 sheet, saved beside the thumbnails.";
+            Add(refSheet);
             status = new Label(); status.AddToClassList("thumbnail-status"); Add(status);
 
             studio = new VisualElement(); studio.AddToClassList("thumbnail-studio"); Add(studio);
@@ -44,14 +50,12 @@ namespace Orbiters.MyAvatar.Editor
             Refresh();
         }
 
-        // Each button opens its photoshoot, switches the open one to it, or closes it when it is the one shown.
+        // Each button opens its photoshoot; once one is open, the main button (Done) closes it.
         private void Open(bool sheet)
         {
             if (studioPanel != null)
             {
-                if (studioPanel.RefSheetOpen == sheet) Close();
-                else studioPanel.ShowRefSheet(sheet);
-                Refresh();
+                Close();
                 return;
             }
             if (!avatar.GetComponentInChildren<Animator>(true))
@@ -61,8 +65,13 @@ namespace Orbiters.MyAvatar.Editor
                 return;
             }
             state.RefSheetOpen = sheet;
+            // The avatar's line of text, as it was left last time.
+            string textKey = TextKey;
+            state.Text = PhotoshootText.FromJson(EditorPrefs.GetString(textKey, "")) ?? new PhotoshootText();
             studioPanel = new PhotoshootPanel(state, new PhotoshootOptions
             {
+                TextFonts = TextFonts(),
+                TextChanged = text => EditorPrefs.SetString(textKey, text.ToJson()),
                 AvatarRoot = () => avatar ? avatar.gameObject : null,
                 IncludeBanner = false,
                 ThumbnailSize = AvatarThumbnail.Size,
@@ -75,6 +84,11 @@ namespace Orbiters.MyAvatar.Editor
                 RefSheet = SaveRefSheet,
             });
             studio.Add(studioPanel);
+            // The card and Done lead the photoshoot: beside its style when the Inspector is wide.
+            var lead = new VisualElement();
+            lead.AddToClassList("thumbnail-lead");
+            lead.Add(cardStage); lead.Add(actions); lead.Add(status);
+            studioPanel.SetLead(lead);
             Refresh();
         }
 
@@ -82,10 +96,20 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (studioPanel == null) return;
             studioPanel.DetachFraming(card.Media);
+            studioPanel.SetLead(null);
+            Insert(IndexOf(refSheet), cardStage); Insert(IndexOf(refSheet), actions); Insert(IndexOf(refSheet) + 1, status);
             studioPanel.RemoveFromHierarchy(); studioPanel = null; live = null;
             state.ClosePreview();
             Refresh();
         }
+
+        private const string FontFolder = "Packages/orbiters.myavatar/Editor/Fonts";
+        private string TextKey => "Orbiters.MyAvatar.ThumbnailText." + GlobalObjectId.GetGlobalObjectIdSlow(avatar);
+
+        // Unity's default font, then the ones My Avatar ships (Fonts folder, SIL Open Font License).
+        private static IReadOnlyList<string> TextFonts() => new[] { "" }
+            .Concat(AssetDatabase.FindAssets("t:Font", new[] { FontFolder }).Select(AssetDatabase.GUIDToAssetPath).OrderBy(p => p, System.StringComparer.OrdinalIgnoreCase))
+            .ToList();
 
         // Kept beside the thumbnails, named after the avatar, and shown in the Project window.
         private void SaveRefSheet(Texture2D sheet)
@@ -118,13 +142,14 @@ namespace Orbiters.MyAvatar.Editor
             ShowCard();
             status.text = "";
             status.style.display = DisplayStyle.None;
-            bool sheetOpen = studioPanel != null && studioPanel.RefSheetOpen, thumbnailOpen = studioPanel != null && !sheetOpen;
-            create.text = thumbnailOpen ? "Done" : has ? "Edit thumbnail" : "Create thumbnail";
-            create.tooltip = thumbnailOpen ? "Close the photoshoot." : has ? "Open the photoshoot to capture a new thumbnail." : "Pose, light and frame the avatar, then capture a 4:3 VRChat thumbnail.";
-            create.EnableInClassList("mcb-button--primary", studioPanel == null);
-            refSheet.text = sheetOpen ? "Done" : "Create ref sheet";
-            refSheet.tooltip = sheetOpen ? "Close the ref sheet." : "Pose the avatar once and get it from the front, the back and the side on one 1920×1080 sheet, saved beside the thumbnails.";
-            openSdk.style.display = has && studioPanel == null ? DisplayStyle.Flex : DisplayStyle.None;
+            bool open = studioPanel != null;
+            create.text = open ? "Done" : has ? "Edit thumbnail" : "Create thumbnail";
+            create.tooltip = open ? (studioPanel.RefSheetOpen ? "Close the ref sheet." : "Close the photoshoot.")
+                : has ? "Open the photoshoot to capture a new thumbnail." : "Pose, light and frame the avatar, then capture a 4:3 VRChat thumbnail.";
+            create.EnableInClassList("mcb-button--primary", !open);
+            // Only a way in: the open photoshoot shows no ref sheet link.
+            refSheet.style.display = open ? DisplayStyle.None : DisplayStyle.Flex;
+            openSdk.style.display = has && !open ? DisplayStyle.Flex : DisplayStyle.None;
             // While the card follows the live preview, the avatar is framed right on it.
             studioPanel?.AttachFraming(card.Media, () =>
             {

@@ -94,9 +94,10 @@
 .thumbnail-actions .mcb-button { height: 34px; min-height: 34px; margin: 0; }
 .thumbnail-actions .thumbnail-actions__sdk { flex-grow: 1; flex-basis: 0; margin-right: 10px; }
 .thumbnail-actions .thumbnail-actions__main { flex-grow: 2; flex-basis: 0; }
-.thumbnail-refsheet.mcb-button { height: 30px; min-height: 30px; margin: 8px 0 0 0; }
+.mcb-button.avatar-link.thumbnail-refsheet { margin: 6px 0 0 0; align-self: flex-end; }
 .thumbnail-status { margin-top: 8px; color: #ff8c59; font-size: 11px; white-space: normal; }
 .thumbnail-studio { margin-top: 12px; }
+.thumbnail-lead { margin-bottom: 12px; }
 /* VRChat in-game avatar card, measured on the game at 1:1: 228x234, 4px frame, 220x127 image, text centred in the body. */
 .vrc-stage { height: 270px; flex-shrink: 0; border-radius: 16px; overflow: hidden; background-color: #0c0e14; border-width: 1px; border-color: rgba(255,255,255,0.05); justify-content: center; }
 .vrc-stage__row { flex-direction: row; justify-content: center; align-items: center; }
@@ -129,7 +130,22 @@
 .avatar-section__note.warning { color: #ffb020; }
 .mcb-button.avatar-link { height: 22px; min-height: 22px; margin: 0; padding: 0 8px; border-width: 0; border-radius: 11px; background-color: rgba(0, 0, 0, 0); color: #9a9a9a; font-size: 11px; -unity-font-style: normal; }
 .mcb-button.avatar-link:hover { background-color: rgba(255, 255, 255, 0.08); color: #e6e6e6; }
+/* Face tracking: face-tracking.uss */
+/* Materials */
+.materials-card__chip--todo { color: #d9d9d9; background-color: rgba(255, 255, 255, 0.08); }
+.materials__note-row { flex-direction: row; align-items: center; margin-bottom: 4px; }
+.materials__note { flex-grow: 1; flex-shrink: 1; margin: 0; padding: 0; white-space: normal; color: #00DA6D; font-size: 10px; }
+.materials__note.warning { color: #ffb84d; }
+.materials__row { flex-direction: row; align-items: center; margin-top: 6px; padding: 6px 4px 6px 10px; border-radius: 10px; background-color: #2a2a2a; }
+.materials__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 6px; }
+.materials__name { color: #e6e6e6; font-size: 11px; -unity-font-style: bold; }
+.materials__detail { margin-top: 1px; color: #8f8f8f; font-size: 10px; white-space: normal; }
+.materials__actions { flex-direction: row; margin-top: 10px; }
+.materials__actions .mcb-button { height: 30px; min-height: 30px; margin: 0; padding: 0 14px; }
 /* Posing */
+.rexouium__feathers { flex-direction: row; flex-wrap: wrap; }
+.rexouium__feather { flex-direction: row; align-items: center; width: 50%; height: 26px; }
+.rexouium__feather-name { margin-left: 8px; color: #d6d6d6; font-size: 11px; }
 .posing-toggles { flex-direction: row; margin: 0 -3px; }
 .posing-toggles .posing-toggle { margin: 0 3px; }
 .posing-list { margin-top: 8px; }

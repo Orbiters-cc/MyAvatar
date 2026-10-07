@@ -101,7 +101,8 @@ namespace Orbiters.MyAvatar.Editor
                 : "Turn on what you need while posing in the Scene view. Hover a button to see what it does.";
             list.Clear();
             var found = AccessoriesOn ? AccessoryPoseSync.Accessories.ToList() : AccessoryPoseSync.Find(avatar.transform);
-            foreach (var accessory in found)
+            // My Avatar's face tracking template links to the head too, but it is not something to pose.
+            foreach (var accessory in found.Where(a => !a.Root || !a.Root.GetComponentInChildren<MyAvatarFaceTracking>(true)))
             {
                 var item = new VisualElement(); item.AddToClassList("posing-item");
                 var dot = new VisualElement(); dot.AddToClassList("posing-item__dot"); dot.EnableInClassList("partial", accessory.Reason != null || accessory.Following < accessory.Total / 2); item.Add(dot);

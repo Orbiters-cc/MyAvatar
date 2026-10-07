@@ -50,7 +50,9 @@ namespace Orbiters.MyAvatar.Editor
                 for (int index = 0; index < materials.Length; index++)
                 {
                     var material = materials[index];
-                    // Locked/optimized shaders (e.g. Poiyomi's Hidden/Locked/...) are the norm on avatars and keep their texture slots.
+                    // Locked/optimized shaders (e.g. Poiyomi's Hidden/Locked/...) are the norm on avatars. They keep only the features
+                    // that were on when locked, so slots come from the shader they were made from (hair locked with emission off
+                    // still takes an emission map); applying a texture unlocks the copy.
                     if (!material || !material.shader || material.shader.name == "Hidden/InternalErrorShader") continue;
                     if (byMaterial.TryGetValue(material, out var known))
                     {
@@ -63,14 +65,14 @@ namespace Orbiters.MyAvatar.Editor
                         continue;
                     }
                     var slots = byMaterial[material] = new List<TextureSlot>();
-                    var shader = material.shader;
+                    var shader = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.OriginalShader(material) ?? material.shader;
                     string shaderName = ShaderName(material);
                     for (int i = 0; i < shader.GetPropertyCount(); i++)
                     {
                         if (shader.GetPropertyType(i) != ShaderPropertyType.Texture || !includeAll && (shader.GetPropertyTextureDimension(i) != TextureDimension.Tex2D ||
                             (shader.GetPropertyFlags(i) & ShaderPropertyFlags.HideInInspector) != 0)) continue;
                         string property = shader.GetPropertyName(i), description = CleanDescription(shader.GetPropertyDescription(i));
-                        var texture = material.GetTexture(property);
+                        var texture = material.HasProperty(property) ? material.GetTexture(property) : Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, property);
                         var slot = new TextureSlot { id = "s" + result.Count, material = material, materialName = material.name,
                             shader = shaderName, property = property, description = description, role = SlotRole(property, description),
                             secondary = Secondary(property, description), existing = texture, existingName = texture ? texture.name : "",

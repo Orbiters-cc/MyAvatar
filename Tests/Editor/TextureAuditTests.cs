@@ -501,6 +501,41 @@ namespace Orbiters.MyAvatar.Editor.Tests
             StringAssert.Contains("about as likely", entries[0].reason);
         }
 
+        // Ultirex orbit hair: two of the three hair materials were locked with emission off, so their locked shader has no
+        // emission slot. Slots come from the original shader, the map lands on them, and applying it turns emission on.
+        [Test] public void HairLockedWithEmissionOffStillTakesTheEmissionMap()
+        {
+            var folder = Folder();
+            string path = folder + "/LockedHair.shader";
+            File.WriteAllText(path, "Shader \"Hidden/Locked/HairEmissionRegression\" { Properties { _MainTex (\"Albedo\", 2D) = \"white\" {} _BumpMap (\"Normal Map\", 2D) = \"bump\" {} } SubShader { Pass {} } }");
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            var locked = Own(new Material(AssetDatabase.LoadAssetAtPath<Shader>(path)) { name = "orbit fursuit hair blue" });
+            locked.SetOverrideTag("OriginalShader", "Standard");
+            var avatar = Avatar();
+            var renderer = Child(avatar, "HairFrontMesh").AddComponent<MeshRenderer>(); renderer.sharedMaterial = locked;
+
+            var slots = TextureMatching.Slots(avatar);
+            Assert.That(slots.Any(s => s.material == locked && s.property == "_EmissionMap"), "The original shader's emission slot is offered.");
+            var color = Png(folder, "t_hair_BaseColor", 2, (x, y) => new Color32(20, 20, 60, 255));
+            var emission = Png(folder, "t_hair_EmissionMap", 2, (x, y) => new Color32(255, 0, 0, 255));
+            var entries = new List<TextureEntry>
+            {
+                new TextureEntry { texture = color, fileName = "t_hair_BaseColor.png", role = TextureMatching.FileRole("t_hair_BaseColor.png") },
+                new TextureEntry { texture = emission, fileName = "t_hair_EmissionMap.png", role = TextureMatching.FileRole("t_hair_EmissionMap.png") },
+            };
+            Match(entries, slots);
+            var emissionEntry = entries.Single(e => e.texture == emission);
+            Assert.AreSame(locked, emissionEntry.material);
+            Assert.AreEqual("_EmissionMap", emissionEntry.property);
+
+            TextureChanges.Apply(avatar, entries.Where(e => e.material).ToList(), folder + "/Batch");
+            var result = renderer.sharedMaterial;
+            Assert.AreEqual("Standard", result.shader.name, "The copy is unlocked to its original shader.");
+            Assert.AreSame(emission, result.GetTexture("_EmissionMap"));
+            Assert.IsTrue(result.IsKeywordEnabled("_EMISSION"));
+            Assert.Greater(result.GetColor("_EmissionColor").maxColorComponent, 0f);
+        }
+
         [Test] public void SubmeshesSharingTheirUvLayoutAreOneTarget()
         {
             var triangle = new[] { new Vector2(.1f, .1f), new Vector2(.9f, .1f), new Vector2(.1f, .9f) };
