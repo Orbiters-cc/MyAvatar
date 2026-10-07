@@ -18,12 +18,12 @@ namespace Orbiters.MyAvatar.Editor
             return "Assets/Orbiters/MyAvatar/Thumbnails/" + SafeName(avatar.gameObject.name) + " " + hash;
         }
 
-        // Each capture is immutable so Undo/Redo can restore both the reference and its pixels.
-        internal static Texture2D Save(MyAvatar avatar, Texture2D image)
+        // Each capture is immutable so Undo/Redo can restore both the reference and its pixels. Ref sheets go here too.
+        internal static Texture2D Save(MyAvatar avatar, Texture2D image, string kind = "thumbnail")
         {
             string folder = Folder(avatar);
             TextureImport.EnsureFolder(folder);
-            string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafeName(avatar.gameObject.name) + " thumbnail.png");
+            string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafeName(avatar.gameObject.name) + " " + kind + ".png");
             File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Application.dataPath), path), image.EncodeToPNG());
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             if (AssetImporter.GetAtPath(path) is TextureImporter importer && (importer.mipmapEnabled || importer.npotScale != TextureImporterNPOTScale.None))

@@ -44,7 +44,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             // The MCP tool edits the same draft: show its version.
             void Replaced() { if (publishing) return; draft = GalleryCreatorDraft.Load(); if (mine != null) Build(); }
             RegisterCallback<AttachToPanelEvent>(_ => GalleryPublisher.DraftReplaced += Replaced);
-            RegisterCallback<DetachFromPanelEvent>(_ => GalleryPublisher.DraftReplaced -= Replaced);
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                GalleryPublisher.DraftReplaced -= Replaced;
+                CloseStudio();
+                photoshoot?.Dispose();
+                photoshoot = null;
+                GalleryPictures.UnloadAll();
+            });
         }
 
         private async Task LoadAsync()
@@ -75,7 +82,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             VersionStep(Step(2, "Version", draft.version + (draft.scope != VersionScopes.Public ? " · " + draft.scope : ""), !string.IsNullOrWhiteSpace(draft.version)));
             VariantsStep(Step(3, "Packages", draft.variants.Count(v => v.report != null && v.report.Publishable) + " of " + draft.variants.Count + " ready",
                 draft.variants.Count > 0 && draft.variants.All(v => v.report != null && v.report.Publishable)));
-            PublishStep(Step(4, "Publish", draft.rights ? "Rights confirmed" : "", false));
+            PicturesStep(Step(4, "Pictures", PicturesSummary(), HasCardPicture()));
+            PublishStep(Step(5, "Publish", draft.rights ? "Rights confirmed" : "", false));
         }
 
         private VisualElement Step(int number, string title, string summary, bool done)

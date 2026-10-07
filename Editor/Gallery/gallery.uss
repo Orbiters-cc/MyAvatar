@@ -282,6 +282,40 @@
 /* ---- Cleanup window (on top of Toolkit's settings-window.uss) ---- */
 .gallery-cleanup .orb-settings__card { margin-bottom: 12px; }
 
+/* ---- Creator pictures: the card buyers see, the strip of pictures, and the photoshoot under them ---- */
+.creator-pictures { flex-direction: row; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.orb-card.gallery-card.creator-pictures__card { margin: 0 16px 10px 0; flex-shrink: 0; cursor: arrow; }
+.orb-card.gallery-card.creator-pictures__card:hover { translate: 0 0; }
+.creator-pictures__side { flex-grow: 1; flex-shrink: 1; flex-basis: 220px; min-width: 200px; }
+.creator-pictures__strip { flex-direction: row; flex-wrap: wrap; }
+.creator-pictures__actions { margin-top: 2px; }
+.creator-actions .mcb-button.creator-pictures__take { padding: 0 16px; }
+.mcb-button.creator-pictures__sheet { height: 28px; min-height: 28px; margin: 8px 0 0 0; padding: 0 12px; border-radius: 14px; font-size: 11px; align-self: flex-start; }
+.creator-picture { width: 78px; height: 78px; margin: 0 8px 8px 0; border-radius: 12px; overflow: hidden; background-color: #141414; border-width: 2px; border-color: rgba(0, 0, 0, 0); cursor: link; opacity: 1; scale: 1 1; transition-property: scale, opacity, border-color; transition-duration: 0.18s, 0.18s, 0.15s; transition-timing-function: ease-out-back, ease-out, ease-out; }
+.creator-picture:hover { scale: 1.04 1.04; border-color: rgba(255, 255, 255, 0.22); }
+.creator-picture--pressed { scale: 0.95 0.95; }
+.creator-picture--sheet { width: 139px; cursor: arrow; }
+.creator-picture--card, .creator-picture--card:hover { border-color: #00DA6D; cursor: arrow; }
+.creator-picture--new { scale: 0.6 0.6; opacity: 0; }
+.creator-picture__image { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.creator-picture__badge { position: absolute; left: 5px; bottom: 5px; height: 16px; margin: 0; padding: 0 6px; border-radius: 8px; background-color: rgba(10, 10, 10, 0.72); color: #f2f2f2; font-size: 9px; -unity-font-style: bold; -unity-text-align: middle-center; }
+.creator-picture--card .creator-picture__badge { background-color: #00DA6D; color: #06140c; }
+.creator-picture__tools { position: absolute; top: 4px; right: 4px; flex-direction: row; opacity: 0; transition-property: opacity; transition-duration: 0.15s; }
+.creator-picture:hover .creator-picture__tools { opacity: 1; }
+.creator-picture__tool { width: 20px; height: 20px; min-height: 20px; margin: 0 0 0 3px; padding: 4px; border-width: 0; border-radius: 10px; background-color: rgba(10, 10, 10, 0.78); --icon-color: #e6e6e6; }
+.creator-picture__tool:hover { background-color: #00DA6D; --icon-color: #06140c; }
+.creator-picture__tool--remove:hover { background-color: #ff6b6b; --icon-color: #1a0505; }
+.creator-picture__tool-icon { flex-grow: 1; }
+.creator-picture--empty { width: 139px; justify-content: center; align-items: center; background-color: #191919; border-width: 1px; border-color: rgba(255, 255, 255, 0.1); }
+.creator-picture--empty:hover { border-color: rgba(0, 218, 109, 0.5); }
+.creator-picture__empty-icon { width: 24px; height: 24px; --icon-color: #6f6f6f; }
+.creator-picture--empty:hover .creator-picture__empty-icon { --icon-color: #00DA6D; }
+.creator-picture__empty-text { margin: 4px 0 0 0; padding: 0; font-size: 10px; color: #7f7f7f; }
+.creator-studio { margin-top: 12px; }
+.creator-pictures__placeholder { position: absolute; left: 0; top: 0; right: 0; bottom: 0; justify-content: center; align-items: center; }
+.creator-pictures__placeholder-icon { width: 30px; height: 30px; --icon-color: #4f4f4f; }
+.creator-pictures__placeholder-text { margin: 6px 0 0 0; padding: 0; font-size: 10px; color: #6a6a6a; }
+
 /* ---- Creator window ---- */
 .gallery-creator-window { flex-grow: 1; background-color: #1f1f1f; }
 .gallery-creator-window__scroll { flex-grow: 1; }

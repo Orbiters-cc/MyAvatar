@@ -94,6 +94,7 @@
 .thumbnail-actions .mcb-button { height: 34px; min-height: 34px; margin: 0; }
 .thumbnail-actions .thumbnail-actions__sdk { flex-grow: 1; flex-basis: 0; margin-right: 10px; }
 .thumbnail-actions .thumbnail-actions__main { flex-grow: 2; flex-basis: 0; }
+.thumbnail-refsheet.mcb-button { height: 30px; min-height: 30px; margin: 8px 0 0 0; }
 .thumbnail-status { margin-top: 8px; color: #ff8c59; font-size: 11px; white-space: normal; }
 .thumbnail-studio { margin-top: 12px; }
 /* VRChat in-game avatar card, measured on the game at 1:1: 228x234, 4px frame, 220x127 image, text centred in the body. */

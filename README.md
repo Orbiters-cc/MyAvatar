@@ -1,5 +1,17 @@
 # My Avatar
 
+## 0.9.4 — 2026-10-07
+
+- **Pictures** in Publish to the gallery: take pictures of the avatar wearing your clothing or accessory with the
+  photoshoot, shown live on the gallery card buyers will see. The first picture goes on the card, the others and ref
+  sheets open on the asset's page (the website and My Avatar's details); add picture files too, remove them, put another
+  on the card, or save a copy. They are sent with the asset when you publish. Needs the matching Orbiters server.
+- **Create ref sheet**, under the thumbnail's buttons (and in the gallery's Pictures): the avatar from the front, the back
+  and the side on one 1920×1080 sheet. In the Thumbnail section it is saved beside the thumbnails and shown in the
+  Project window.
+- The thumbnail photoshoot gets the Toolkit's new effects, backgrounds of your own and environment light.
+- Requires Orbiters Toolkit 0.3.16.
+
 ## 0.9.3 — 2026-10-07
 
 - **Blueprint ID check**: Build & Publish stops before the build when the avatar's blueprint ID belongs to an avatar

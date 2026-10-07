@@ -12,7 +12,7 @@ namespace Orbiters.MyAvatar.Editor
         private readonly PhotoshootState state;
         private readonly VrcAvatarCard card;
         private readonly Label status;
-        private readonly Button create, openSdk;
+        private readonly Button create, openSdk, refSheet;
         private readonly VisualElement studio;
         private PhotoshootPanel studioPanel;
         private Texture live;
@@ -34,7 +34,9 @@ namespace Orbiters.MyAvatar.Editor
             openSdk.AddToClassList("thumbnail-actions__sdk");
             openSdk.tooltip = "Show the VRChat SDK panel on this avatar with this thumbnail filled in. It is filled in whenever the SDK shows this avatar.";
             actions.Add(openSdk);
-            create = MyAvatarEditor.Button("Create thumbnail", Toggle); create.AddToClassList("thumbnail-actions__main"); actions.Add(create);
+            create = MyAvatarEditor.Button("Create thumbnail", () => Open(false)); create.AddToClassList("thumbnail-actions__main"); actions.Add(create);
+            // Under them, the other photoshoot: the avatar from the front, the back and the side on one sheet.
+            refSheet = MyAvatarEditor.Button("Create ref sheet", () => Open(true)); refSheet.AddToClassList("thumbnail-refsheet"); Add(refSheet);
             status = new Label(); status.AddToClassList("thumbnail-status"); Add(status);
 
             studio = new VisualElement(); studio.AddToClassList("thumbnail-studio"); Add(studio);
@@ -42,15 +44,23 @@ namespace Orbiters.MyAvatar.Editor
             Refresh();
         }
 
-        private void Toggle()
+        // Each button opens its photoshoot, switches the open one to it, or closes it when it is the one shown.
+        private void Open(bool sheet)
         {
-            if (studioPanel != null) { Close(); return; }
+            if (studioPanel != null)
+            {
+                if (studioPanel.RefSheetOpen == sheet) Close();
+                else studioPanel.ShowRefSheet(sheet);
+                Refresh();
+                return;
+            }
             if (!avatar.GetComponentInChildren<Animator>(true))
             {
                 status.text = "Add an Animator with a humanoid avatar to pose this avatar.";
                 status.style.display = DisplayStyle.Flex;
                 return;
             }
+            state.RefSheetOpen = sheet;
             studioPanel = new PhotoshootPanel(state, new PhotoshootOptions
             {
                 AvatarRoot = () => avatar ? avatar.gameObject : null,
@@ -62,6 +72,7 @@ namespace Orbiters.MyAvatar.Editor
                 Browsed = _ => Close(),
                 ThumbnailPreview = texture => { live = texture; ShowCard(); },
                 Changed = Refresh,
+                RefSheet = SaveRefSheet,
             });
             studio.Add(studioPanel);
             Refresh();
@@ -74,6 +85,18 @@ namespace Orbiters.MyAvatar.Editor
             studioPanel.RemoveFromHierarchy(); studioPanel = null; live = null;
             state.ClosePreview();
             Refresh();
+        }
+
+        // Kept beside the thumbnails, named after the avatar, and shown in the Project window.
+        private void SaveRefSheet(Texture2D sheet)
+        {
+            try
+            {
+                var saved = AvatarThumbnail.Save(avatar, sheet, "ref sheet");
+                EditorGUIUtility.PingObject(saved);
+                state.Status = "Ref sheet saved to " + AssetDatabase.GetAssetPath(saved);
+            }
+            finally { Object.DestroyImmediate(sheet); }
         }
 
         private void Assign(Texture2D image)
@@ -95,9 +118,12 @@ namespace Orbiters.MyAvatar.Editor
             ShowCard();
             status.text = "";
             status.style.display = DisplayStyle.None;
-            create.text = studioPanel != null ? "Done" : has ? "Edit thumbnail" : "Create thumbnail";
-            create.tooltip = studioPanel != null ? "Close the photoshoot." : has ? "Open the photoshoot to capture a new thumbnail." : "Pose, light and frame the avatar, then capture a 4:3 VRChat thumbnail.";
+            bool sheetOpen = studioPanel != null && studioPanel.RefSheetOpen, thumbnailOpen = studioPanel != null && !sheetOpen;
+            create.text = thumbnailOpen ? "Done" : has ? "Edit thumbnail" : "Create thumbnail";
+            create.tooltip = thumbnailOpen ? "Close the photoshoot." : has ? "Open the photoshoot to capture a new thumbnail." : "Pose, light and frame the avatar, then capture a 4:3 VRChat thumbnail.";
             create.EnableInClassList("mcb-button--primary", studioPanel == null);
+            refSheet.text = sheetOpen ? "Done" : "Create ref sheet";
+            refSheet.tooltip = sheetOpen ? "Close the ref sheet." : "Pose the avatar once and get it from the front, the back and the side on one 1920×1080 sheet, saved beside the thumbnails.";
             openSdk.style.display = has && studioPanel == null ? DisplayStyle.Flex : DisplayStyle.None;
             // While the card follows the live preview, the avatar is framed right on it.
             studioPanel?.AttachFraming(card.Media, () =>
@@ -110,8 +136,9 @@ namespace Orbiters.MyAvatar.Editor
         private void ShowCard()
         {
             if (!avatar) return;
-            Texture shown = studioPanel != null ? live : avatar.thumbnail;
-            card.Show(avatar.gameObject.name, shown, studioPanel != null);
+            // The live camera while the studio shows it; the saved thumbnail otherwise (also during a ref sheet).
+            Texture shown = studioPanel != null && live != null ? live : avatar.thumbnail;
+            card.Show(avatar.gameObject.name, shown, studioPanel != null && live != null);
         }
     }
 }

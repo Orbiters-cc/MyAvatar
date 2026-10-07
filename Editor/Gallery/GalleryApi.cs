@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -89,21 +90,32 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         internal static Task<CreatorAssets> CreatorAssetsAsync(CancellationToken cancellation) => Send<CreatorAssets>(Url("creator/assets"), cancellation: cancellation);
 
-        internal static async Task<Created> CreateAssetAsync(object metadata, string thumbnailPath, string idempotencyKey, OrbitersTransfer.Progress progress, CancellationToken cancellation)
+        internal static async Task<Created> CreateAssetAsync(object metadata, string thumbnailPath, IReadOnlyList<string> previewPaths, string idempotencyKey, OrbitersTransfer.Progress progress, CancellationToken cancellation)
         {
             var parts = new List<OrbitersTransfer.Part> { OrbitersTransfer.Part.Field("metadata", JsonConvert.SerializeObject(metadata)) };
-            if (!string.IsNullOrEmpty(thumbnailPath)) parts.Add(OrbitersTransfer.Part.File("thumbnail", thumbnailPath, "thumbnail.png", "image/png"));
+            AddPictures(parts, thumbnailPath, previewPaths);
             var result = await OrbitersTransfer.UploadMultipartAsync(Url("creator/assets"), Token, parts, progress, cancellation,
                 headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey });
             return Answer<Created>(result);
         }
 
-        internal static async Task<Created> UpdateAssetAsync(int assetId, object metadata, string thumbnailPath, CancellationToken cancellation)
+        internal static async Task<Created> UpdateAssetAsync(int assetId, object metadata, string thumbnailPath, IReadOnlyList<string> previewPaths, CancellationToken cancellation)
         {
             var parts = new List<OrbitersTransfer.Part> { OrbitersTransfer.Part.Field("metadata", JsonConvert.SerializeObject(metadata)) };
-            if (!string.IsNullOrEmpty(thumbnailPath)) parts.Add(OrbitersTransfer.Part.File("thumbnail", thumbnailPath, "thumbnail.png", "image/png"));
+            AddPictures(parts, thumbnailPath, previewPaths);
             return Answer<Created>(await OrbitersTransfer.UploadMultipartAsync(Url($"creator/assets/{assetId}"), Token, parts, null, cancellation, "PUT"));
         }
+
+        // The card's picture, and the previews shown on the asset's page (photoshoot shots, ref sheets) in order.
+        private static void AddPictures(List<OrbitersTransfer.Part> parts, string thumbnailPath, IReadOnlyList<string> previewPaths)
+        {
+            if (!string.IsNullOrEmpty(thumbnailPath)) parts.Add(OrbitersTransfer.Part.File("thumbnail", thumbnailPath, "thumbnail" + Path.GetExtension(thumbnailPath), MimeType(thumbnailPath)));
+            for (int i = 0; previewPaths != null && i < previewPaths.Count; i++)
+                parts.Add(OrbitersTransfer.Part.File("previews", previewPaths[i], "preview-" + (i + 1) + Path.GetExtension(previewPaths[i]), MimeType(previewPaths[i])));
+        }
+
+        private static string MimeType(string path) =>
+            Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg";
 
         internal static Task<object> SetPreferredStoreAsync(string provider) => Send<object>(Url("creator/preferred-store"), new { provider }, HttpMethod.Put);
 

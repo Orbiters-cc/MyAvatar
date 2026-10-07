@@ -12,6 +12,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public int assetId;
         public bool newAsset = true;
         public string name, type = "ACCESSORY", shortDescription, description, gumroad, jinxxy, currency = "USD", preferredStore, thumbnailPath;
+        /// <summary>Pictures for the asset's page besides <see cref="thumbnailPath"/> (the card's): photoshoot shots and ref sheets, in order.</summary>
+        public List<string> previewPaths = new List<string>();
+        /// <summary>An existing asset's current previews make way for these instead of following them.</summary>
+        public bool replacePreviews;
+        /// <summary>The pictures reached Orbiters: publishing again doesn't send them twice.</summary>
+        public bool picturesSent;
         public bool free;
         public long priceCents;
         public bool listed;

@@ -16,6 +16,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
     {
         internal GalleryAsset Asset { get; private set; }
         internal GalleryUI.State State { get; private set; }
+        /// <summary>Where the picture is shown.</summary>
+        internal VisualElement Media => media;
         internal GalleryJob Job { get; private set; }
         internal OrbitersAttachment.GalleryReceipt Installed { get; private set; }
 
@@ -81,7 +83,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var release = asset.fit?.release;
             var variant = asset.fit?.Compatible == true ? asset.fit.variants[0] : null;
             meta.text = release == null ? (asset.Clothing ? "Clothing" : "Accessory")
-                : string.Join(" · ", new[] { release.version, variant != null ? GalleryUI.Size(variant.sizeBytes) : null, variant != null && variant.parameterBits > 0 ? variant.parameterBits + " bits" : null,
+                : string.Join(" · ", new[] { release.version, variant != null && variant.sizeBytes > 0 ? GalleryUI.Size(variant.sizeBytes) : null, variant != null && variant.parameterBits > 0 ? variant.parameterBits + " bits" : null,
                     release.scope != "public" ? release.scope : null }.WithoutNulls());
             Refresh();
         }
@@ -149,6 +151,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 AddToClassList("gallery-pop");
                 schedule.Execute(() => RemoveFromClassList("gallery-pop")).StartingIn(180);
             }
+        }
+
+        /// <summary>Shows a picture that isn't on Orbiters yet (a creator's listing as buyers will see it).</summary>
+        internal void ShowPicture(Texture picture)
+        {
+            shimmer?.RemoveFromHierarchy();
+            shimmer = null;
+            image.image = picture;
+            image.EnableInClassList(GalleryImages.ShownClass, picture != null);
+            image.MarkDirtyRepaint();
         }
 
         // Why it does not fit, in a sentence for the tooltip.

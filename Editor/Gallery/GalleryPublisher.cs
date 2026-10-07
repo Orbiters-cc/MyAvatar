@@ -86,16 +86,25 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                         name = draft.name.Trim(), type = draft.type, shortDescription = draft.shortDescription, description = draft.description,
                         free = draft.free, priceCents = draft.free ? 0 : draft.priceCents, currency = draft.currency, gumroadLink = Url(draft.gumroad), jinxxyLink = Url(draft.jinxxy),
                         preferredStore = draft.preferredStore,
-                    }, Thumbnail(draft), draft.idempotencyKey, null, cancellation);
-                    draft.assetId = created.id; draft.newAsset = false; draft.Save();
+                    }, Thumbnail(draft), Previews(draft), draft.idempotencyKey, null, cancellation);
+                    draft.assetId = created.id; draft.newAsset = false; draft.picturesSent = true; draft.Save();
                 }
                 else
                 {
                     var mine = await GalleryApi.CreatorAssetsAsync(cancellation);
-                    if (mine?.assets.FirstOrDefault(a => a.id == draft.assetId)?.inGallery == false)
+                    bool join = mine?.assets.FirstOrDefault(a => a.id == draft.assetId)?.inGallery == false;
+                    // An existing asset keeps its card picture unless the creator took a new one.
+                    string picture = OwnPicture(draft);
+                    var previews = Previews(draft);
+                    bool pictures = !draft.picturesSent && (picture != null || previews.Count > 0);
+                    if (join || pictures)
                     {
-                        progress("Adding it to the gallery…");
-                        await GalleryApi.UpdateAssetAsync(draft.assetId, new { type = draft.type }, null, cancellation);
+                        progress(join ? "Adding it to the gallery…" : "Sending its pictures…");
+                        var metadata = new Dictionary<string, object>();
+                        if (join) metadata["type"] = draft.type;
+                        if (pictures) metadata["replacePreviews"] = draft.replacePreviews;
+                        await GalleryApi.UpdateAssetAsync(draft.assetId, metadata, pictures ? picture : null, pictures ? previews : null, cancellation);
+                        if (pictures) { draft.picturesSent = true; draft.Save(); }
                     }
                 }
                 if (draft.releaseId <= 0)
@@ -121,6 +130,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 published.id = draft.assetId; published.version = draft.version;
                 GalleryCreatorDraft.Clear();
                 GalleryCache.Clear();
+                // On Orbiters now: the copies taken for this listing go (a file chosen elsewhere stays).
+                foreach (string path in Previews(draft).Append(draft.thumbnailPath)) GalleryPictures.Delete(path);
                 Debug.Log($"[My Avatar] {draft.name} {draft.version} is in the gallery" + (published.listed ? "." : " (its listing stays private until you publish it on Orbiters)."));
                 return published;
             }
@@ -129,10 +140,17 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private static string Url(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+        private static string OwnPicture(GalleryCreatorDraft draft) =>
+            !string.IsNullOrEmpty(draft.thumbnailPath) && File.Exists(draft.thumbnailPath) ? draft.thumbnailPath : null;
+
+        // The asset page's pictures that still exist, at most the 8 the server takes in one request.
+        private static List<string> Previews(GalleryCreatorDraft draft) =>
+            draft.previewPaths.Where(p => !string.IsNullOrEmpty(p) && File.Exists(p)).Take(8).ToList();
+
         // The asset's picture: the draft's own image, else the first package's first prefab as My Avatar renders it.
         private static string Thumbnail(GalleryCreatorDraft draft)
         {
-            if (!string.IsNullOrEmpty(draft.thumbnailPath) && File.Exists(draft.thumbnailPath)) return draft.thumbnailPath;
+            if (OwnPicture(draft) is string own) return own;
             try
             {
                 var prefab = draft.variants.SelectMany(v => v.report?.prefabs ?? new List<GallerySetupPrefab>())
