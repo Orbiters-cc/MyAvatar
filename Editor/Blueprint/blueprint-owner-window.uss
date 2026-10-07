@@ -1,0 +1,33 @@
+/* Build & Publish stopped: the blueprint ID belongs to someone else's avatar. In the style of Orbiters' dialogs. */
+
+.bp-owner { flex-grow: 1; padding: 20px 22px 18px 22px; background-color: #1f1f1f; }
+
+.bp-owner__header { flex-direction: row; align-items: center; }
+.bp-owner__badge { width: 40px; height: 40px; margin-right: 14px; flex-shrink: 0; border-radius: 20px; align-items: center; justify-content: center; }
+.bp-owner__badge > Image { width: 22px; height: 22px; }
+.bp-owner__badge--warning { background-color: rgba(255, 176, 32, 0.16); }
+.bp-owner__badge--done { background-color: rgba(0, 218, 109, 0.16); }
+.bp-owner__titles { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.bp-owner__title { margin: 0; padding: 0; font-size: 16px; -unity-font-style: bold; color: #ffffff; white-space: normal; }
+.bp-owner__subject { margin: 3px 0 0 0; padding: 0; font-size: 12px; color: #a8a8a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.bp-owner__card { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background-color: rgba(255, 176, 32, 0.1); border-width: 1px; border-color: rgba(255, 176, 32, 0.3); }
+.bp-owner__card--done { background-color: rgba(0, 218, 109, 0.09); border-color: rgba(0, 218, 109, 0.28); }
+.bp-owner__message { margin: 0; padding: 0; font-size: 12px; color: #f2dcb4; white-space: normal; }
+.bp-owner__card--done .bp-owner__message { color: #c9f5dc; }
+
+.bp-owner__id { flex-direction: row; align-items: center; margin-top: 14px; padding: 8px 8px 8px 12px; border-radius: 10px; background-color: #171717; }
+.bp-owner__id-label { margin: 0 10px 0 0; padding: 0; font-size: 11px; -unity-font-style: bold; color: #8f8f8f; flex-shrink: 0; }
+.bp-owner__id-value { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0; padding: 0; font-size: 11px; color: #d8d8d8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-owner__chip-button { height: 24px; margin: 0 0 0 8px; padding: 0 12px; border-radius: 12px; border-width: 0; font-size: 11px; -unity-font-style: bold; color: #e6e6e6; background-color: #333333; flex-shrink: 0; }
+.bp-owner__chip-button:hover { background-color: #3e3e3e; }
+.bp-owner__chip-button:active { scale: 0.96 0.96; }
+
+.bp-owner__hint { margin: 12px 2px 0 2px; padding: 0; font-size: 11px; color: #8f8f8f; white-space: normal; }
+
+.bp-owner__buttons { flex-direction: row; justify-content: flex-end; margin-top: 16px; }
+.bp-owner__button { height: 34px; min-width: 112px; margin: 0 0 0 8px; padding: 0 18px; border-radius: 17px; border-width: 0; font-size: 12px; -unity-font-style: bold; color: #e6e6e6; background-color: #3a3a3a; }
+.bp-owner__button:hover { background-color: #454545; }
+.bp-owner__button:active { scale: 0.97 0.97; }
+.bp-owner__button--primary { color: #06140c; background-color: #00da6d; }
+.bp-owner__button--primary:hover { background-color: #1ee57f; }

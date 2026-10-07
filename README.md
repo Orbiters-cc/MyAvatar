@@ -1,5 +1,14 @@
 # My Avatar
 
+## 0.9.3 — 2026-10-07
+
+- **Blueprint ID check**: Build & Publish stops before the build when the avatar's blueprint ID belongs to an avatar
+  another VRChat account published (often a creator's ID left in a prefab), instead of failing after the whole build
+  and upload. A window explains it and clears the ID in one click, so the avatar uploads as a new one. Asked to the
+  Orbiters server for signed-in members with a linked VRChat account; the avatar shown in the SDK panel is checked
+  ahead of time. Build & Test is never stopped, and nothing is blocked when the answer isn't known.
+- Requires the matching Orbiters backend (`GET /vrchat/avatars/:id/owner`).
+
 ## 0.9.2 — 2026-10-06
 
 - Thumbnail photoshoot: **Look at the camera**, with a **Look** dial from the head alone to the eyes alone, and a sphere that turns and tilts the avatar around what is framed (Orbiters Toolkit 0.3.14).
@@ -302,6 +311,24 @@ materials and keep its snapshot, so Undo returns to the state before the drop.
 A new drop replaces the component's previous persistent Undo snapshot; Unity's
 regular Undo is also recorded, with AI matches as their own step. Undo after a Git
 checkpoint creates a new local change, not a history rewrite. Existing imported files also remain after cancellation.
+
+## Blueprint ID check
+
+VRChat only lets an account update the avatars it published. When an avatar carries someone else's blueprint ID (its
+Pipeline Manager's ID, often left in a prefab by the avatar's creator), the VRChat SDK only finds out when it uploads,
+after the whole build. With an Orbiters account linked to your VRChat account, My Avatar checks the ID before the build
+starts: when you click **Build & Publish**, it asks Orbiters who published the avatar that ID points to and compares it
+with the VRChat account the SDK uploads with (or your linked one). When it belongs to someone else, the build stops
+right away: the SDK reports it was aborted, then My Avatar's window says whose avatar it is and offers **Clear the
+blueprint ID** (one Undo step): the avatar is then uploaded as a new one, after you give it a name and a thumbnail in the
+SDK panel. **Put the ID back** restores it.
+
+- The avatar shown in the SDK panel is checked as soon as it is selected, so Build & Publish doesn't wait; answers are
+  kept ten minutes.
+- Nothing is blocked when the answer isn't known: not signed in, no linked VRChat account, an avatar Orbiters can't
+  see (private, hidden or deleted), or no answer within a few seconds. Build & Test is never stopped.
+- Orbiters reads the avatar's author with its own VRChat account and only answers signed-in members with a linked
+  VRChat account.
 
 ## Optional account and AI
 
