@@ -1,0 +1,68 @@
+/* Avatar customization: one frame like the face tracking hero (16 px frame, 12 px rows, #00DA6D accent). The physics
+   matrix first (a row per part, an "All" row on top), then the looks. */
+
+.custom { padding: 12px 14px 14px 14px; border-radius: 16px; background-color: #1c1e23; border-width: 1px; border-color: rgba(255, 255, 255, 0.05); overflow: hidden; }
+.custom__glow { position: absolute; right: -60px; top: -70px; width: 220px; height: 180px; }
+
+/* ---- Physics matrix ---- */
+.custom__columns { flex-direction: row; align-items: center; height: 18px; margin-bottom: 4px; padding: 0 8px 0 12px; }
+.custom__column { margin: 0; padding: 0; font-size: 10px; color: #8f8f8f; letter-spacing: 0.6px; -unity-font-style: bold; -unity-text-align: middle-center; }
+.custom__name { width: 84px; min-width: 84px; flex-direction: row; align-items: center; }
+.custom__column.custom__name { -unity-text-align: middle-left; }
+.custom__column.custom__column--access { width: 86px; margin-right: 6px; }
+.custom__column.custom__stretch-title { flex-grow: 1; -unity-text-align: middle-left; padding-left: 4px; }
+
+.custom__row { flex-direction: row; align-items: center; height: 38px; margin-top: 4px; padding: 0 8px 0 12px; border-radius: 12px; background-color: #24262c; transition-property: background-color; transition-duration: 0.12s; }
+.custom__row:hover { background-color: #292b32; }
+.custom__row--all { background-color: rgba(138, 125, 255, 0.10); }
+.custom__row--all:hover { background-color: rgba(138, 125, 255, 0.15); }
+.custom__row--all .custom__part { color: #c9c2ff; }
+.custom__part { margin: 0; padding: 0; font-size: 12px; color: #ffffff; -unity-font-style: bold; }
+.mcb-button.custom__count { height: 16px; min-height: 16px; margin: 0 0 0 6px; padding: 0 6px; border-radius: 8px; background-color: rgba(255, 255, 255, 0.06); color: #9a9a9a; font-size: 9px; -unity-font-style: bold; }
+.mcb-button.custom__count:hover { background-color: rgba(255, 255, 255, 0.14); color: #ffffff; }
+
+.custom__access { flex-direction: row; width: 86px; height: 28px; margin-right: 6px; padding: 2px; border-radius: 10px; background-color: #15171b; }
+.custom__access-option { flex-grow: 1; margin: 0; padding: 0; border-width: 0; border-radius: 8px; background-color: rgba(0, 0, 0, 0); align-items: center; justify-content: center; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; transition-timing-function: ease-out, ease-out-back; }
+.custom__access-option:hover { background-color: rgba(255, 255, 255, 0.06); }
+.custom__access-option:active { scale: 0.9 0.9; }
+.custom__access-option .orb-icon { width: 15px; height: 15px; --icon-color: #7c7c7c; }
+.custom__access-option:hover .orb-icon { --icon-color: #d9d9d9; }
+.custom__access-option--on, .custom__access-option--on:hover { background-color: rgba(0, 218, 109, 0.18); }
+.custom__access-option--on .orb-icon, .custom__access-option--on:hover .orb-icon { --icon-color: #00DA6D; }
+.custom__access-option:disabled { opacity: 0.28; }
+.custom__access--mixed { border-width: 1px; border-color: rgba(255, 176, 32, 0.35); padding: 1px; }
+
+.custom__stretch { flex-grow: 1; flex-shrink: 1; min-width: 0; flex-direction: row; align-items: center; }
+.custom__stretch:disabled { opacity: 0.4; }
+.custom__value { width: 40px; min-width: 40px; margin: 0; padding: 0; font-size: 11px; color: #ffffff; -unity-text-align: middle-right; -unity-font-style: bold; }
+
+.custom .unity-base-slider { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 6px 0 4px; }
+.custom .unity-base-slider__dragger { width: 14px; height: 14px; border-radius: 7px; margin-top: -6px; background-color: #00DA6D; border-width: 0; }
+.custom .unity-base-slider__tracker { height: 4px; border-radius: 2px; margin-top: -1px; background-color: #121317; border-width: 0; }
+.custom :disabled .unity-base-slider__dragger { background-color: #666666; }
+
+.custom__missing { flex-direction: row; align-items: center; margin-top: 4px; padding: 5px 6px 5px 12px; border-radius: 12px; background-color: rgba(255, 176, 32, 0.07); }
+.custom__missing-text { flex-grow: 1; flex-shrink: 1; margin: 0; font-size: 11px; color: #e8c27a; white-space: normal; }
+.mcb-button.custom__missing-button { height: 26px; min-height: 26px; margin: 0 0 0 8px; padding: 0 12px; border-radius: 13px; background-color: #00DA6D; color: #06140c; font-size: 11px; -unity-font-style: bold; flex-shrink: 0; }
+.mcb-button.custom__missing-button:hover { background-color: #19e27d; }
+
+/* ---- Looks ---- */
+.custom__looks { margin-top: 12px; padding-top: 10px; border-top-width: 1px; border-color: rgba(255, 255, 255, 0.06); }
+.custom__physics { }
+.custom__subtitle { margin: 0 0 6px 2px; padding: 0; font-size: 10px; color: #8f8f8f; letter-spacing: 0.6px; -unity-font-style: bold; }
+.custom__chips-line { flex-direction: row; align-items: flex-start; }
+.custom__chips-line > .custom__chips-label { margin-top: 7px; }
+.custom__chips { flex-grow: 1; flex-shrink: 1; min-width: 0; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.custom__chips-label { width: 72px; min-width: 72px; margin: 0 0 0 2px; padding: 0; font-size: 11px; color: #bdbdbd; }
+.mcb-button.custom__chip { flex-shrink: 0; flex-direction: row; align-items: center; height: 26px; min-height: 26px; margin: 2px 4px 2px 0; padding: 0 10px 0 8px; border-width: 0; border-radius: 13px; background-color: #24262c; color: #9a9a9a; font-size: 11px; -unity-font-style: normal; transition-property: background-color, color, scale; transition-duration: 0.12s, 0.12s, 0.18s; transition-timing-function: ease-out, ease-out, ease-out-back; }
+.mcb-button.custom__chip:hover { background-color: #2c2e36; color: #e6e6e6; }
+.mcb-button.custom__chip.pressed { scale: 0.95 0.95; }
+.custom__chip-check { width: 12px; height: 12px; margin-right: 5px; --icon-color: #5a5a5a; }
+.custom__chip-text { margin: 0; padding: 0; font-size: 11px; color: #9a9a9a; }
+.custom__chip:hover .custom__chip-text { color: #e6e6e6; }
+.custom__chip--on .custom__chip-text { color: #ffffff; }
+.mcb-button.custom__chip--on, .mcb-button.custom__chip--on:hover { background-color: rgba(0, 218, 109, 0.16); color: #ffffff; }
+.custom__chip--on .custom__chip-check { --icon-color: #00DA6D; }
+.custom__slider-row { flex-direction: row; align-items: center; height: 30px; margin-top: 6px; }
+.custom__centered { flex-grow: 1; flex-shrink: 1; min-width: 0; justify-content: center; }
+.custom__center-tick { position: absolute; left: 50%; top: 8px; bottom: 8px; width: 2px; margin-left: -1px; border-radius: 1px; background-color: rgba(255, 255, 255, 0.16); }

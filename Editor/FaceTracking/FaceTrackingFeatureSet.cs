@@ -19,24 +19,61 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         private FaceTrackingFeature(FaceTrackingFeatures flag, FaceTrackingFeatures parent, string label, string detail)
         { Flag = flag; Parent = parent; Label = label; Detail = detail; }
 
-        // Pupils and brows are weighted by EyeTrackingActive in the templates, tongue and cheeks by LipTrackingActive.
+        // Pupils and brows are weighted by EyeTrackingActive in the templates, the mouth's parts and cheeks by LipTrackingActive.
+        // A child comes after its parent: a feature is only effective when its parent is.
         public static readonly FaceTrackingFeature[] All =
         {
             new FaceTrackingFeature(FaceTrackingFeatures.Eyes, FaceTrackingFeatures.None, "Eyes", "Where you look, blinks and squints"),
-            new FaceTrackingFeature(FaceTrackingFeatures.Pupils, FaceTrackingFeatures.Eyes, "Pupils", "Dilation, for eye trackers that measure it (iPhones don't)"),
-            new FaceTrackingFeature(FaceTrackingFeatures.Brows, FaceTrackingFeatures.Eyes, "Brows", "Raised and frowning brows"),
+            new FaceTrackingFeature(FaceTrackingFeatures.Pupils, FaceTrackingFeatures.Eyes, "Pupils", "Dilation, for eye trackers that measure it (Vive does; iPhone and Quest Pro don't)"),
+            new FaceTrackingFeature(FaceTrackingFeatures.Brows, FaceTrackingFeatures.Eyes, "Brows", "Raised and frowning brows (not on Vive)"),
             new FaceTrackingFeature(FaceTrackingFeatures.Mouth, FaceTrackingFeatures.None, "Mouth", "Jaw, lips, smiles and frowns"),
-            new FaceTrackingFeature(FaceTrackingFeatures.Tongue, FaceTrackingFeatures.Mouth, "Tongue", "Out, side to side, up and down"),
-            new FaceTrackingFeature(FaceTrackingFeatures.Cheeks, FaceTrackingFeatures.Mouth, "Cheeks", "Puffed and sucked in"),
+            new FaceTrackingFeature(FaceTrackingFeatures.LipPress, FaceTrackingFeatures.Mouth, "Lip press", "Pressed lips and a raised upper lip (iPhone and Quest Pro, not Vive)"),
+            new FaceTrackingFeature(FaceTrackingFeatures.LipTighteners, FaceTrackingFeatures.Mouth, "Lip tighteners", "Tightened lips (Quest Pro only)"),
+            new FaceTrackingFeature(FaceTrackingFeatures.Nose, FaceTrackingFeatures.Mouth, "Nose", "Sneer (iPhone and Quest Pro, not Vive)"),
+            new FaceTrackingFeature(FaceTrackingFeatures.Tongue, FaceTrackingFeatures.Mouth, "Tongue", "Sticking out"),
+            new FaceTrackingFeature(FaceTrackingFeatures.TongueDirections, FaceTrackingFeatures.Tongue, "Tongue direction", "Side to side, up and down and roll (Vive only)"),
+            new FaceTrackingFeature(FaceTrackingFeatures.Cheeks, FaceTrackingFeatures.Mouth, "Cheeks", "Puffed and sucked in (iPhones can't suck in)"),
         };
 
-        /// <summary>Quick choices, from the lightest.</summary>
-        public static readonly (string label, FaceTrackingFeatures features)[] Presets =
+        /// <summary>
+        /// The trackers: what each one sends, per VRCFaceTracking's compatibility table (docs.vrcft.io, Avatars,
+        /// Compatibility), so nothing it cannot drive costs bits.
+        /// </summary>
+        public static readonly (FaceTrackingPreset preset, string label, string sub, FaceTrackingFeatures features, string note)[] Trackers =
         {
-            ("Eyes", FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Brows),
-            ("Eyes + mouth", FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Brows | FaceTrackingFeatures.Mouth),
-            ("Everything", FaceTrackingFeatures.All),
+            (FaceTrackingPreset.MetaQuest, "Meta Quest", "Quest Pro",
+                FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Brows | FaceTrackingFeatures.Mouth | FaceTrackingFeatures.LipPress |
+                FaceTrackingFeatures.LipTighteners | FaceTrackingFeatures.Nose | FaceTrackingFeatures.Tongue | FaceTrackingFeatures.Cheeks,
+                "Quest Pro (Meta Movement): no pupil dilation, and the tongue only sticks out."),
+            (FaceTrackingPreset.Vive, "Vive", "SRanipal",
+                FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Pupils | FaceTrackingFeatures.Mouth | FaceTrackingFeatures.Tongue |
+                FaceTrackingFeatures.TongueDirections | FaceTrackingFeatures.Cheeks,
+                "Vive Pro Eye and Facial Tracker: pupils and the tongue in every direction, but no brows, nose, lip press or tighteners."),
+            (FaceTrackingPreset.ARKit, "Apple", "ARKit",
+                FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Brows | FaceTrackingFeatures.Mouth | FaceTrackingFeatures.LipPress |
+                FaceTrackingFeatures.Nose | FaceTrackingFeatures.Tongue | FaceTrackingFeatures.Cheeks,
+                "iPhone and iPad: no pupil dilation, no lip tighteners, and the tongue only sticks out."),
         };
+
+        /// <summary>The features a tracker sends; Everything and Custom keep <paramref name="current"/>.</summary>
+        public static FaceTrackingFeatures FeaturesOf(FaceTrackingPreset preset, FaceTrackingFeatures current)
+        {
+            foreach (var tracker in Trackers) if (tracker.preset == preset) return tracker.features;
+            return current;
+        }
+
+        /// <summary>
+        /// Chooses <paramref name="preset"/> on <paramref name="marker"/>: a tracker keeps its features with the recommended
+        /// smoothing and the expressive mouth; Custom starts from what was chosen.
+        /// </summary>
+        public static void Choose(MyAvatarFaceTracking marker, FaceTrackingPreset preset)
+        {
+            marker.preset = preset;
+            if (preset == FaceTrackingPreset.Custom || preset == FaceTrackingPreset.Everything) return;
+            marker.synced = FeaturesOf(preset, marker.synced);
+            marker.smoothing = FaceTrackingSmoothing.Balanced;
+            marker.expressiveMouth = true;
+        }
     }
 
     /// <summary>
@@ -61,12 +98,16 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (v2.StartsWith("Pupil", StringComparison.Ordinal) || v2.StartsWith("EyesDilation", StringComparison.Ordinal)) return FaceTrackingFeatures.Pupils;
             if (v2.StartsWith("Brow", StringComparison.Ordinal)) return FaceTrackingFeatures.Brows;
             if (v2.StartsWith("Eye", StringComparison.Ordinal)) return FaceTrackingFeatures.Eyes;
-            if (v2.StartsWith("Tongue", StringComparison.Ordinal)) return FaceTrackingFeatures.Tongue;
+            if (v2.StartsWith("TongueOut", StringComparison.Ordinal)) return FaceTrackingFeatures.Tongue;
+            if (v2.StartsWith("Tongue", StringComparison.Ordinal)) return FaceTrackingFeatures.TongueDirections;
             if (v2.StartsWith("Cheek", StringComparison.Ordinal)) return FaceTrackingFeatures.Cheeks;
+            if (v2.StartsWith("Nose", StringComparison.Ordinal)) return FaceTrackingFeatures.Nose;
+            if (v2.StartsWith("MouthPress", StringComparison.Ordinal) || v2.StartsWith("MouthRaiserUpper", StringComparison.Ordinal)) return FaceTrackingFeatures.LipPress;
+            if (v2.StartsWith("MouthTightener", StringComparison.Ordinal)) return FaceTrackingFeatures.LipTighteners;
             return FaceTrackingFeatures.Mouth;
         }
 
-        /// <summary>The chosen features that can move: pupils and brows need the eyes, tongue and cheeks the mouth.</summary>
+        /// <summary>The chosen features that can move: pupils and brows need the eyes; the mouth's parts, the tongue and cheeks the mouth.</summary>
         internal static FaceTrackingFeatures Effective(FaceTrackingFeatures chosen)
         {
             foreach (var feature in FaceTrackingFeature.All)
@@ -129,6 +170,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         [InitializeOnLoadMethod]
         private static void CountAsBuilt()
         {
+            AvatarParameterBudget.FaceTrackingOwners.Add(go => go != null && go.GetComponentInParent<MyAvatarFaceTracking>(true) != null);
             AvatarParameterBudget.BuildRemovedParameters.Add(component =>
             {
                 var marker = component != null ? component.GetComponentInParent<MyAvatarFaceTracking>(true) : null;

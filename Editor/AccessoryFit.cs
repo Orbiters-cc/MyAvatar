@@ -26,6 +26,16 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static bool IsQuestion(MyAvatar.AccessoryNote note) => note != null && (note.fit == Ask || note.fit == AddShapes || note.fit == Refit);
 
+        /// <summary>The avatar's custom base key as detected, or null when none is known (the original base, or none recognised).</summary>
+        internal static string Key(CustomBaseState state) => state != null && state.Known ? state.Info.Key : null;
+
+        /// <summary>
+        /// A fit note no longer about this avatar: asked for another custom base than <paramref name="baseKey"/> (a version
+        /// switched or reset since), or reporting a refit that is gone. It goes, and the accessory is checked again.
+        /// </summary>
+        internal static bool Stale(MyAvatar.AccessoryNote note, string baseKey) =>
+            note != null && !string.IsNullOrEmpty(note.fit) && (note.fitKey != baseKey || note.fit == Done && !Refitted(note.accessory as OrbitersAttachment));
+
         internal static string DismissKey(OrbitersAttachment attachment, string baseKey) =>
             GlobalObjectId.GetGlobalObjectIdSlow(attachment) + "|" + baseKey;
 
@@ -79,21 +89,42 @@ namespace Orbiters.MyAvatar.Editor
 
         /// <summary>
         /// Refits the accessory: <see cref="RefitMode.Shapes"/> adds the blendshapes its meshes lack; <see cref="RefitMode.Fit"/>
-        /// fits every mesh from the original base first. Each mesh only gets the shapes near it.
+        /// fits every mesh from the original base first. Each mesh only gets the shapes near it. Null when the answer is
+        /// stale: the avatar's custom base is no longer <paramref name="baseKey"/>, before the refit or once it is done (its
+        /// result is then taken back). The avatar counts as refitting throughout (<see cref="RefitRunner.IsRunning"/>).
         /// </summary>
         internal static async Task<RefitBatchResult> RunAsync(MyAvatar avatar, OrbitersAttachment attachment, RefitMode mode, CustomBaseOriginal original,
-            IList<string> asked, Action<float, string> progress, CancellationToken cancellation)
+            IList<string> asked, string baseKey, Action<float, string> progress, CancellationToken cancellation)
         {
-            var state = await CustomBaseDetection.DetectAsync(avatar.transform);
-            if (state == null || !state.Known) throw new InvalidOperationException("My Avatar does not recognise this avatar's custom base any more.");
             if (!attachment) throw new InvalidOperationException("This accessory was removed.");
+            var root = RefitRecords.AvatarRoot(attachment.transform);
+            using (RefitRunner.Hold(root))
+            {
+                var state = await CustomBaseDetection.DetectAsync(avatar.transform);
+                if (baseKey == null || Key(state) != baseKey) return null;
+                var result = await RunAsync(state, attachment, root, mode, original, asked, progress, cancellation);
+                // The custom base changed meanwhile: a fit for the previous one must not stay (nor be saved for the new one).
+                // A detection that fails now (no connection) keeps the result.
+                string now;
+                try { now = avatar ? Key(await CustomBaseDetection.DetectAsync(avatar.transform)) : baseKey; }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { now = baseKey; }
+                if (now == baseKey) return result;
+                foreach (var item in result.Items) if (item.Record) RefitRecords.Remove(item.Record);
+                if (attachment) Results.Remove(attachment.GetInstanceID());
+                return null;
+            }
+        }
+
+        private static async Task<RefitBatchResult> RunAsync(CustomBaseState state, OrbitersAttachment attachment, Transform root, RefitMode mode,
+            CustomBaseOriginal original, IList<string> asked, Action<float, string> progress, CancellationToken cancellation)
+        {
             var suggestion = await FitCheck.CheckAsync(attachment.gameObject, state, cancellation);
             // What the user answered for: the shapes of the question, even when the accessory moved since (a pose preview).
             bool checkedAgain = suggestion.Missing.Count > 0;
             var meshes = mode == RefitMode.Fit || !checkedAgain ? RefitCandidates.Meshes(attachment.gameObject, state.Info.Body) : suggestion.Meshes;
             var batch = new RefitBatch
             {
-                Avatar = RefitRecords.AvatarRoot(attachment.transform), Body = state.Info.Body, Renderers = meshes, Mode = mode, Original = original,
+                Avatar = root, Body = state.Info.Body, Renderers = meshes, Mode = mode, Original = original,
                 BaseKey = state.Info.Key, BaseName = state.Info.Name, Tool = Tool, Tightness = RefitPreferences.Tightness,
             };
             foreach (var mesh in meshes)
@@ -110,11 +141,11 @@ namespace Orbiters.MyAvatar.Editor
         internal static bool Refitted(OrbitersAttachment attachment) =>
             attachment && attachment.GetComponentsInChildren<OrbitersRefit>(true).Any(r => r.Applied);
 
-        /// <summary>Puts every refitted mesh of the accessory back as it was, with Undo.</summary>
+        /// <summary>Puts every refitted mesh of the accessory back as it was, with Undo; no tool puts those fits back later.</summary>
         internal static void Restore(OrbitersAttachment attachment)
         {
             if (!attachment) return;
-            foreach (var record in attachment.GetComponentsInChildren<OrbitersRefit>(true)) RefitRecords.Remove(record);
+            foreach (var record in attachment.GetComponentsInChildren<OrbitersRefit>(true)) RefitRecords.Discard(record);
             Results.Remove(attachment.GetInstanceID());
         }
 
@@ -180,7 +211,16 @@ namespace Orbiters.MyAvatar.Editor
                 Active = this;
                 SceneView.duringSceneGui += Handle;
                 AssemblyReloadEvents.beforeAssemblyReload += Dispose;
+                CustomBases.Changed += BaseChanged;
                 SceneView.RepaintAll();
+            }
+
+            // Another version or the original base: the body shown is no longer the one to refit from.
+            private void BaseChanged(Transform root)
+            {
+                if (root == null || !Attachment) return;
+                var avatar = RefitRecords.AvatarRoot(Attachment.transform);
+                if (avatar == root || avatar.IsChildOf(root) || root.IsChildOf(avatar)) Dispose();
             }
 
             // A move handle on the accessory, without selecting it.
@@ -211,6 +251,7 @@ namespace Orbiters.MyAvatar.Editor
             {
                 SceneView.duringSceneGui -= Handle;
                 AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+                CustomBases.Changed -= BaseChanged;
                 if (Active == this) Active = null;
                 SceneView.RepaintAll();
                 Ghost?.Dispose();
@@ -220,8 +261,9 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
+        /// <summary>Shows the original base to line the accessory up with; null when the custom base is no longer <paramref name="baseKey"/> (when given).</summary>
         internal static async Task<Placement> PlaceAsync(MyAvatar avatar, OrbitersAttachment attachment,
-            Action<float, string> progress = null, CancellationToken cancellation = default)
+            Action<float, string> progress = null, CancellationToken cancellation = default, string baseKey = null)
         {
             cancellation.ThrowIfCancellationRequested();
             progress?.Invoke(.1f, "Finding the original base…");
@@ -237,6 +279,7 @@ namespace Orbiters.MyAvatar.Editor
                 }
                 info = (await detection)?.Info;
             }
+            if (baseKey != null && info?.Key != baseKey) return null;
             if (info == null || !info.CanFit)
                 throw new InvalidOperationException("Refitting from the original base needs MCB on the avatar: it provides the original body.");
             if (!attachment) throw new InvalidOperationException("This accessory was removed.");

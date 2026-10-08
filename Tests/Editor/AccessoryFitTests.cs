@@ -18,11 +18,13 @@ namespace Orbiters.MyAvatar.Editor.Tests
     // Accessories on a custom base: the question each one gets, and none without a known custom base.
     public sealed class AccessoryFitTests
     {
-        private sealed class Provider : ICustomBaseProvider
+        private sealed class Provider : ICustomBaseProvider, ICustomBaseFits
         {
             public Transform Avatar;
             public CustomBaseInfo Info;
+            public readonly List<SkinnedMeshRenderer> Forgotten = new List<SkinnedMeshRenderer>();
             public CustomBaseInfo Describe(Transform avatarRoot) => avatarRoot == Avatar ? Info : null;
+            public void Forget(Transform avatarRoot, SkinnedMeshRenderer renderer) { if (avatarRoot == Avatar) Forgotten.Add(renderer); }
         }
 
         private Scene scene;
@@ -112,6 +114,37 @@ namespace Orbiters.MyAvatar.Editor.Tests
             record.mesh = null;
             Assert.That(AccessoryFit.CompletedNote(attachment), Is.Null);
             Assert.That(AccessoryFit.CommissionItem(attachment), Is.Null);
+        }
+
+        // Restore in My Avatar takes the refit back for good: the custom base's tool (MCB) must not put its saved fit back.
+        [Test] public void RestoreMakesTheCustomBaseForgetItsSavedFit()
+        {
+            var (avatar, attachment) = Setup();
+            provider = new Provider { Avatar = avatar.transform };
+            CustomBases.Register(provider);
+            var renderer = attachment.GetComponentInChildren<SkinnedMeshRenderer>();
+            var record = renderer.gameObject.AddComponent<OrbitersRefit>();
+            record.mesh = renderer.sharedMesh;
+            AccessoryFit.Restore(attachment);
+            Assert.That(provider.Forgotten, Is.EqualTo(new[] { renderer }));
+            Assert.That(renderer.GetComponent<OrbitersRefit>(), Is.Null);
+        }
+
+        // Notes answer the custom base they were asked for: another version, the original base or a refit gone outdates them.
+        [Test] public void NotesForAnotherCustomBaseOrAGoneRefitAreStale()
+        {
+            var (_, attachment) = Setup();
+            var question = new MyAvatar.AccessoryNote { accessory = attachment, fit = AccessoryFit.Ask, fitKey = "mcb:1:1.0" };
+            Assert.That(AccessoryFit.Stale(question, "mcb:1:1.0"), Is.False);
+            Assert.That(AccessoryFit.Stale(question, "mcb:1:2.0"), Is.True, "A version switched since.");
+            Assert.That(AccessoryFit.Stale(question, null), Is.True, "Reset to the original base.");
+            var done = new MyAvatar.AccessoryNote { accessory = attachment, fit = AccessoryFit.Done, fitKey = "mcb:1:1.0" };
+            Assert.That(AccessoryFit.Stale(done, "mcb:1:1.0"), Is.True, "The refit it reports was restored elsewhere (MCB's panel).");
+            var record = attachment.GetComponentInChildren<SkinnedMeshRenderer>().gameObject.AddComponent<OrbitersRefit>();
+            record.mesh = record.GetComponent<SkinnedMeshRenderer>().sharedMesh;
+            Assert.That(AccessoryFit.Stale(done, "mcb:1:1.0"), Is.False);
+            Assert.That(AccessoryFit.Stale(new MyAvatar.AccessoryNote { accessory = attachment, text = "Prepared 2 materials." }, "mcb:1:2.0"), Is.False,
+                "Other notes are not about the custom base.");
         }
 
         [UnityTest] public IEnumerator AnAvatarWithoutAKnownCustomBaseAsksNothing()

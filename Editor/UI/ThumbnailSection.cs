@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.Photoshoot;
 using UnityEditor;
 using UnityEngine;
@@ -28,9 +29,10 @@ namespace Orbiters.MyAvatar.Editor
 
             // The thumbnail is always shown on the card it will appear on in VRChat, also while it is being made.
             card = new VrcAvatarCard();
+            VrcAvatarCardSdk.FollowSignedInUser(card);
             cardStage = new VrcCardStage(card); Add(cardStage);
             // The performance rank walks the whole avatar; it is measured once the Inspector has drawn.
-            schedule.Execute(() => { if (avatar) card.ShowPerformance(avatar.gameObject); });
+            schedule.Execute(() => { if (avatar) VrcAvatarCardSdk.ShowPerformance(card, avatar.gameObject); });
             // Same rhythm as the texture actions above: the secondary button, then the primary one taking two thirds.
             actions = new VisualElement(); actions.AddToClassList("thumbnail-actions"); Add(actions);
             openSdk = MyAvatarEditor.Button("Open in VRChat SDK", () => VrcSdkThumbnail.Open(avatar));
@@ -164,6 +166,7 @@ namespace Orbiters.MyAvatar.Editor
             // The live camera while the studio shows it; the saved thumbnail otherwise (also during a ref sheet).
             Texture shown = studioPanel != null && live != null ? live : avatar.thumbnail;
             card.Show(avatar.gameObject.name, shown, studioPanel != null && live != null);
+            VrcAvatarCardSdk.ShowBuildTarget(card);
         }
     }
 }

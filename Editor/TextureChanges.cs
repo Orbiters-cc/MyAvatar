@@ -292,12 +292,15 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static void UndoLast(MyAvatar avatar)
         {
-            var snapshots = avatar.undoMaterials;
-            if (snapshots.Count == 0) return;
+            if (avatar.undoMaterials.Count == 0) return;
             bool redo = avatar.canRedo;
-            if (snapshots.Any(s => !s.renderer || !s.renderer.sharedMaterials.SequenceEqual(redo ? s.before : s.after)))
+            // Renderers gone since (a custom base version replaced them) are skipped; the others still undo.
+            var snapshots = avatar.undoMaterials.Where(s => s.renderer).ToList();
+            int gone = avatar.undoMaterials.Count - snapshots.Count;
+            if (snapshots.Any(s => !s.renderer.sharedMaterials.SequenceEqual(redo ? s.before : s.after)))
                 throw new InvalidOperationException("Material assignments changed since this action. Restore those assignments before using Undo or Redo, to keep your later edits.");
             Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(snapshots.Select(s => (UnityEngine.Object)s.renderer)).ToArray(), redo ? "My Avatar: redo textures" : "My Avatar: undo textures");
+            avatar.undoMaterials = snapshots;
             foreach (var state in snapshots)
             {
                 state.renderer.sharedMaterials = redo ? state.after : state.before; PrefabUtility.RecordPrefabInstancePropertyModifications(state.renderer);
@@ -314,7 +317,8 @@ namespace Orbiters.MyAvatar.Editor
                 entry.reasonBeforeLast = reason; entry.appliedBeforeLast = applied;
             }
             avatar.canRedo = !redo;
-            avatar.notice = redo ? "Last apply restored." : "Last apply undone. Click Redo to restore it without importing or matching again."; Dirty(avatar);
+            avatar.notice = (redo ? "Last apply restored." : "Last apply undone. Click Redo to restore it without importing or matching again.") +
+                (gone == 0 ? "" : $" Skipped {gone} renderer{(gone == 1 ? "" : "s")} no longer on the avatar (replaced since, e.g. by a custom base version)."); Dirty(avatar);
         }
 
         // Unit Git is optional: without it Save stores the scene and generated assets; with it, Save also records a local commit.

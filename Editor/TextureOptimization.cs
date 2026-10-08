@@ -464,6 +464,8 @@ namespace Orbiters.MyAvatar.Editor
             Undo.IncrementCurrentGroup(); int group = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName(RevertName);
             var renderers = record.swaps.Where(s => s.renderer).Select(s => s.renderer).Distinct().ToList();
+            // Renderers gone since (a custom base version replaced them) are skipped and reported; the others still revert.
+            int goneSlots = record.swaps.Count(s => !s.renderer);
             Undo.RecordObjects(new Object[] { avatar }.Concat(renderers).ToArray(), RevertName);
             int keptSlots = 0;
             foreach (var renderer in renderers)
@@ -482,7 +484,9 @@ namespace Orbiters.MyAvatar.Editor
             var kept = new List<string>();
             if (keptSlots > 0) kept.Add($"{keptSlots} material slot{(keptSlots == 1 ? "" : "s")}");
             if (keptImporters > 0) kept.Add($"{keptImporters} texture import setting{(keptImporters == 1 ? "" : "s")}");
-            return kept.Count == 0 ? null : "Optimization undone. Kept " + string.Join(" and ", kept) + " you changed since.";
+            string skipped = goneSlots == 0 ? "" : $" Skipped {goneSlots} material slot{(goneSlots == 1 ? "" : "s")} of renderers no longer on the avatar (replaced since, e.g. by a custom base version).";
+            if (kept.Count == 0) return goneSlots == 0 ? null : "Optimization undone." + skipped;
+            return "Optimization undone. Kept " + string.Join(" and ", kept) + " you changed since." + skipped;
         }
 
         // Brings each recorded importer to the state its entry asks for. One that matches neither state was edited by hand and stays.

@@ -42,6 +42,16 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             other.Head = Head; other.LeftEye = LeftEye; other.RightEye = RightEye;
         }
 
+        /// <summary>Between <paramref name="a"/> and <paramref name="b"/> at <paramref name="t"/> (0: a, 1: b).</summary>
+        public static void Lerp(FaceFrame a, FaceFrame b, float t, FaceFrame into)
+        {
+            into.App = b.App;
+            for (int i = 0; i < into.Shapes.Length; i++) into.Shapes[i] = a.Shapes[i] + (b.Shapes[i] - a.Shapes[i]) * t;
+            into.Head = Vector3.LerpUnclamped(a.Head, b.Head, t);
+            into.LeftEye = Vector3.LerpUnclamped(a.LeftEye, b.LeftEye, t);
+            into.RightEye = Vector3.LerpUnclamped(a.RightEye, b.RightEye, t);
+        }
+
         public void Clear()
         {
             Array.Clear(Shapes, 0, Shapes.Length);

@@ -40,12 +40,6 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             public HashSet<string> Removed;
         }
 
-        /// <summary>
-        /// Set while the face tracking test builds its copy: every feature's parameters stay, so the test can show any choice
-        /// of features without building again.
-        /// </summary>
-        internal static bool TestBuild;
-
         /// <summary>The template's Local Smoothing to start with: 0 snaps, 1 smooths most (0.25 is the template's own).</summary>
         internal static float StartingSmoothing(FaceTrackingSmoothing smoothing) =>
             smoothing == FaceTrackingSmoothing.Responsive ? 0f : smoothing == FaceTrackingSmoothing.Smooth ? .6f : .25f;
@@ -62,23 +56,40 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             public bool OnPreprocessAvatar(GameObject avatar)
             {
                 var marker = avatar.GetComponentInChildren<MyAvatarFaceTracking>(true);
-                var standard = marker != null ? FaceTrackingStandard.Find(marker.standard) : null;
                 Plans.Remove(avatar);
-                if (standard != null && marker.face != null && marker.face.sharedMesh != null)
+                if (marker == null) return true;
+                var face = FaceTrackingSetup.CurrentFace(marker, avatar.transform);
+                if (face == null)
+                {
+                    Debug.LogWarning("[My Avatar] Face tracking: the template's face mesh is missing and no face was found on " + avatar.name + ": face tracking will not move the face.");
+                    return true;
+                }
+                if (face != marker.face)
+                {
+                    Debug.LogWarning("[My Avatar] Face tracking: the template's face mesh is missing; it animates “" + face.name + "”, the face found on " + avatar.name + ".");
+                    marker.face = face;
+                }
+                // The template animates the face where it is now, also when it moved or was renamed since the setup (this copy only).
+                string facePath = AnimationUtility.CalculateTransformPath(face.transform, avatar.transform);
+                if (!FaceTrackingSetup.PointBody(marker.gameObject, facePath, undo: false))
+                    Debug.LogWarning("[My Avatar] Face tracking: this template version has no path rewrite to point it at “" + facePath + "”.");
+                var standard = FaceTrackingStandard.Find(marker.standard);
+                if (standard != null)
                     Plans.Add(avatar, new Plan
                     {
-                        Standard = standard, FacePath = AnimationUtility.CalculateTransformPath(marker.face.transform, avatar.transform), Face = marker.face.sharedMesh,
+                        Standard = standard, FacePath = facePath, Face = face.sharedMesh,
                         Smoothing = marker.smoothing, Expressive = marker.expressiveMouth,
-                        Removed = TestBuild ? new HashSet<string>() : FaceTrackingFeatureSet.Removed(FaceTrackingFeatureSet.Parameters(marker.gameObject).Select(p => p.name), marker.synced),
+                        Removed = FaceTrackingFeatureSet.Removed(FaceTrackingFeatureSet.Parameters(marker.gameObject).Select(p => p.name), marker.synced),
                     });
                 return true;
             }
         }
 
-        // After VRCFury merged the template into its copy of the FX controller.
+        // After VRCFury merged the template into its copy of the FX controller, and before MCB's corrective blendshape links
+        // (-9000): they wrap the clips that move the face's own shapes, so the template's must be renamed to them first.
         internal sealed class Apply : IVRCSDKPreprocessAvatarCallback
         {
-            public int callbackOrder => -9000;
+            public int callbackOrder => -9010;
 
             public bool OnPreprocessAvatar(GameObject avatar)
             {
@@ -87,7 +98,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 var descriptor = avatar.GetComponent<VRCAvatarDescriptor>();
                 var fx = descriptor != null ? descriptor.baseAnimationLayers.FirstOrDefault(l => l.type == VRCAvatarDescriptor.AnimLayerType.FX).animatorController as AnimatorController : null;
                 if (fx == null) return true;
-                if (!Owned(fx, fx))
+                if (!Editable(fx))
                 {
                     Debug.LogWarning("[My Avatar] Face tracking: the FX controller “" + fx.name + "” is the avatar's own asset (VRCFury did not build this avatar), so its blendshape names and gestures were left as they are.");
                     return true;
@@ -150,6 +161,9 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 if (control != null && control.type == VRCExpressionsMenu.Control.ControlType.SubMenu) count += RemoveControls(control.subMenu, removed, visited);
             return count;
         }
+
+        /// <summary>VRCFury's working copies and objects in memory: anything else (the avatar's own assets) is never edited.</summary>
+        internal static bool Editable(Object asset) => Owned(asset, null);
 
         // VRCFury's working copies, and objects made during this build, can be edited; anything else is copied first.
         private static bool Owned(Object asset, AnimatorController fx)
@@ -245,27 +259,38 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 var states = States(machine).ToList();
                 var transitions = Transitions(machine).ToList();
                 if (!states.Any(s => Shapes(s.motion, plan.FacePath).Any(tracked.Contains))) continue;
-                // Expressions: no hand gesture changes the face while it is tracked, and an expression shown returns to rest.
-                var gestures = transitions.Where(t => t.conditions.Any(c => GestureParameters.Contains(c.parameter))).ToList();
-                if (gestures.Count > 0 && machine.defaultState != null)
+                // Expressions: while the face is tracked the layer rests. Nothing leaves the rest state (hand gestures, menu
+                // toggles, Entry and Exit alike), and Any State brings an expression shown back to it.
+                var rest = machine.defaultState;
+                if (rest != null && transitions.Any(t => t.conditions.Any(c => GestureParameters.Contains(c.parameter))))
                 {
-                    foreach (var transition in gestures)
-                        if (!transition.conditions.Any(c => c.parameter == ExpressionsDisabled)) transition.AddCondition(AnimatorConditionMode.IfNot, 0, ExpressionsDisabled);
-                    var rest = machine.AddAnyStateTransition(machine.defaultState);
-                    rest.AddCondition(AnimatorConditionMode.If, 0, ExpressionsDisabled);
-                    rest.hasExitTime = false; rest.duration = .1f; rest.canTransitionToSelf = false;
+                    foreach (var transition in transitions)
+                        if (transition.destinationState != rest && !transition.conditions.Any(c => c.parameter == ExpressionsDisabled))
+                            Require(transition, AnimatorConditionMode.IfNot, 0, ExpressionsDisabled);
+                    var back = Keep(fx, new AnimatorStateTransition
+                    {
+                        destinationState = rest, hasExitTime = false, hasFixedDuration = true, duration = .1f, canTransitionToSelf = false,
+                        conditions = new[] { new AnimatorCondition { mode = AnimatorConditionMode.If, parameter = ExpressionsDisabled } },
+                    });
+                    machine.anyStateTransitions = machine.anyStateTransitions.Append(back).ToArray();
                     gated++;
                 }
-                // Blinks the avatar animates itself wait while the eyes are tracked.
-                foreach (var transition in transitions.Where(t => t.destinationState != null && Shapes(t.destinationState.motion, plan.FacePath).Any(blinks.Contains)))
+                // Blinks the avatar animates itself wait while the eyes are tracked: transitions into a state that closes
+                // the eyes, not those back to one holding them open.
+                foreach (var transition in transitions.Where(t => t.destinationState != null && Raised(t.destinationState.motion, plan.FacePath).Any(blinks.Contains)))
                     if (!transition.conditions.Any(c => c.parameter == EyeTracking))
                     {
-                        if (eye.type == AnimatorControllerParameterType.Bool) transition.AddCondition(AnimatorConditionMode.IfNot, 0, EyeTracking);
-                        else transition.AddCondition(AnimatorConditionMode.Less, .5f, EyeTracking);
+                        if (eye.type == AnimatorControllerParameterType.Bool) Require(transition, AnimatorConditionMode.IfNot, 0, EyeTracking);
+                        else Require(transition, AnimatorConditionMode.Less, .5f, EyeTracking);
                     }
             }
             return gated;
         }
+
+        // Setters, not AddCondition, AddParameter or AddAnyStateTransition: those record Undo steps, and the face tracking
+        // test edits its controllers in memory.
+        private static void Require(AnimatorTransitionBase transition, AnimatorConditionMode mode, float threshold, string parameter) =>
+            transition.conditions = transition.conditions.Append(new AnimatorCondition { mode = mode, threshold = threshold, parameter = parameter }).ToArray();
 
         private static bool IsBlink(string shape) => shape.IndexOf("blink", StringComparison.OrdinalIgnoreCase) >= 0;
 
@@ -286,6 +311,18 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             }
         }
 
+        // The face's shapes a motion moves above 0: a rest clip holding a blink at 0 keeps the eyes open.
+        private static IEnumerable<string> Raised(Motion motion, string facePath)
+        {
+            if (motion is AnimationClip clip)
+                return AnimationUtility.GetCurveBindings(clip)
+                    .Where(b => b.path == facePath && b.type == typeof(SkinnedMeshRenderer) && b.propertyName.StartsWith("blendShape.", StringComparison.Ordinal) &&
+                                AnimationUtility.GetEditorCurve(clip, b).keys.Any(k => k.value > 0f))
+                    .Select(b => b.propertyName.Substring(11));
+            if (motion is BlendTree tree) return tree.children.SelectMany(c => Raised(c.motion, facePath));
+            return Enumerable.Empty<string>();
+        }
+
         private static IEnumerable<string> Shapes(Motion motion, string facePath)
         {
             if (motion is AnimationClip clip)
@@ -300,8 +337,9 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         {
             var existing = fx.parameters.FirstOrDefault(p => p.name == name);
             if (existing != null) return existing;
-            fx.AddParameter(name, type);
-            return fx.parameters.First(p => p.name == name);
+            var parameter = new AnimatorControllerParameter { name = name, type = type };
+            fx.parameters = fx.parameters.Append(parameter).ToArray();
+            return parameter;
         }
 
         private static IEnumerable<AnimatorState> States(AnimatorStateMachine machine)
@@ -312,14 +350,19 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 foreach (var state in States(sub.stateMachine)) yield return state;
         }
 
-        private static IEnumerable<AnimatorStateTransition> Transitions(AnimatorStateMachine machine)
+        // Every transition of a layer: Any State's, Entry's, the states', and those leaving its sub-state machines.
+        private static IEnumerable<AnimatorTransitionBase> Transitions(AnimatorStateMachine machine)
         {
             if (machine == null) yield break;
             foreach (var transition in machine.anyStateTransitions) yield return transition;
+            foreach (var transition in machine.entryTransitions) yield return transition;
             foreach (var state in machine.states)
                 foreach (var transition in state.state.transitions) yield return transition;
             foreach (var sub in machine.stateMachines)
+            {
+                foreach (var transition in machine.GetStateMachineTransitions(sub.stateMachine)) yield return transition;
                 foreach (var transition in Transitions(sub.stateMachine)) yield return transition;
+            }
         }
     }
 }

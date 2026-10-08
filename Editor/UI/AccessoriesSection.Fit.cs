@@ -22,7 +22,7 @@ namespace Orbiters.MyAvatar.Editor
         private CancellationTokenSource fitChecks;
         private CancellationTokenSource workCancellation;
         private double workStartedAt;
-        private bool detecting, resuming;
+        private bool detecting, resuming, reconciling;
         // A failed detection (no connection, an unreadable body) is tried again after a while, not on every refresh.
         private double detectAgainAt;
 
@@ -39,8 +39,15 @@ namespace Orbiters.MyAvatar.Editor
             if (active != null && active.Attachment && active.Attachment.transform.IsChildOf(avatar.transform)
                 && !avatar.accessoryNotes.Any(n => n.accessory == active.Attachment && n.fit == AccessoryFit.Place))
                 active.Dispose();
-            if (!detecting && UnityEditor.EditorApplication.timeSinceStartup >= detectAgainAt && CustomBaseDetection.Current(avatar.transform) == null)
+            var current = CustomBaseDetection.Current(avatar.transform);
+            if (!detecting && UnityEditor.EditorApplication.timeSinceStartup >= detectAgainAt && current == null)
                 _ = DetectAsync();
+            // Not while this refresh builds the list: dropping notes refreshes again.
+            if (current != null && !reconciling && StaleFits(current).Count > 0)
+            {
+                reconciling = true;
+                schedule.Execute(() => { reconciling = false; DropStaleFits(CustomBaseDetection.Current(avatar.transform)); });
+            }
             if (resuming || AccessoryService.Busy(avatar)) return;
             // Lining up without the preview (it went away with a script reload or another line-up): ask again.
             var unplaced = avatar.accessoryNotes.FirstOrDefault(n => n.fit == AccessoryFit.Place && AccessoryFit.Placement.For(n.accessory as OrbitersAttachment) == null);
@@ -68,7 +75,9 @@ namespace Orbiters.MyAvatar.Editor
             try
             {
                 var state = await CustomBaseDetection.DetectAsync(avatar.transform);
-                if (avatar && AccessoryFit.FirstLook(avatar, state))
+                if (!avatar) return;
+                DropStaleFits(state);
+                if (AccessoryFit.FirstLook(avatar, state))
                     await CheckFitsAsync(AttachmentInstaller.Installed(avatar.transform), dropped: false);
             }
             catch (OperationCanceledException) { }
@@ -80,7 +89,8 @@ namespace Orbiters.MyAvatar.Editor
             finally { detecting = false; }
         }
 
-        // A custom base version was applied or reset on this avatar: detect it again and check its accessories.
+        // A custom base version was applied or reset on this avatar: detect it again and check its accessories (a line-up
+        // with the previous original base ends by itself, see AccessoryFit.Placement).
         private void BaseChanged(Transform root)
         {
             if (!avatar || root == null || !(avatar.transform.IsChildOf(root) || root.IsChildOf(avatar.transform))) return;
@@ -104,11 +114,45 @@ namespace Orbiters.MyAvatar.Editor
             try
             {
                 var note = await AccessoryFit.CheckAsync(avatar, attachment, CancellationToken.None);
-                if (!avatar || !attachment) return;
-                if (note != null) SetFitNote(note);
+                if (!avatar || !attachment || attachment == working) return;
+                if (note != null && !avatar.fitDismissed.Contains(AccessoryFit.DismissKey(attachment, note.fitKey))) SetFitNote(note);
                 else RemoveFitNote(attachment);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException)) { Debug.LogWarning("[My Avatar] " + ex.Message); }
+        }
+
+        // Fit notes answer the custom base they were asked for: after a version switch or reset, or once the refit a note
+        // reports is gone, they go and their accessories are checked again. Never the one at work: its own answer ends it.
+        private List<MyAvatar.AccessoryNote> StaleFits(CustomBaseState state)
+        {
+            string key = AccessoryFit.Key(state);
+            return avatar.accessoryNotes.Where(n => n.accessory is OrbitersAttachment a && a && a != working && AccessoryFit.Stale(n, key)).ToList();
+        }
+
+        private void DropStaleFits(CustomBaseState state)
+        {
+            if (!avatar || state == null) return;
+            var stale = StaleFits(state);
+            if (stale.Count == 0) return;
+            foreach (var note in stale) AccessoryFit.Placement.For(note.accessory as OrbitersAttachment)?.Dispose();
+            AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Except(stale).ToList());
+            if (AccessoryFit.Key(state) == null) return;
+            foreach (var attachment in stale.Select(n => (OrbitersAttachment)n.accessory).Distinct()) _ = RecheckAsync(attachment);
+        }
+
+        // An answer the custom base outdated (a version switched meanwhile): asked again instead of failing.
+        private bool AnsweredStale(MyAvatar.AccessoryNote note)
+        {
+            var current = CustomBaseDetection.Current(avatar.transform);
+            if (current == null || !AccessoryFit.Stale(FitNote(note.accessory) ?? note, AccessoryFit.Key(current))) return false;
+            DropStaleFits(current);
+            return true;
+        }
+
+        private void AskAgain(OrbitersAttachment attachment)
+        {
+            RemoveFitNote(attachment);
+            if (attachment) _ = RecheckAsync(attachment);
         }
 
         private async Task CheckFitsAsync(List<OrbitersAttachment> attachments, bool dropped)
@@ -255,7 +299,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Act(MyAvatar.AccessoryNote note, string action)
         {
             var attachment = note.accessory as OrbitersAttachment;
-            if (!attachment || AccessoryService.Busy(avatar)) return;
+            if (!attachment || AccessoryService.Busy(avatar) || AnsweredStale(note)) return;
             // ReFit is only needed now: install it, then the answer continues after Unity reloads.
             if (!RefitEngine.Available)
             {
@@ -274,8 +318,9 @@ namespace Orbiters.MyAvatar.Editor
             await Task.Yield();
             try
             {
-                await AccessoryFit.PlaceAsync(avatar, attachment, ReportWork, workCancellation.Token);
+                var placement = await AccessoryFit.PlaceAsync(avatar, attachment, ReportWork, workCancellation.Token, (FitNote(attachment) ?? note).fitKey);
                 EndWork();
+                if (placement == null) { AskAgain(attachment); return; }
                 UpdateFit(note, n => { n.fitNext = question; n.fit = AccessoryFit.Place; });
             }
             catch (OperationCanceledException)
@@ -293,7 +338,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Confirm(MyAvatar.AccessoryNote note)
         {
             var attachment = note.accessory as OrbitersAttachment;
-            if (!attachment) return;
+            if (!attachment || AnsweredStale(note)) return;
             // The preview is gone (a script reload): show it again first.
             var placement = AccessoryFit.Placement.For(attachment);
             if (placement == null) { Act(note, AccessoryFit.Place); return; }
@@ -314,10 +359,17 @@ namespace Orbiters.MyAvatar.Editor
             await Task.Yield();
             try
             {
-                var result = await AccessoryFit.RunAsync(avatar, attachment, mode, original, note.fitShapeNames, ReportWork, workCancellation.Token);
-                var failed = result.Failed;
+                var asked = FitNote(attachment) ?? note;
+                var result = await AccessoryFit.RunAsync(avatar, attachment, mode, original, asked.fitShapeNames, asked.fitKey, ReportWork, workCancellation.Token);
                 ReportWork(1f, "Done");
                 EndWork();
+                // The custom base changed before or during the refit: the question is asked again for the new one.
+                if (result == null)
+                {
+                    AskAgain(attachment);
+                    return;
+                }
+                var failed = result.Failed;
                 if (result.Cancelled)
                 {
                     CancelledFit(note, attachment);

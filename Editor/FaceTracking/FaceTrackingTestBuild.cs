@@ -1,14 +1,17 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.Animations;
+using Orbiters.Toolkit.Editor.VRChat;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using VRC.SDK3.Avatars.Components;
+using VRC.SDK3.Avatars.ScriptableObjects;
 using VRC.SDKBase.Editor.BuildPipeline;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
@@ -16,20 +19,25 @@ using Object = UnityEngine.Object;
 namespace Orbiters.MyAvatar.Editor.FaceTracking
 {
     /// <summary>
-    /// The avatar built as VRChat builds it for an upload, on a hidden copy in its own preview scene: every preprocess
-    /// callback in VRChat's order (VRCFury, MCB, My Avatar, the Toolkit…), one per editor frame so the window can show the
-    /// progress. The copy stays (one at a time) while the avatar is unchanged, so testing again starts at once; scripts
-    /// reloading, Play Mode, quitting or ten idle minutes release it with the build data it holds.
+    /// The face tracking My Avatar set up, assembled as an upload would have it, in a second instead of a whole build: a
+    /// copy of the avatar in its own preview scene, and in memory only the template's controllers merged the way VRCFury
+    /// merges them (its binding rewrites, its parameters), then the steps that change them at upload: My Avatar's
+    /// blendshape names and mouth tuning (<see cref="FaceTrackingBuild"/>), and MCB's corrective blendshape links of the
+    /// avatar's custom base (e.g. the Orbit Face eyelid fix following the eyelids). The avatar's own layers and the rest
+    /// of the build (VRCFury's other features, MCB's version meshes) are left out: the face shows as it is in the scene.
+    /// The copy stays (one at a time) while the avatar is unchanged; scripts reloading, Play Mode, quitting or ten idle
+    /// minutes release it.
     /// </summary>
     internal sealed class FaceTrackingTestBuild
     {
-        private const string TimesKey = "Orbiters.MyAvatar.FaceTracking.BuildSeconds.";
         private const double IdleRelease = 600;
+        // The build steps that also change the template's clips at upload, by type name (MCB is optional).
+        private static readonly string[] UploadSteps = { "BlendShapeLinkPostVrcfuryHook" };
         private static FaceTrackingTestBuild cached;
         private static double idleSince = -1;
 
         public readonly GameObject Source;
-        /// <summary>The avatar as the build saw it (measured again once built: build steps may mark source objects changed).</summary>
+        /// <summary>The avatar as the build saw it (measured again once built).</summary>
         public string Signature { get; private set; }
         public readonly bool Expressive;
         public Scene Scene { get; private set; }
@@ -41,17 +49,24 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         public bool Done { get; private set; }
         public double Seconds => clock.Elapsed.TotalSeconds;
 
-        private readonly List<IVRCSDKPreprocessAvatarCallback> steps;
+        private readonly List<(string label, Action run)> steps = new List<(string, Action)>();
+        private readonly List<AnimatorControllerCopy> copies = new List<AnimatorControllerCopy>();
+        private readonly List<Object> made = new List<Object>();
         private readonly Stopwatch clock = new Stopwatch();
-        private readonly double[] estimates;
+        private readonly MyAvatarFaceTracking marker;
+        private SkinnedMeshRenderer face;
+        private string facePath;
         private int next;
-        private Renderer[] renderers;
 
-        private FaceTrackingTestBuild(GameObject source, string signature, bool expressive)
+        private FaceTrackingTestBuild(GameObject source, MyAvatarFaceTracking marker, string signature, bool expressive)
         {
-            Source = source; Signature = signature; Expressive = expressive;
-            steps = Callbacks();
-            estimates = steps.Select(s => (double)EditorPrefs.GetFloat(TimesKey + s.GetType().FullName, DefaultSeconds(s))).ToArray();
+            Source = source; this.marker = marker; Signature = signature; Expressive = expressive;
+            steps.Add(("Copying the face tracking template", Merge));
+            steps.Add(("My Avatar tunes the face", Tune));
+            foreach (var step in Callbacks()) steps.Add(("MCB links its corrective blendshapes", () =>
+            {
+                if (!step.OnPreprocessAvatar(Copy)) throw new InvalidOperationException(step.GetType().Name + " stopped.");
+            }));
         }
 
         /// <summary>The cached build of <paramref name="source"/> when it is still the avatar as it is, else a new one started.</summary>
@@ -59,11 +74,10 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         {
             string signature = SignatureOf(source);
             bool expressive = marker == null || marker.expressiveMouth;
-            bool building = cached != null && !cached.Done && cached.Error == null && cached.Copy != null;
-            if (cached != null && cached.Source == source && cached.Signature == signature && cached.Expressive == expressive && (cached.Usable || building))
+            if (cached != null && cached.Source == source && cached.Signature == signature && cached.Expressive == expressive && (cached.Usable || !cached.Done && cached.Error == null))
             { idleSince = -1; return cached; }
             Release();
-            cached = new FaceTrackingTestBuild(source, signature, expressive);
+            cached = new FaceTrackingTestBuild(source, marker, signature, expressive);
             cached.Begin();
             return cached;
         }
@@ -71,30 +85,19 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         /// <summary>A finished build of <paramref name="source"/> is kept (testing starts at once unless the avatar changed).</summary>
         internal static bool Kept(GameObject source) => cached != null && cached.Source == source && cached.Usable;
 
-        /// <summary>The build is done and its copy, controllers and meshes are all still there (VRCFury's next build may delete them).</summary>
-        public bool Usable => Done && Error == null && Copy != null && Scene.IsValid() && Fx != null && renderers != null && renderers.All(r => r == null || Mesh(r) != null);
+        public bool Usable => Done && Error == null && Copy != null && Scene.IsValid() && Fx != null;
 
-        /// <summary>From 0 to 1, by how long each callback took last time.</summary>
-        public float Progress
-        {
-            get
-            {
-                if (Done) return 1f;
-                double total = estimates.Sum(), done = estimates.Take(next).Sum();
-                return total <= 0 ? 0f : (float)(done / total);
-            }
-        }
-
-        public double SecondsLeft => Done ? 0 : estimates.Skip(next).Sum();
+        public float Progress => Done ? 1f : steps.Count == 0 ? 0f : next / (float)(steps.Count + 1);
 
         /// <summary>What runs next, in the words of the person waiting.</summary>
-        public string Step => Done ? "Ready" : next < steps.Count ? Describe(steps[next]) : "Finishing";
+        public string Step => Done ? "Ready" : next < steps.Count ? steps[next].label : "Finishing";
 
         private void Begin()
         {
             clock.Start();
             try
             {
+                if (marker == null) throw new InvalidOperationException("the avatar has no face tracking set up by My Avatar");
                 Scene = EditorSceneManager.NewPreviewScene();
                 // Instantiated under an object of the preview scene: the copy is never in the user's scene, even for a frame.
                 var holder = new GameObject("Face tracking test");
@@ -102,55 +105,42 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 Copy = Object.Instantiate(Source, holder.transform);
                 Copy.transform.SetParent(null, false);
                 Object.DestroyImmediate(holder);
-                // Its own name: VRCFury keeps each build's controllers in a folder named after the avatar.
                 Copy.name = Source.name + " (face tracking test)";
+                // The VRChat SDK's builder lists every active avatar in a scene but skips objects with exactly these flags.
+                Copy.hideFlags = HideFlags.NotEditable;
                 Copy.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
                 Copy.SetActive(true);
+                Descriptor = Copy.GetComponent<VRCAvatarDescriptor>();
+                if (Descriptor == null) throw new InvalidOperationException("the avatar has no VRChat avatar descriptor");
             }
             catch (Exception ex) { Fail("Could not copy the avatar: " + ex.Message); }
         }
 
-        /// <summary>Runs the next callback. False once there is nothing left to do (done or failed).</summary>
+        /// <summary>Runs the next step. False once there is nothing left to do (done or failed).</summary>
         internal bool StepOnce()
         {
             if (Done || Error != null) return false;
             if (Copy == null) { Fail("The avatar copy was destroyed while building."); return false; }
             if (next >= steps.Count) { Finish(); return false; }
-            var step = steps[next];
-            var watch = Stopwatch.StartNew();
-            FaceTrackingBuild.TestBuild = true;
-            try
-            {
-                if (!step.OnPreprocessAvatar(Copy)) { Fail(Describe(step) + " stopped the build (" + step.GetType().Name + " returned false). Uploading would stop there too."); return false; }
-            }
+            var (label, run) = steps[next];
+            try { run(); }
             catch (Exception ex)
             {
                 Debug.LogException(ex);
-                Fail(Describe(step) + " failed: " + ex.Message);
+                Fail(label + " failed: " + ex.Message);
                 return false;
             }
-            finally { FaceTrackingBuild.TestBuild = false; }
-            // Remember how long it took, for the next progress bar.
-            EditorPrefs.SetFloat(TimesKey + step.GetType().FullName, (float)watch.Elapsed.TotalSeconds);
-            estimates[next] = watch.Elapsed.TotalSeconds;
             next++;
             return true;
         }
 
         private void Finish()
         {
-            Descriptor = Copy.GetComponent<VRCAvatarDescriptor>();
-            if (Descriptor == null) { Fail("The built avatar has no VRChat avatar descriptor."); return; }
-            AnimatorController Layer(VRCAvatarDescriptor.AnimLayerType type) =>
-                Descriptor.baseAnimationLayers.FirstOrDefault(l => l.type == type && !l.isDefault).animatorController as AnimatorController;
-            Fx = Layer(VRCAvatarDescriptor.AnimLayerType.FX);
-            Additive = Layer(VRCAvatarDescriptor.AnimLayerType.Additive);
-            if (Fx == null) { Fail("The built avatar has no FX controller: VRCFury did not merge the face tracking template."); return; }
-            renderers = Copy.GetComponentsInChildren<Renderer>(true).Where(r => Mesh(r) != null).ToArray();
+            // Measured again: build steps may mark the avatar's own objects changed without changing them.
             Signature = SignatureOf(Source);
             clock.Stop();
             Done = true;
-            Debug.Log($"[My Avatar] Face tracking test: {Source.name} built like an upload in {Seconds:0.0} s.");
+            Debug.Log($"[My Avatar] Face tracking test: {Source.name}'s face tracking assembled in {Seconds:0.00} s.");
         }
 
         private void Fail(string message)
@@ -159,52 +149,117 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             clock.Stop();
         }
 
-        private static Mesh Mesh(Renderer renderer) =>
-            renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.TryGetComponent<MeshFilter>(out var filter) ? filter.sharedMesh : null;
+        // ---- The template, merged as VRCFury merges it ----
 
-        // ---- VRChat's callbacks ----
-
-        // Every preprocess callback, in VRChat's order: the ones its build pipeline runs (VRCBuildPipelineCallbacks collects
-        // the same types).
-        private static List<IVRCSDKPreprocessAvatarCallback> Callbacks()
+        // The template's Full Controllers (the face, and the eye rotation): their controllers copied with VRCFury's binding
+        // rewrites (the "Body" the template animates pointed at the face where it is now, as at upload), their parameters
+        // in one asset.
+        private void Merge()
         {
-            var list = new List<IVRCSDKPreprocessAvatarCallback>();
+            var markerCopy = Copy.GetComponentInChildren<MyAvatarFaceTracking>(true);
+            if (markerCopy == null) throw new InvalidOperationException("the copy has no face tracking template");
+            face = FaceTrackingSetup.CurrentFace(marker, Source.transform);
+            if (face == null) throw new InvalidOperationException("the face mesh is missing");
+            facePath = AnimationUtility.CalculateTransformPath(face.transform, Source.transform);
+            FaceTrackingSetup.PointBody(markerCopy.gameObject, facePath, undo: false);
+            var parameters = new List<VRCExpressionParameters.Parameter>();
+            AnimatorController fx = null, additive = null;
+            foreach (var (_, feature, kind) in VrcFury.Features(markerCopy.gameObject))
+            {
+                if (kind != "FullController") continue;
+                var rewrites = Entries(feature, "rewriteBindings")
+                    .Select(r => (from: Field<string>(r, "from") ?? "", to: Field<string>(r, "to") ?? "", delete: Field<bool>(r, "delete"))).ToList();
+                foreach (var entry in Entries(feature, "controllers"))
+                {
+                    if (!(VrcFury.ObjectReference(entry.GetType().GetField("controller")?.GetValue(entry)) is AnimatorController source)) continue;
+                    var type = (VRCAvatarDescriptor.AnimLayerType)Convert.ToInt32(entry.GetType().GetField("type")?.GetValue(entry) ?? VRCAvatarDescriptor.AnimLayerType.FX);
+                    if (type != VRCAvatarDescriptor.AnimLayerType.FX && type != VRCAvatarDescriptor.AnimLayerType.Additive) continue;
+                    var copy = AnimatorControllerCopy.Of(source, clip => Rewrite(clip, rewrites));
+                    copies.Add(copy);
+                    if (type == VRCAvatarDescriptor.AnimLayerType.FX) fx = Join(fx, copy.Controller);
+                    else additive = Join(additive, copy.Controller);
+                }
+                foreach (var entry in Entries(feature, "prms"))
+                    if (VrcFury.ObjectReference(entry.GetType().GetField("parameters")?.GetValue(entry)) is VRCExpressionParameters asset && asset.parameters != null)
+                        parameters.AddRange(asset.parameters.Where(p => p != null && !string.IsNullOrEmpty(p.name) && parameters.All(q => q.name != p.name))
+                            .Select(p => new VRCExpressionParameters.Parameter { name = p.name, valueType = p.valueType, defaultValue = p.defaultValue, saved = p.saved, networkSynced = p.networkSynced }));
+            }
+            if (fx == null) throw new InvalidOperationException("the template has no FX controller");
+            Fx = fx; Additive = additive;
+            var merged = ScriptableObject.CreateInstance<VRCExpressionParameters>();
+            merged.hideFlags = HideFlags.HideAndDontSave;
+            merged.name = "Face tracking test parameters";
+            merged.parameters = parameters.ToArray();
+            made.Add(merged);
+            // The copy's playable layers are the template's alone: build steps after this one find them as VRCFury's.
+            Descriptor.customizeAnimationLayers = true;
+            var layers = (Descriptor.baseAnimationLayers ?? Array.Empty<VRCAvatarDescriptor.CustomAnimLayer>())
+                .Where(l => l.type != VRCAvatarDescriptor.AnimLayerType.FX && l.type != VRCAvatarDescriptor.AnimLayerType.Additive)
+                .Select(l => { l.isDefault = true; l.animatorController = null; return l; }).ToList();
+            layers.Add(new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = Fx });
+            if (Additive != null) layers.Add(new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.Additive, animatorController = Additive });
+            Descriptor.baseAnimationLayers = layers.ToArray();
+            Descriptor.expressionParameters = merged;
+            Descriptor.expressionsMenu = null;
+        }
+
+        // Several controllers of one playable layer: VRCFury appends the layers and parameters of the next to the first
+        // (through the setters: AddParameter and AddLayer would record Undo steps).
+        private static AnimatorController Join(AnimatorController into, AnimatorController next)
+        {
+            if (into == null) return next;
+            into.parameters = into.parameters.Concat(next.parameters.Where(n => into.parameters.All(p => p.name != n.name))).ToArray();
+            into.layers = into.layers.Concat(next.layers).ToArray();
+            return into;
+        }
+
+        private void Tune()
+        {
+            var standard = FaceTrackingStandard.Find(marker.standard);
+            if (standard == null) throw new InvalidOperationException("unknown blendshape standard “" + marker.standard + "”");
+            FaceTrackingBuild.Finish(Fx, standard, facePath, face.sharedMesh);
+            FaceTrackingBuild.Tune(Fx, facePath, face.sharedMesh, Expressive, FaceTrackingBuild.MouthSlowdown(marker.smoothing));
+        }
+
+        private static AnimationClip Rewrite(AnimationClip clip, List<(string from, string to, bool delete)> rewrites)
+        {
+            var copy = Object.Instantiate(clip);
+            if (rewrites.Count == 0) return copy;
+            foreach (var binding in AnimationUtility.GetCurveBindings(copy))
+            {
+                string path = binding.path;
+                var rule = rewrites.FirstOrDefault(r => r.from.Length == 0 || path == r.from || path.StartsWith(r.from + "/", StringComparison.Ordinal));
+                if (rule.from == null) continue;
+                string moved = rule.from.Length == 0 ? (rule.to.Length == 0 ? path : rule.to + "/" + path) : rule.to + path.Substring(rule.from.Length);
+                if (!rule.delete && moved == path) continue;
+                var curve = AnimationUtility.GetEditorCurve(copy, binding);
+                AnimationUtility.SetEditorCurve(copy, binding, null);
+                if (!rule.delete) AnimationUtility.SetEditorCurve(copy, EditorCurveBinding.FloatCurve(moved, binding.type, binding.propertyName), curve);
+            }
+            return copy;
+        }
+
+        private static IEnumerable<object> Entries(object feature, string field) =>
+            VrcFury.Field(feature, field) is IEnumerable list ? list.Cast<object>().Where(e => e != null) : Enumerable.Empty<object>();
+
+        private static T Field<T>(object model, string name) => model.GetType().GetField(name)?.GetValue(model) is T value ? value : default;
+
+        private static IEnumerable<IVRCSDKPreprocessAvatarCallback> Callbacks()
+        {
             foreach (var type in TypeCache.GetTypesDerivedFrom<IVRCSDKPreprocessAvatarCallback>())
             {
-                if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters || type.GetConstructor(Type.EmptyTypes) == null) continue;
-                try { list.Add((IVRCSDKPreprocessAvatarCallback)Activator.CreateInstance(type)); }
-                catch (Exception ex) { Debug.LogWarning("[My Avatar] Face tracking test: could not create the build step " + type.FullName + ": " + ex.Message); }
+                if (type.IsAbstract || !UploadSteps.Contains(type.Name) || type.GetConstructor(Type.EmptyTypes) == null) continue;
+                IVRCSDKPreprocessAvatarCallback step = null;
+                try { step = (IVRCSDKPreprocessAvatarCallback)Activator.CreateInstance(type); }
+                catch (Exception ex) { Debug.LogWarning("[My Avatar] Face tracking test: could not create " + type.FullName + ": " + ex.Message); }
+                if (step != null) yield return step;
             }
-            return list.OrderBy(c => c.callbackOrder).ThenBy(c => c.GetType().FullName, StringComparer.Ordinal).ToList();
-        }
-
-        private static float DefaultSeconds(IVRCSDKPreprocessAvatarCallback step)
-        {
-            string name = step.GetType().FullName ?? "";
-            if (name.StartsWith("VF.Hooks.VrcPreuploadHook", StringComparison.Ordinal)) return 30f;
-            if (name.Contains("VersionCustomizationApply")) return 7f;
-            if (name.Contains("VersionCustomizationCapture")) return 2f;
-            if (name.Contains("BuildCopyAssets")) return 1.5f;
-            return .1f;
-        }
-
-        private static string Describe(IVRCSDKPreprocessAvatarCallback step)
-        {
-            string name = step.GetType().FullName ?? "";
-            if (name.StartsWith("VF.Hooks.VrcPreuploadHook", StringComparison.Ordinal)) return "VRCFury merges the face tracking template";
-            if (name.StartsWith("VF.Hooks.ParameterCompressor", StringComparison.Ordinal)) return "VRCFury compresses parameters";
-            if (name.StartsWith("VF.", StringComparison.Ordinal)) return "VRCFury prepares the avatar";
-            if (name.Contains("VersionCustomization") || name.Contains("NativeMesh") || name.Contains("BlendShapeLink")) return "MCB applies your version";
-            if (name.Contains("FaceTrackingBuild")) return "My Avatar tunes the face";
-            if (name.StartsWith("Orbiters.", StringComparison.Ordinal)) return "Orbiters tools finish the avatar";
-            if (name.StartsWith("Thry", StringComparison.Ordinal)) return "Thry prepares the materials";
-            return "VRChat prepares the avatar";
         }
 
         // ---- What makes a build stale ----
 
-        // Objects' serialized contents by instance, measured again only when their dirty count moved: inspectors and build
-        // steps often mark a component changed without changing it (MCB's own does, on every Inspector).
+        // Objects' serialized contents by instance, measured again only when their dirty count moved: inspectors often mark
+        // a component changed without changing it (MCB's own does, on every Inspector).
         private static readonly Dictionary<int, (int dirty, int hash)> Contents = new Dictionary<int, (int, int)>();
 
         private static int Content(Object value)
@@ -219,8 +274,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         }
 
         /// <summary>
-        /// Changes to the avatar that the build sees: its objects and components as saved (not where its bones are), and
-        /// the assets its descriptor uses. The face tracking settings the test applies live (smoothing, features) are left out.
+        /// Changes to the avatar the test would show: its objects and components (not where its bones are). The settings the
+        /// test applies live (smoothing, features) are left out.
         /// </summary>
         internal static string SignatureOf(GameObject root)
         {
@@ -241,14 +296,6 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                         Add(Content(component));
                     }
                 }
-                var descriptor = root.GetComponent<VRCAvatarDescriptor>();
-                if (descriptor != null)
-                {
-                    foreach (var layer in descriptor.baseAnimationLayers.Concat(descriptor.specialAnimationLayers))
-                        if (layer.animatorController != null) Add(EditorUtility.GetDirtyCount(layer.animatorController));
-                    if (descriptor.expressionParameters != null) Add(EditorUtility.GetDirtyCount(descriptor.expressionParameters));
-                    if (descriptor.expressionsMenu != null) Add(EditorUtility.GetDirtyCount(descriptor.expressionsMenu));
-                }
                 return hash.ToString("x");
             }
         }
@@ -258,7 +305,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         /// <summary>The build is no longer shown: released after ten idle minutes unless a test uses it again.</summary>
         internal static void Idle() => idleSince = EditorApplication.timeSinceStartup;
 
-        /// <summary>Closes the copy's scene and releases the build data the Toolkit keeps for it (meshes made for the build).</summary>
+        /// <summary>Closes the copy's scene and frees the controllers and clips made for it.</summary>
         internal static void Release()
         {
             var build = cached;
@@ -266,18 +313,61 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             idleSince = -1;
             Contents.Clear();
             if (build == null) return;
-            try { if (build.Copy != null) AttachmentAnimationBuild.Release(build.Copy); }
-            catch (Exception ex) { Debug.LogWarning("[My Avatar] Face tracking test: could not release the build data: " + ex.Message); }
+            // The build steps' own objects (My Avatar's tuning, MCB's corrective links) are found in the controllers.
+            var reached = new HashSet<Object>();
+            foreach (var controller in new[] { build.Fx, build.Additive }) Reach(controller, reached);
             if (build.Scene.IsValid()) EditorSceneManager.ClosePreviewScene(build.Scene);
-            build.Copy = null;
+            foreach (var copy in build.copies) copy.Destroy();
+            foreach (var value in build.made.Concat(reached)) if (value != null && !EditorUtility.IsPersistent(value)) Object.DestroyImmediate(value);
+            build.copies.Clear(); build.made.Clear();
+            build.Copy = null; build.Fx = build.Additive = null;
+        }
+
+        // Everything a controller holds: its state machines, states, transitions, behaviours, blend trees and clips.
+        private static void Reach(AnimatorController controller, HashSet<Object> reached)
+        {
+            if (controller == null || !reached.Add(controller)) return;
+            void AddMotion(Motion motion)
+            {
+                if (motion == null || !reached.Add(motion)) return;
+                if (motion is BlendTree tree) foreach (var child in tree.children) AddMotion(child.motion);
+            }
+            void AddTransitions(IEnumerable<AnimatorTransitionBase> transitions) { foreach (var t in transitions) if (t != null) reached.Add(t); }
+            void AddMachine(AnimatorStateMachine machine)
+            {
+                if (machine == null || !reached.Add(machine)) return;
+                reached.UnionWith(machine.behaviours.Where(b => b != null));
+                AddTransitions(machine.anyStateTransitions); AddTransitions(machine.entryTransitions);
+                foreach (var child in machine.states)
+                {
+                    if (child.state == null || !reached.Add(child.state)) continue;
+                    reached.UnionWith(child.state.behaviours.Where(b => b != null));
+                    AddTransitions(child.state.transitions);
+                    AddMotion(child.state.motion);
+                }
+                foreach (var child in machine.stateMachines)
+                {
+                    AddTransitions(machine.GetStateMachineTransitions(child.stateMachine));
+                    AddMachine(child.stateMachine);
+                }
+            }
+            foreach (var layer in controller.layers) AddMachine(layer.stateMachine);
+        }
+
+        // Everything the test holds goes before scripts reload (a copy left in a preview scene can hang the reload) or the
+        // editor quits: the phone link's sockets and threads, the played layers, the stage, the copy and its controllers.
+        private static void Shutdown()
+        {
+            FaceTrackingTest.StopAll();
+            Release();
         }
 
         [InitializeOnLoadMethod]
         private static void Watch()
         {
-            AssemblyReloadEvents.beforeAssemblyReload += Release;
-            EditorApplication.quitting += Release;
-            EditorApplication.playModeStateChanged += change => { if (change == PlayModeStateChange.ExitingEditMode) { FaceTrackingTest.StopAll(); Release(); } };
+            AssemblyReloadEvents.beforeAssemblyReload += Shutdown;
+            EditorApplication.quitting += Shutdown;
+            EditorApplication.playModeStateChanged += change => { if (change == PlayModeStateChange.ExitingEditMode) Shutdown(); };
             EditorApplication.update += () =>
             {
                 if (cached != null && idleSince >= 0 && EditorApplication.timeSinceStartup - idleSince > IdleRelease) Release();

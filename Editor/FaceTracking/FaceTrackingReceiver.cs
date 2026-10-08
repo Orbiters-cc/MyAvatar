@@ -204,6 +204,10 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         private const int SioUdpConnReset = -1744830452;
         private readonly object gate = new object();
         private readonly FaceFrame latest = new FaceFrame();
+        // The last frames and when they arrived, newest at head.
+        private readonly FaceFrame[] history = new FaceFrame[FaceTrackingPlayback.History];
+        private readonly double[] times = new double[FaceTrackingPlayback.History];
+        private int head = -1, count;
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private readonly Queue<double> arrivals = new Queue<double>();
         private readonly HashSet<string> greeted = new HashSet<string>();
@@ -265,6 +269,24 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             }
         }
 
+        /// <summary>
+        /// The face as it was a moment ago, between the two frames around that moment: every frame the phone sends shows,
+        /// and Wi-Fi bursts and gaps play out evenly, at whatever rate the editor draws. The moment trails the newest frame by
+        /// about one and a half frames of the phone's rate.
+        /// </summary>
+        public bool TryReadSmoothed(FaceFrame into)
+        {
+            lock (gate)
+            {
+                if (count == 0) return false;
+                double now = Now;
+                Trim(now);
+                double delay = arrivals.Count > 1 ? Math.Min(.1, Math.Max(.015, 1.5 / arrivals.Count)) : 0;
+                FaceTrackingPlayback.Sample(history, times, head, count, now - delay, into);
+                return true;
+            }
+        }
+
         private Listener Listen(int port, FaceApp app)
         {
             var listener = new Listener();
@@ -311,6 +333,11 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 {
                     frame.CopyTo(latest);
                     double now = Now;
+                    head = (head + 1) % history.Length;
+                    if (history[head] == null) history[head] = new FaceFrame();
+                    frame.CopyTo(history[head]);
+                    times[head] = now;
+                    if (count < history.Length) count++;
                     lastPacket = now;
                     if (app == FaceApp.IFacialMocap) lastIFacialMocap = now;
                     App = app;
@@ -349,6 +376,32 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 listener.Thread?.Join(1000);
             }
             iFacialMocap = liveLink = null;
+        }
+    }
+    /// <summary>Playing frames back from a short history: the frame at a moment, between the two around it.</summary>
+    internal static class FaceTrackingPlayback
+    {
+        internal const int History = 48;
+
+        /// <summary>
+        /// Writes into <paramref name="into"/> the face at <paramref name="time"/> from <paramref name="count"/> frames (a ring,
+        /// newest at <paramref name="head"/>): the newest after it, the oldest before it, else the two around it blended.
+        /// </summary>
+        internal static void Sample(FaceFrame[] frames, double[] times, int head, int count, double time, FaceFrame into)
+        {
+            int size = frames.Length;
+            if (count <= 0) return;
+            if (time >= times[head] || count == 1) { frames[head].CopyTo(into); return; }
+            for (int age = 0; age < count - 1; age++)
+            {
+                int newer = ((head - age) % size + size) % size, older = ((newer - 1) % size + size) % size;
+                if (times[older] > time) continue;
+                double span = times[newer] - times[older];
+                float t = span <= 0 ? 1f : (float)((time - times[older]) / span);
+                FaceFrame.Lerp(frames[older], frames[newer], t, into);
+                return;
+            }
+            frames[((head - count + 1) % size + size) % size].CopyTo(into);
         }
     }
 }

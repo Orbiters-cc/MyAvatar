@@ -32,6 +32,11 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         internal const string PackageId = "adjerry91.vrcft.templates";
         internal const string PackageFolder = "Packages/" + PackageId;
         internal const string Repository = "https://github.com/Adjerry91/VRCFaceTracking-Templates";
+        /// <summary>How to install VRCFaceTracking, the desktop app that sends the tracker's data to VRChat.</summary>
+        internal const string VrcftInstall = "https://docs.vrcft.io/docs/vrcft-software/vrcft";
+
+        /// <summary>The installed templates' version, or null.</summary>
+        internal static string TemplatesVersion => UnityEditor.PackageManager.PackageInfo.FindForAssetPath(PackageFolder)?.version;
         internal const string Credit = "Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates";
         // VRCFaceTracking's parameters: "v2/JawOpen", "FT/v2/EyeLidLeft", and the tracking state flags.
         private static readonly Regex TrackingParameter = new Regex(@"(^|/)v2/|^(Eye|Lip|Expression)TrackingActive$", RegexOptions.CultureInvariant);

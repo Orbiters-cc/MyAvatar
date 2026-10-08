@@ -10,7 +10,7 @@ using Debug = UnityEngine.Debug;
 namespace Orbiters.MyAvatar.Editor.FaceTracking
 {
     /// <summary>
-    /// Testing face tracking without Play Mode: the avatar built like an upload (<see cref="FaceTrackingTestBuild"/>), an
+    /// Testing face tracking without Play Mode: the face tracking assembled as uploaded (<see cref="FaceTrackingTestBuild"/>), an
     /// iPhone app or the simulator as the face, VRCFaceTracking's mapping and parameters (<see cref="Vrcft"/>), the built
     /// layers played every editor frame (<see cref="FaceTrackingTestRig"/>) and the face shown up close
     /// (<see cref="FaceTrackingStage"/>). One test runs at a time; it stops when no face tracking section shows it.
@@ -41,8 +41,6 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         public FaceTrackingReceiver Receiver { get; private set; }
         /// <summary>The avatar changed since the build: the test shows the avatar as it was.</summary>
         public bool Stale { get; private set; }
-        /// <summary>A setting only a new build shows changed (the expressive mouth).</summary>
-        public bool NeedsBuild { get; private set; }
         public readonly FaceFrame Frame = new FaceFrame();
         public readonly UnifiedFace Face = new UnifiedFace();
         public bool HasFace { get; private set; }
@@ -155,7 +153,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             bool smoothing = marker.smoothing != Smoothing;
             Features = marker.synced;
             Smoothing = marker.smoothing;
-            NeedsBuild = Build != null && Build.Done && Build.Expressive != marker.expressiveMouth;
+            if (Build != null && Build.Done && Build.Expressive != marker.expressiveMouth) { Rebuild(); return; }
             if (rig == null) { Changed?.Invoke(); return; }
             if (smoothing && Build.Fx != null && FaceTrackingBuild.SetMouthSlowdown(Build.Fx, FaceTrackingBuild.MouthSlowdown(Smoothing)) > 0)
                 CreateRig();
@@ -177,7 +175,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         {
             DisposeView();
             FaceTrackingTestBuild.Release();
-            Stale = NeedsBuild = false;
+            Stale = false;
             Build = FaceTrackingTestBuild.For(Root, Marker);
             State = Phase.Building;
             Error = null;
@@ -186,6 +184,9 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         private void Ready()
         {
+            // The expressive mouth changed while this build ran: only a new build shows it.
+            var marker = Marker;
+            if (marker != null && Build.Expressive != marker.expressiveMouth) { Rebuild(); return; }
             try
             {
                 CreateRig();
@@ -197,7 +198,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 Fail("Could not play the built avatar: " + ex.Message);
                 return;
             }
-            Apply(Marker);
+            Apply(marker);
             State = HasFace ? Phase.Live : Phase.Waiting;
             if (Source == FaceApp.Simulator) simulatorStart = Now;
             lastFrame = Now;
@@ -208,6 +209,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         {
             rig?.Dispose();
             rig = new FaceTrackingTestRig(Build.Copy, Build.Descriptor, Build.Additive, Build.Fx);
+            drives.Clear();
             ApplyToRig();
             eyesActive = lipActive = false;
         }
@@ -238,7 +240,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 return;
             }
             if (State == Phase.Failed) return;
-            if (!Build.Usable) { Fail("The test's build was removed (another build or upload replaced VRCFury's files). Test again to rebuild."); return; }
+            if (!Build.Usable) { Fail("The test's copy of the avatar was removed. Test again."); return; }
             Receiver.Tick();
             double now = Now;
             if (now - lastCheck > 2.0)
@@ -261,7 +263,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (!HasFace && Source != FaceApp.Simulator && Receiver.App != FaceApp.None && Receiver.App != Source && Receiver.Age < .5) SetSource(Receiver.App);
             bool fresh;
             if (Source == FaceApp.Simulator) { FaceTrackingSimulator.Fill(Now - simulatorStart, Frame); fresh = true; }
-            else fresh = Receiver.App == Source && Receiver.TryRead(Frame);
+            else fresh = Receiver.App == Source && Receiver.TryReadSmoothed(Frame);
             if (!fresh) return;
             if (!HasFace) { HasFace = true; State = Phase.Live; Changed?.Invoke(); }
             Vrcft.From(Frame, Face);
@@ -275,8 +277,16 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (rig == null || Stage == null) return;
             rig.Evaluate(seconds);
             Stage.Render(Width, Height);
+            double now = Now;
+            shown.Enqueue(now);
+            while (shown.Count > 0 && shown.Peek() < now - 1.0) shown.Dequeue();
             Rendered?.Invoke();
         }
+
+        private readonly Queue<double> shown = new Queue<double>();
+
+        /// <summary>Images of the face drawn in the last second: the editor draws less often while another app is in front.</summary>
+        public int ShownFps => shown.Count;
 
         /// <summary>A parameter as the built avatar's layers read it now.</summary>
         public float Parameter(string name) => rig != null ? rig.Get(name) : 0f;
@@ -287,8 +297,16 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         public string SimulatorBeat => FaceTrackingSimulator.Name(Now - simulatorStart);
 
         /// <summary>The avatar has a parameter VRCFaceTracking drives for this "v2/" name (float or binary).</summary>
-        public bool Drives(string v2) => rig != null && rig.Vrcft.Names.Any(n => n.EndsWith("v2/" + v2, StringComparison.Ordinal) ||
-            (n.Contains("v2/" + v2) && char.IsDigit(n[n.Length - 1])) || n.EndsWith("v2/" + v2 + "Negative", StringComparison.Ordinal));
+        public bool Drives(string v2)
+        {
+            if (rig == null) return false;
+            if (drives.TryGetValue(v2, out bool known)) return known;
+            return drives[v2] = rig.Vrcft.Names.Any(n => n.EndsWith("v2/" + v2, StringComparison.Ordinal) ||
+                (n.Contains("v2/" + v2) && char.IsDigit(n[n.Length - 1])) || n.EndsWith("v2/" + v2 + "Negative", StringComparison.Ordinal));
+        }
+
+        // Per rig: the meters ask every rendered frame.
+        private readonly Dictionary<string, bool> drives = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         private void DisposeView()
         {

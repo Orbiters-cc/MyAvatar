@@ -15,7 +15,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
     /// <item>smiles, frowns, the lower lip, jaw and tongue keep 70 % of the last frame like the original, not 30 %: the
     /// template's single smoothing weight suits the eyes, not a mouth that flickers between expressions;</item>
     /// <item>on a face sculpted with its own grin (Rexouium, Ultirex), a smile with the upper lip raised becomes that grin,
-    /// which also lifts the cheeks and lower lids; its other shapes take the original's weights.</item>
+    /// which also lifts the cheeks and lower lids; its other shapes take the original's weights. Any other face grins with
+    /// its own cheek and eye squints.</item>
     /// </list>
     /// The slower mouth follows the smoothing setting; the rest is the "expressive mouth" setting.
     /// </summary>
@@ -129,10 +130,16 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         // The original's smile: no smile and the lip raised lifts the corners half; a full smile is the lip tracking smile,
         // and raising the lip as well turns it into the face's grin (with 61.4 of the smile, as the grin also smiles).
+        // A face without its own grin gets one from its cheek and eye squints, which is what a sculpted grin adds: the full
+        // smile with the lip raised lifts the cheeks and the lower lids.
         private static int Grin(AnimatorController fx, List<BlendTree> trees, string facePath, HashSet<string> mesh, string side)
         {
             string grin = "Grin_" + side[0];
-            if (!mesh.Contains(grin)) return 0;
+            bool sculpted = mesh.Contains(grin);
+            var index = FaceTrackingNames.Index(mesh);
+            string cheek = sculpted ? null : FaceTrackingNames.Resolve("CheekSquint" + side, index);
+            string squint = sculpted ? null : FaceTrackingNames.Resolve("EyeSquint" + side, index);
+            if (!sculpted && cheek == null && squint == null) return 0;
             int grins = 0;
             foreach (var parent in trees.Where(t => t.blendType == BlendTreeType.Direct).ToList())
             {
@@ -144,11 +151,14 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 var upTree = (BlendTree)children[upAt].motion;
                 string smile = TopShape(smileTree, facePath), up = TopShape(upTree, facePath);
                 if (smile == null || up == null || !mesh.Contains(smile) || !mesh.Contains(up)) continue;
-                AnimationClip Pose(string name, float smiling, float raised, float grinning) => Keep(fx, Clip(name, facePath, (smile, smiling), (up, raised), (grin, grinning)));
+                AnimationClip Pose(string name, float smiling, float raised, float grinning) => Keep(fx, sculpted
+                    ? Clip(name, facePath, (smile, smiling), (up, raised), (grin, grinning))
+                    : Clip(name, facePath, new[] { (smile, smiling), (up, raised), (cheek, grinning * .5f), (squint, grinning * .2f) }.Where(s => s.Item1 != null).ToArray()));
                 var rest = Pose("Grin " + side + " rest", 0, 0, 0);
                 var lipUp = Pose("Grin " + side + " lip up", 0, 50, 0);
                 var smiled = Pose("Grin " + side + " smile", 100, 0, 0);
-                var grinned = Pose("Grin " + side, 61.4f, 0, 100);
+                // The sculpted grin smiles itself (61.4 of the smile, as on the Ultirex); a made one keeps the smile and the lip.
+                var grinned = sculpted ? Pose("Grin " + side, 61.4f, 0, 100) : Pose("Grin " + side, 100, 60, 100);
                 var neutral = Keep(fx, Tree("Grin " + side + " no smile", upTree.blendParameter, (0f, rest), (1f, lipUp)));
                 var full = Keep(fx, Tree("Grin " + side + " full smile", upTree.blendParameter, (0f, smiled), (1f, grinned)));
                 var replaced = children[smileAt];

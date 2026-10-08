@@ -108,16 +108,16 @@ namespace Orbiters.MyAvatar.Editor
             return null;
         }
 
-        // A component that belongs on the avatar's root: the one there, else added (with Undo); the root is selected so the
-        // Inspector shows it.
+        // A component that belongs on the avatar: the one already on it (on its root or a child, as MCB accepts), else one
+        // added to the root (with Undo); its object is selected so the Inspector shows it.
         private static string OnAvatar(MyAvatar avatar, Type type, string label)
         {
             if (type == null) return label + " is installed but Unity has not loaded it yet: try again once its scripts compiled.";
             if (avatar == null) return "Select the avatar first.";
             var root = TextureOptimization.AvatarRoot(avatar);
             if (root == null) return "Select the avatar first.";
-            if (root.GetComponent(type) == null) Undo.AddComponent(root, type);
-            Select(root);
+            var existing = root.GetComponentInChildren(type, true);
+            Select(existing != null ? existing.gameObject : Undo.AddComponent(root, type).gameObject);
             return null;
         }
 

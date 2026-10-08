@@ -3,7 +3,7 @@
 My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. The thumbnail fonts at the end ship with My Avatar, under the SIL Open Font License.
 
 ## Adjerry91’s Face Tracking Templates
-Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates. My Avatar downloads them through VPM and sets them up when you choose Set up face tracking; it does not ship or modify them. Products utilizing this project must include visible credit on their store or product page: “Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates” with a link to https://github.com/Adjerry91/VRCFaceTracking-Templates. The package also includes its own license agreement (License folder, credit required).
+Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates. My Avatar downloads them through VPM and sets them up when you choose Add in the Face tracking section; it does not ship or modify them. Products utilizing this project must include visible credit on their store or product page: “Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates” with a link to https://github.com/Adjerry91/VRCFaceTracking-Templates. The package also includes its own license agreement (License folder, credit required).
 https://github.com/Adjerry91/VRCFaceTracking-Templates
 ```
 MIT License

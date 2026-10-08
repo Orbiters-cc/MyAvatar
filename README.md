@@ -1,5 +1,50 @@
 # My Avatar
 
+## 0.9.6 — 2026-10-08
+
+- **Face tracking quick settings, simpler**: they fold into the face tracking frame (open right after the setup) and start
+  with four big buttons: **Meta Quest**, **Vive (SRanipal)**, **Apple (ARKit)** and **Custom**. A tracker keeps only what
+  it sends, from VRCFaceTracking's compatibility table (an iPhone has no pupil dilation, lip tighteners or tongue
+  directions; a Vive has pupils and the tongue in every direction but no brows, nose, lip press or lip tighteners; a Quest
+  Pro has no pupil dilation and its tongue only sticks out), with the recommended smoothing and the expressive mouth.
+  **Custom** shows every setting: the smoothing, each feature others see (Nose, Lip press, Lip tighteners and Tongue
+  direction are now their own switches) with the parameter budget, and the expressive mouth.
+- **Expressive mouth on every avatar**: a face without its own grin shape grins with its cheek and eye squints when a full
+  smile raises the upper lip; Rexouium and Ultirex faces keep their sculpted grin.
+- **Test live in about a second** instead of a whole upload build: only the template's controllers are copied in memory and
+  finished as at upload (the face's shape names, the mouth tuning), then MCB's corrective blendshape links of the custom
+  base are applied to them, so fixes such as an Orbit Face eyelid fix following the blinks and the eyes looking aside show
+  in the test. The avatar's own layers are left out. Changing the expressive mouth puts the face together again at once.
+- At upload, the face's shape names are matched before MCB's corrective links run, so those links also follow the face
+  tracking clips.
+- **Avatar customization**: one compact frame replaces the Rexouium card and the Hair, Ears, Tail and Toes cards. A row per
+  part with who can grab and pose it (three icons) and its stretch, an **All** row that sets every part at once, chains
+  without physics with **Add physics** inline, and the avatar's looks below (Rexouium's feathers as chips, the ear size
+  slider, double-click for the sculpted size).
+- **Face tracking**: the quick settings are open by default; the frame shows VRCFaceTracking's logo in the shape ring, the
+  template as "Adjerry91's face tracking template" with the installed templates' version, and **Get VRCFaceTracking** opens
+  its install guide. Setting it up is now **Add** under "Face tracking available".
+- **Smoother live test**: every frame the phone sends is shown (the face plays a moment behind, between the frames around
+  that moment, so Wi-Fi bursts play out evenly) and the values VRChat receives follow every drawn frame instead of ten times
+  a second. The corner shows the frames received and drawn; Unity draws less often while another app is in front.
+- Face tracking counts as its own share in the Avatar budget (XRay Gizmos 0.2.9).
+- The VRChat avatar card of the thumbnail now comes from Orbiters Toolkit, shared with Unit Git's upload releases.
+- **Face tracking fixes**: the upload only edits VRCFury's copy of the FX controller, never the avatar's own asset; the
+  template animates the face where it is now, also after the face mesh was renamed or moved (an MCB version), and the
+  section shows **Check the face** with **Point at “…”** when the template's face is missing; blinks the avatar animates
+  wait for eye tracking only on the way to closed eyes, no longer on the way back to rest; while expressions are disabled
+  the expression layer stays at rest (menu toggles and Entry transitions included, no more flicker).
+- The live test: no longer listed in the VRChat SDK panel, adds nothing to the Undo history, frees what each rebuild
+  made, closes its ports and threads before scripts reload, and survives changing the expressive mouth while it builds.
+  A pending one-click setup gives up after five minutes instead of waiting forever. The budget bar uses the same face
+  tracking count as the estimate.
+- **Restore** of a fitted accessory also takes back the fit MCB saved for the version, so it no longer returns after a
+  version switch. Fit notes made for another custom base, or whose fit is gone, are asked again instead of failing. A
+  refit finishing after the custom base changed is taken back; the line-up ends when the custom base changes.
+- **Undo textures** and the optimization's undo skip renderers that no longer exist (MCB replaced them) and say how many,
+  instead of failing. The MCB tile finds MCB on a child of the avatar.
+- Requires Orbiters Toolkit 0.3.18 (and MCB 1.12.4 for the corrective links in the test and fits taken back).
+
 ## 0.9.5 — 2026-10-07
 
 - **No more "This file was already uploaded"**: the VRChat SDK keeps a pending thumbnail through every reload of the
@@ -310,16 +355,16 @@ explanation):
 Pose edits of the avatar stay regular Unity edits: Undo reverts the avatar and its
 mirrored bones together.
 
-## Hair, tail & toes
+## Avatar customization
 
-Hair, tail and toe PhysBones are recognised by name (`Hair_Front`, `Ponytail`,
+Hair, ear, tail and toe PhysBones are recognised by name (`Hair_Front`, `Ponytail`,
 `Tail1`, `Toe_L`, toe beans...), from the bone they start at or the object holding
-them. Each part gets its own card, flowing into as many columns as the Inspector is
-wide:
+them. Each part is a row of the **Avatar customization** frame (its PhysBone count selects them), with an **All**
+row on top that sets every part at once:
 
 - **Grab** and **Pose**: Nobody, Only me or Everyone icon buttons, written to the PhysBones'
   grab and pose permissions. VRChat has no friends-only setting. Posing is limited to
-  who can grab.
+  who can grab. A picker outlined in orange means its PhysBones disagree.
 - **Stretch**: a slider for how much longer the chain gets when pulled (PhysBone Max Stretch), up
   to three times its length.
 
@@ -327,6 +372,9 @@ A choice applies to every PhysBone of the part and can be undone. Bones of the
 avatar's own armature named like a part but driven by no PhysBone are offered under
 **Add physics**, which adds a PhysBone per chain under `PhysBones/<Part>` on the
 avatar, with settings suited to the part and the part's current permissions.
+
+Under **Looks**, a Rexouium shows its feather groups as chips (what the avatar starts with in VRChat, shown in the scene
+too) and its ear size.
 
 ## Avatar budget
 
@@ -346,7 +394,7 @@ An install goes through VPM like any optional dependency; the tool opens once Un
 ## Face tracking
 
 When the avatar's face (the mesh lip sync uses) has most of the blendshapes face tracking uses, the **Face tracking**
-section offers **Set up face tracking**. My Avatar works out which standard the face fits best: Unified Expressions,
+section offers **Add** (Face tracking available). My Avatar works out which standard the face fits best: Unified Expressions,
 ARKit (Perfect Sync) or SRanipal, also when the shapes are named another way (e.g. Rexouium's "LipTrack_JawOpen",
 "Eye_LookUp_L", "EyesWide_L"). One click then:
 

@@ -32,6 +32,8 @@ namespace Orbiters.MyAvatar.Editor
             target = Mathf.Clamp01(fraction);
             value.text = text;
             caption.text = under;
+            // Without text the ring frames a logo.
+            value.style.display = caption.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
             started = (float)EditorApplication.timeSinceStartup;
             float from = shown;
             schedule.Execute(timer =>
@@ -168,5 +170,29 @@ namespace Orbiters.MyAvatar.Editor
             fill.EnableInClassList("ft-meter__fill--negative", value < 0f);
             number.text = value.ToString(Signed ? "+0.00;-0.00;0.00" : "0.00");
         }
+    }
+
+
+    /// <summary>
+    /// A face tracker's mark in plain white: Meta's, Vive's and Apple's logos, or sliders for the custom choice. Dimmed
+    /// until <see cref="On"/>.
+    /// </summary>
+    internal sealed class FaceTrackerLogo : VisualElement
+    {
+        private const string Meta = "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M5,19.5c0-4.6,2.3-9.4,5-9.4c1.5,0,2.7,0.9,4.6,3.6c-1.8,2.8-2.9,4.5-2.9,4.5c-2.4,3.8-3.2,4.6-4.5,4.6 C5.9,22.9,5,21.7,5,19.5 M20.7,17.8L19,15c-0.4-0.7-0.9-1.4-1.3-2c1.5-2.3,2.7-3.5,4.2-3.5c3,0,5.4,4.5,5.4,10.1 c0,2.1-0.7,3.3-2.1,3.3S23.3,22,20.7,17.8 M16.4,11c-2.2-2.9-4.1-4-6.3-4C5.5,7,2,13.1,2,19.5c0,4,1.9,6.5,5.1,6.5 c2.3,0,3.9-1.1,6.9-6.3c0,0,1.2-2.2,2.1-3.7c0.3,0.5,0.6,1,0.9,1.6l1.4,2.4c2.7,4.6,4.2,6.1,6.9,6.1c3.1,0,4.8-2.6,4.8-6.7 C30,12.6,26.4,7,22.1,7C19.8,7,18,8.8,16.4,11\"/></svg>";
+        private const string Vive = "<svg viewBox=\"-2.25 0 804.75 705.8\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"m791.79 590.97-52.02 88.8c-9.18 16.84-26.01 26.03-44.37 26.03h-592.08c-18.36 0-35.19-9.19-44.37-26.03l-52.02-88.8c-9.18-15.31-9.18-35.21 0-52.05l298.34-512.89c9.18-16.84 26.01-26.03 44.37-26.03h102.5c18.36 0 35.19 9.19 44.37 26.03l296.81 512.89c9.18 15.31 9.18 35.21-1.53 52.05zm-175.94-125.54c-21.42-97.99-71.91-185.25-142.29-249.56-41.31-38.27-104.03-38.27-145.34 0-71.91 65.84-122.4 151.57-142.29 249.56-10.7 53.59 21.42 105.64 73.44 122.48 44.37 13.78 91.8 21.44 140.76 21.44 48.95 0 96.38-7.66 140.75-21.44 53.55-15.31 84.15-68.89 74.97-122.48z\"/></svg>";
+        private const string Apple = "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.09997 22C7.78997 22.05 6.79997 20.68 5.95997 19.47C4.24997 17 2.93997 12.45 4.69997 9.39C5.56997 7.87 7.12997 6.91 8.81997 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z\"/></svg>";
+
+        public FaceTrackerLogo(FaceTrackingPreset preset)
+        {
+            pickingMode = PickingMode.Ignore;
+            AddToClassList("ft-logo");
+            string svg = preset == FaceTrackingPreset.MetaQuest ? Meta : preset == FaceTrackingPreset.Vive ? Vive : preset == FaceTrackingPreset.ARKit ? Apple : null;
+            VisualElement mark = svg != null ? new OrbitersVectorLogo(svg) : (VisualElement)new Orbiters.Toolkit.Editor.VectorIcon(Orbiters.Toolkit.Editor.IconGlyph.Sliders);
+            mark.AddToClassList("ft-logo__mark");
+            Add(mark);
+        }
+
+        public bool On { set => EnableInClassList("ft-logo--on", value); }
     }
 }

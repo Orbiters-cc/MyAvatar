@@ -128,8 +128,7 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(accessories);
             content.Add(new ThumbnailSection(avatar, photoshoot));
             content.Add(new PosingSection(avatar));
-            content.Add(new RexouiumSection(avatar));
-            content.Add(new PhysicsSection(avatar));
+            content.Add(new AvatarCustomizationSection(avatar));
             content.Add(new FaceTrackingSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());

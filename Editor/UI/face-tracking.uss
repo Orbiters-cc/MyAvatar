@@ -1,10 +1,16 @@
-/* Face tracking: a hero (or the live test stage), the phone link, what VRChat receives, then the quick settings.
+/* Face tracking: the live test stage, the phone link and what VRChat receives when testing, then the hero frame with the quick settings fold.
    Same palette and radii as the photoshoot and thumbnail studio: 16 px frames, 12 px rows, #00DA6D accent. */
 
-.ft-hero { flex-direction: row; align-items: center; padding: 16px 16px 16px 14px; margin-bottom: 10px; border-radius: 16px; background-color: #1c1e23; border-width: 1px; border-color: rgba(255, 255, 255, 0.05); overflow: hidden; }
+.ft-hero { padding: 16px 16px 16px 14px; margin-bottom: 10px; border-radius: 16px; background-color: #1c1e23; border-width: 1px; border-color: rgba(255, 255, 255, 0.05); overflow: hidden; }
+.ft-hero__top { flex-direction: row; align-items: center; }
+.ft-hero--settings-only { padding-top: 4px; padding-bottom: 6px; }
+.ft-hero--settings-only .ft-fold { margin-top: 0; border-top-width: 0; }
 .ft-hero__badge { width: 78px; height: 78px; flex-shrink: 0; margin-right: 16px; }
 .ft-hero__glow { position: absolute; left: -22px; top: -22px; width: 122px; height: 122px; }
 .ft-hero__ring { width: 78px; height: 78px; }
+.ft-hero__logo { position: absolute; left: 19px; top: 19px; width: 40px; height: 40px; }
+.ft-hero__title-row { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.ft-hero__version { height: 18px; margin: 3px 0 0 8px; padding: 0 7px; border-radius: 9px; background-color: rgba(255, 255, 255, 0.07); color: #a8a8a8; font-size: 10px; -unity-font-style: bold; -unity-text-align: middle-center; }
 .ft-hero__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
 .ft-hero__eyebrow { margin: 0; padding: 0; font-size: 10px; letter-spacing: 1px; color: #00DA6D; -unity-font-style: bold; }
 .ft-hero__eyebrow.warning { color: #ffb020; }
@@ -113,6 +119,33 @@
 .ft-budget__text { margin: 8px 0 0 0; padding: 0; font-size: 11px; color: #9a9a9a; white-space: normal; }
 .ft-budget__text.warning { color: #ffb020; }
 .ft-switch-row { flex-direction: row; align-items: center; padding: 8px 8px 8px 12px; border-radius: 12px; background-color: #2a2a2a; }
+.ft-switch-row__text { flex-grow: 1; flex-shrink: 1; margin-right: 10px; }
+
+/* ---- The quick settings fold, in the hero frame --------------------------------------------------- */
+.ft-fold { margin-top: 14px; border-top-width: 1px; border-color: rgba(255, 255, 255, 0.06); }
+.ft-fold__header { flex-direction: row; align-items: center; height: 34px; margin: 0 -6px; padding: 0 6px; border-radius: 10px; cursor: link; }
+.ft-fold__header:hover { background-color: rgba(255, 255, 255, 0.04); }
+.ft-fold__chevron { width: 14px; height: 14px; margin-right: 6px; --icon-color: #9a9a9a; transition-property: rotate; transition-duration: 0.15s; }
+.ft-fold__chevron--open { rotate: 90deg; }
+.ft-fold__title { flex-grow: 1; margin: 0; padding: 0; color: #f2f2f2; font-size: 12px; -unity-font-style: bold; }
+.ft-fold__summary { margin: 0; padding: 0; color: #8f8f8f; font-size: 11px; }
+.ft-fold__body { padding-top: 6px; }
+
+.ft-trackers { flex-direction: row; flex-wrap: wrap; margin: 0 -3px; }
+.mcb-button.ft-tracker { flex-grow: 1; flex-basis: 22%; min-width: 86px; height: 92px; min-height: 92px; margin: 3px; padding: 10px 6px 8px 6px; border-width: 0; border-radius: 14px; background-color: #26282e; align-items: center; justify-content: center; transition-property: background-color, scale; transition-duration: 0.14s, 0.2s; transition-timing-function: ease-out, ease-out-back; }
+.mcb-button.ft-tracker:hover { background-color: #2e3038; }
+.mcb-button.ft-tracker.pressed { scale: 0.96 0.96; }
+.mcb-button.ft-tracker--on, .mcb-button.ft-tracker--on:hover { background-color: rgba(0, 218, 109, 0.16); }
+.ft-tracker__logo { width: 30px; height: 30px; margin-bottom: 8px; opacity: 0.6; transition-property: opacity; transition-duration: 0.14s; }
+.ft-tracker:hover .ft-tracker__logo, .ft-logo--on { opacity: 1; }
+.ft-logo__mark { flex-grow: 1; --icon-color: #ffffff; }
+.ft-tracker__name { margin: 0; padding: 0; font-size: 12px; color: #d9d9d9; -unity-font-style: bold; -unity-text-align: middle-center; }
+.ft-tracker__sub { margin: 1px 0 0 0; padding: 0; font-size: 10px; color: #7f7f7f; -unity-text-align: middle-center; }
+.ft-tracker--on .ft-tracker__name { color: #ffffff; }
+.ft-tracker--on .ft-tracker__sub { color: #9ad9b8; }
+.ft-trackers__caption { margin: 8px 2px 0 2px; padding: 0; color: #8f8f8f; font-size: 11px; white-space: normal; }
+.ft-trackers__caption.warning { color: #ffb020; }
+.ft-custom { margin-top: 12px; padding: 12px; border-radius: 14px; background-color: #23252b; }
 
 .ft-note { margin-top: 8px; color: #8f8f8f; font-size: 11px; white-space: normal; }
 .ft-note.warning { color: #ffb020; }

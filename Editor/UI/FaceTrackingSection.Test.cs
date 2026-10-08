@@ -56,13 +56,18 @@ namespace Orbiters.MyAvatar.Editor
 
         private void TestChanged() => ShowTest();
 
-        private void Repaint() => image?.MarkDirtyRepaint();
+        private void Repaint()
+        {
+            image?.MarkDirtyRepaint();
+            var test = Test;
+            if (test != null && stage != null && meters.Count > 0) UpdateMeters(test);
+        }
 
         private void ShowTest()
         {
             var test = Test;
             bool showing = test != null && Marker != null;
-            hero.style.display = showing ? DisplayStyle.None : DisplayStyle.Flex;
+            ShowHeroTop(!showing);
             if (!showing)
             {
                 if (stage != null) { live.Clear(); stage = null; meters.Clear(); ticker?.Pause(); connectFor = FaceApp.None; }
@@ -77,7 +82,7 @@ namespace Orbiters.MyAvatar.Editor
         private void BuildLive(bool starting)
         {
             live.Clear(); meters.Clear(); connectFor = FaceApp.None;
-            hero.style.display = DisplayStyle.None;
+            ShowHeroTop(false);
             stage = new VisualElement(); stage.AddToClassList("ft-stage"); live.Add(stage);
             // Several sections may show the test at different sizes: the image fills each one without stretching.
             image = new Image { scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Position };
@@ -96,7 +101,7 @@ namespace Orbiters.MyAvatar.Editor
             notice.style.display = DisplayStyle.None;
             var stop = MyAvatarEditor.Button("Stop test", () => { FaceTrackingTest.StopAll(); });
             stop.AddToClassList("ft-stage__stop");
-            stop.tooltip = "Stop listening to the phone. The build stays ready for ten minutes, so testing again starts at once.";
+            stop.tooltip = "Stop listening to the phone. The face stays ready for ten minutes, so testing again starts at once.";
             stage.Add(stop);
 
             overlay = new VisualElement(); overlay.AddToClassList("ft-overlay"); stage.Add(overlay);
@@ -314,15 +319,13 @@ namespace Orbiters.MyAvatar.Editor
             {
                 case FaceTrackingTest.Phase.Building:
                     var build = test.Build;
-                    statusTag.text = "BUILDING";
-                    overlayTitle.text = "Building your avatar like an upload";
-                    double left = build != null ? build.SecondsLeft : 0;
-                    overlayText.text = (build != null ? build.Step : "Starting") + "…" + (left >= 1 ? "  About " + Math.Ceiling(left) + " s left." : "") +
-                                       "\nUnity pauses during VRCFury’s part. The next test starts at once.";
+                    statusTag.text = "PREPARING";
+                    overlayTitle.text = "Preparing the face";
+                    overlayText.text = (build != null ? build.Step : "Copying the avatar") + "…";
                     progressFill.style.width = Length.Percent(Mathf.Max(2f, (build != null ? build.Progress : 0f) * 100f));
                     float sweep = (float)(EditorApplication.timeSinceStartup % 1.6 / 1.6);
                     progressShimmer.style.left = Length.Percent(-30f + sweep * 130f);
-                    rateTag.text = build != null ? build.Seconds.ToString("0") + " s" : "";
+                    rateTag.text = "";
                     break;
                 case FaceTrackingTest.Phase.Waiting:
                     statusTag.text = "WAITING · " + appName.ToUpperInvariant();
@@ -334,7 +337,10 @@ namespace Orbiters.MyAvatar.Editor
                     break;
                 case FaceTrackingTest.Phase.Live:
                     statusTag.text = simulated ? "SIMULATOR · " + test.SimulatorBeat.ToUpperInvariant() : "LIVE · " + appName.ToUpperInvariant();
-                    rateTag.text = simulated ? "90 fps" : receiver.Fps.ToString("0") + " fps · " + (age < 10 ? Math.Round(age * 1000) + " ms" : "paused");
+                    rateTag.text = (simulated ? "" : receiver.Fps.ToString("0") + " in · ") + test.ShownFps + " fps" + (simulated ? "" : " · " + (age < 10 ? Math.Round(age * 1000) + " ms" : "paused"));
+                    rateTag.parent.tooltip = UnityEditorInternal.InternalEditorUtility.isApplicationActive
+                        ? "Frames the phone sends each second, the images of the face drawn, and the age of the last frame. Every frame shows: the face plays a moment behind, between the frames around it."
+                        : "Unity draws less often while another app is in front: click into Unity for the full frame rate.";
                     break;
                 case FaceTrackingTest.Phase.Failed:
                     statusTag.text = "STOPPED";
@@ -343,20 +349,20 @@ namespace Orbiters.MyAvatar.Editor
                     rateTag.text = "";
                     break;
             }
-            bool stale = test.State != FaceTrackingTest.Phase.Building && (test.Stale || test.NeedsBuild);
+            bool stale = test.State != FaceTrackingTest.Phase.Building && test.Stale;
             notice.style.display = stale ? DisplayStyle.Flex : DisplayStyle.None;
             // The camera hint shows for the first seconds of the face, out of the way of a notice.
             if (test.State == FaceTrackingTest.Phase.Live && liveSince < 0) liveSince = EditorApplication.timeSinceStartup;
             if (stageHint.resolvedStyle.display != DisplayStyle.None && (stale || (liveSince >= 0 && EditorApplication.timeSinceStartup - liveSince > 6)))
                 stageHint.style.display = DisplayStyle.None;
-            noticeText.text = test.NeedsBuild ? "Expressive mouth changed" : "Avatar changed since this build";
+            noticeText.text = "Avatar changed since the test started";
 
             // The phone link's status.
             string error = receiver != null ? receiver.Error(test.Source) : null;
             statusRowDot.EnableInClassList("ft-dot--live", test.HasFace && !simulated && age < 1);
             statusRowDot.EnableInClassList("ft-dot--sim", simulated);
             statusRowDot.EnableInClassList("ft-dot--error", error != null);
-            if (test.State == FaceTrackingTest.Phase.Building) statusText.text = simulated ? "The simulator starts once the avatar is built." : "Listening already: start the app while the avatar builds.";
+            if (test.State == FaceTrackingTest.Phase.Building) statusText.text = simulated ? "The simulator starts in a moment." : "Listening already: start the app.";
             else if (simulated) statusText.text = "Simulating: " + test.SimulatorBeat + " (the loop lasts " + Mathf.RoundToInt(FaceTrackingSimulator.Length) + " s).";
             else if (error != null) statusText.text = error;
             else if (test.HasFace && age < 1) statusText.text = "Receiving from " + receiver.Device + " · " + receiver.Fps.ToString("0") + " frames per second · last " + Math.Round(age * 1000) + " ms ago.";
@@ -369,8 +375,12 @@ namespace Orbiters.MyAvatar.Editor
             hint.style.display = quiet ? DisplayStyle.Flex : DisplayStyle.None;
             if (quiet) hint.text = "Nothing arrives yet? Check the phone is on the same Wi-Fi (not a guest network), and that Windows Firewall lets Unity receive on private networks: " +
                                    "Windows Security › Firewall & network protection › Allow an app through firewall › Unity " + Application.unityVersion + " › Private. Close VRCFaceTracking while testing here.";
+            UpdateMeters(test);
+        }
 
-            // What VRChat receives.
+        // What VRChat receives: every rendered frame of the face, not only the ten-times-a-second status.
+        private void UpdateMeters(FaceTrackingTest test)
+        {
             var effective = FaceTrackingFeatureSet.Effective(test.Features);
             foreach (var meter in meters)
             {
