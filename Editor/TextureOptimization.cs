@@ -32,7 +32,7 @@ namespace Orbiters.MyAvatar.Editor
             public Texture2D texture;
             public string path;
             public TextureImporterFormat format;
-            public int maxSize;
+            public int maxSize, quality = 100;
             public long before, after;
             public bool duplicate;
         }
@@ -86,7 +86,21 @@ namespace Orbiters.MyAvatar.Editor
             normalMap ? TextureImporterFormat.BC5 : alphaUsed ? TextureImporterFormat.BC7 : TextureImporterFormat.DXT1;
 
         internal static TextureFormat Runtime(TextureImporterFormat format) =>
-            format == TextureImporterFormat.BC5 ? TextureFormat.BC5 : format == TextureImporterFormat.BC7 ? TextureFormat.BC7 : TextureFormat.DXT1;
+            format == TextureImporterFormat.BC5 ? TextureFormat.BC5 : format == TextureImporterFormat.BC7 ? TextureFormat.BC7 :
+            format == TextureImporterFormat.DXT1Crunched ? TextureFormat.DXT1Crunched : format == TextureImporterFormat.DXT5Crunched ? TextureFormat.DXT5Crunched : TextureFormat.DXT1;
+
+        // Crunch shrinks only the download: memory holds the same DXT1/DXT5 blocks. A crunched texture stays crunched (crunch
+        // has no BC5 or BC7, so alpha and normal maps keep DXT5, the same 8 bits per pixel).
+        internal static TextureImporterFormat Crunch(TextureImporterFormat format) =>
+            format == TextureImporterFormat.DXT1 ? TextureImporterFormat.DXT1Crunched : TextureImporterFormat.DXT5Crunched;
+
+        internal static bool Crunched(TextureImporter importer)
+        {
+            var s = importer.GetPlatformTextureSettings(Platform);
+            if (s.overridden && s.format != TextureImporterFormat.Automatic) return s.format == TextureImporterFormat.DXT1Crunched || s.format == TextureImporterFormat.DXT5Crunched;
+            return s.overridden ? s.crunchedCompression && s.textureCompression != TextureImporterCompression.Uncompressed
+                : importer.crunchedCompression && importer.textureCompression != TextureImporterCompression.Uncompressed;
+        }
 
         // Unity lowers an oversized texture by whole mip levels; smaller textures are never scaled up.
         internal static Vector2Int Capped(int width, int height, int max)
@@ -113,9 +127,10 @@ namespace Orbiters.MyAvatar.Editor
         private static long Bytes(Texture texture) => Bytes(texture.width, texture.height, BitsPerPixel(texture.graphicsFormat),
             texture is Texture2D t ? t.mipmapCount > 1 : texture is RenderTexture r && r.useMipMap);
 
-        internal static ImporterState Target(TextureImporterFormat format, int maxSize) => new ImporterState {
-            overridden = true, maxSize = maxSize, format = (int)format, quality = 100, compression = (int)TextureImporterCompression.CompressedHQ,
-            crunched = false, mipmaps = true, streaming = true };
+        // A crunched format keeps the creator's crunch quality.
+        internal static ImporterState Target(TextureImporterFormat format, int maxSize, int quality = 100) => new ImporterState {
+            overridden = true, maxSize = maxSize, format = (int)format, quality = quality, compression = (int)TextureImporterCompression.CompressedHQ,
+            crunched = format == TextureImporterFormat.DXT1Crunched || format == TextureImporterFormat.DXT5Crunched, mipmaps = true, streaming = true };
 
         // The compression mode is ignored while an explicit format is overridden; without an override only the flags matter.
         internal static bool Same(ImporterState a, ImporterState b) =>
@@ -141,13 +156,15 @@ namespace Orbiters.MyAvatar.Editor
         // ---- Plan ---------------------------------------------------------------------------------------------
 
         // Alpha is measured on the imported pixels: many opaque textures still carry an unused alpha channel. Any texel below
-        // full opacity counts, at full resolution; when mipmap streaming holds only smaller mips, alpha is kept to be safe.
-        // Keyed by the imported contents' hash and kept in Library: measuring reads every texel back from the GPU, too slow
+        // full opacity counts: the image is halved down to 512 px at most, each step averaging 2×2 texels, so a small cut-out
+        // or near-opaque alpha still shows; when mipmap streaming holds only smaller mips, alpha is kept to be safe.
+        // Keyed by the imported contents' hash and kept in Library: measuring reads the image back from the GPU, too slow
         // to repeat for each texture after every script reload.
         private const string AlphaCacheFile = "alpha-cache.json";
         private static Dictionary<string, bool> alphaCache;
 
-        internal static Dictionary<Texture2D, bool> AlphaUsed(IEnumerable<(Texture2D texture, TextureImporter importer)> textures)
+        // With unmeasured, textures never measured are listed there instead of being measured now.
+        internal static Dictionary<Texture2D, bool> AlphaUsed(IEnumerable<(Texture2D texture, TextureImporter importer)> textures, List<Texture2D> unmeasured = null)
         {
             var result = new Dictionary<Texture2D, bool>();
             alphaCache ??= LibraryStore.Read<Dictionary<string, bool>>(AlphaCacheFile);
@@ -159,16 +176,22 @@ namespace Orbiters.MyAvatar.Editor
                     texture.format == TextureFormat.DXT1 || texture.format == TextureFormat.DXT1Crunched || !GraphicsFormatUtility.HasAlphaChannel(texture.graphicsFormat)) result[texture] = false;
                 else if (alphaCache.TryGetValue(key, out bool used)) result[texture] = used;
                 else if (QualitySettings.streamingMipmapsActive && texture.streamingMipmaps && texture.loadedMipmapLevel > 0) result[texture] = true;
+                else if (unmeasured != null) unmeasured.Add(texture);
                 else { result[texture] = alphaCache[key] = TextureAnalysis.UsesAlpha(texture); measured = true; }
             }
-            if (measured) LibraryStore.Write(AlphaCacheFile, alphaCache.Skip(Math.Max(0, alphaCache.Count - 4096)).ToDictionary(p => p.Key, p => p.Value));
+            if (measured) SaveAlpha();
             return result;
         }
+
+        private static void SaveAlpha() => LibraryStore.Write(AlphaCacheFile, alphaCache.Skip(Math.Max(0, alphaCache.Count - 4096)).ToDictionary(p => p.Key, p => p.Value));
 
         private static IEnumerable<Renderer> Renderers(MyAvatar avatar) => avatar.GetComponentsInChildren<Renderer>(true)
             .Where(r => (r.hideFlags & HideFlags.DontSave) == 0 && (r.gameObject.hideFlags & HideFlags.DontSave) == 0);
 
-        internal static Plan Build(MyAvatar avatar)
+        internal static Plan Build(MyAvatar avatar) => Build(avatar, null);
+
+        // With unmeasured, textures whose alpha was never measured are listed there and no plan is made.
+        private static Plan Build(MyAvatar avatar, List<Texture2D> unmeasured)
         {
             var plan = new Plan();
             var candidates = new List<(Texture2D texture, TextureImporter importer)>();
@@ -183,40 +206,119 @@ namespace Orbiters.MyAvatar.Editor
                     group.Any(s => Exclusion(importer.assetPath, texture.name, s.property + " " + s.description, texture.width, texture.height) != null)) continue;
                 candidates.Add(((Texture2D)texture, importer));
             }
-            var alpha = AlphaUsed(candidates.Where(c => c.importer.textureType != TextureImporterType.NormalMap));
+            var alpha = AlphaUsed(candidates.Where(c => c.importer.textureType != TextureImporterType.NormalMap), unmeasured);
+            if (unmeasured != null && unmeasured.Count > 0) return null;
             foreach (var (texture, importer) in candidates)
             {
-                bool normal = importer.textureType == TextureImporterType.NormalMap;
+                bool normal = importer.textureType == TextureImporterType.NormalMap, crunched = Crunched(importer);
                 var format = Format(normal, !normal && alpha[texture]);
+                if (crunched) format = Crunch(format);
                 var standalone = importer.GetPlatformTextureSettings(Platform);
                 int cap = bodyTextures.Contains(texture) ? BodyMaxSize : MaxSize;
-                var size = Capped(texture.width, texture.height, cap);
-                int maxSize = Mathf.Min(cap, standalone.overridden ? standalone.maxTextureSize : importer.maxTextureSize);
+                // From the size Unity imports without a cap, not the current one: a texture capped lower before can go back up.
+                var full = Uncapped(importer, texture);
+                var size = Capped(full.x, full.y, cap);
+                // The smallest max size that keeps that size; a larger one already set (up to the cap) changes nothing.
+                int fit = Mathf.Clamp(Mathf.NextPowerOfTwo(Mathf.Max(size.x, size.y)), 32, 16384);
+                int current = standalone.overridden ? standalone.maxTextureSize : importer.maxTextureSize;
+                int maxSize = current >= fit && current <= cap ? current : fit;
+                int quality = crunched ? standalone.overridden ? standalone.compressionQuality : importer.compressionQuality : 100;
                 long before = BuildBytes(texture), after = Bytes(size.x, size.y, BitsPerPixel(Runtime(format)), true);
                 // Compared with the import settings, not the loaded texture: with "Compress textures on import" off, the editor
                 // keeps textures uncompressed until the build.
-                bool change = size.x != texture.width || size.y != texture.height || !Same(Read(importer), Target(format, maxSize));
-                // Turning mipmaps on can outweigh the saving on an already small texture; never grow a texture.
-                if (!change || after > before) continue;
-                plan.changes.Add(new TexturePlan { texture = texture, path = importer.assetPath, format = format, before = before, after = after, maxSize = maxSize });
+                bool change = size.x != texture.width || size.y != texture.height || !Same(Read(importer), Target(format, maxSize, quality));
+                // Never grow a texture (turning mipmaps on can outweigh the saving on a small one), except back up from a size
+                // this optimization set itself. A crunched texture changes only to take less memory.
+                if (!change || after > before && !Ours(avatar.optimization, texture, importer) || crunched && after >= before) continue;
+                plan.changes.Add(new TexturePlan { texture = texture, path = importer.assetPath, format = format, before = before, after = after, maxSize = maxSize, quality = quality });
                 plan.after += after - before;
             }
             return plan;
         }
 
-        // The body material's textures: the largest submesh of the avatar's body mesh (eyes, hair and extras often share the
-        // mesh as smaller submeshes).
+        // The size Unity imports at without a max size: the source, scaled to a power of two unless that is turned off.
+        private static Vector2Int Uncapped(TextureImporter importer, Texture texture)
+        {
+            importer.GetSourceTextureWidthAndHeight(out int width, out int height);
+            if (width <= 0 || height <= 0) return new Vector2Int(texture.width, texture.height);
+            int Scale(int v) => importer.npotScale == TextureImporterNPOTScale.None || Mathf.IsPowerOfTwo(v) ? v :
+                importer.npotScale == TextureImporterNPOTScale.ToLarger ? Mathf.NextPowerOfTwo(v) :
+                importer.npotScale == TextureImporterNPOTScale.ToSmaller ? Mathf.NextPowerOfTwo(v) / 2 : Mathf.ClosestPowerOfTwo(v);
+            return new Vector2Int(Scale(width), Scale(height));
+        }
+
+        // Import settings this optimization wrote and nobody changed since, or a copy it made.
+        private static bool Ours(TextureOptimizationRecord record, Texture2D texture, TextureImporter importer)
+        {
+            if (record.duplicates.Contains(texture)) return true;
+            string guid = AssetDatabase.AssetPathToGUID(importer.assetPath);
+            return record.textures.Any(t => t.applied && t.guid == guid && Same(t.after, Read(importer)));
+        }
+
+        // The body's and the face's textures, on every material of those meshes (the face often has a head mesh of its own):
+        // what people look at most keeps up to 2048 px.
         private static HashSet<Texture> BodyTextures(MyAvatar avatar, List<TextureSlot> slots)
         {
-            var body = Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(AvatarRoot(avatar).transform);
-            var result = new HashSet<Texture>();
-            if (body == null || body.sharedMesh == null) return result;
-            var mesh = body.sharedMesh;
-            int largest = Enumerable.Range(0, Mathf.Min(mesh.subMeshCount, body.sharedMaterials.Length)).OrderByDescending(i => mesh.GetSubMesh(i).indexCount).DefaultIfEmpty(-1).First();
-            if (largest < 0) return result;
-            var material = body.sharedMaterials[largest];
-            result.UnionWith(slots.Where(s => s.existing && s.material == material).Select(s => s.existing));
-            return result;
+            var root = AvatarRoot(avatar).transform;
+            var meshes = new HashSet<Renderer>(new Renderer[] { Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(root), FaceTracking.FaceTrackingDetection.Face(root) }.Where(r => r));
+            return new HashSet<Texture>(slots.Where(s => s.existing && s.parts.Any(p => meshes.Contains(p.renderer))).Select(s => s.existing));
+        }
+
+        // ---- The card's plan ----------------------------------------------------------------------------------
+
+        // Kept per avatar until its renderers, their materials or an imported asset change: redrawing the Inspector does not
+        // plan again. Alpha the plan still needs is measured one texture per editor frame.
+        private static readonly Dictionary<int, (string key, Plan plan)> Plans = new Dictionary<int, (string key, Plan plan)>();
+        private static readonly Queue<Texture2D> Unmeasured = new Queue<Texture2D>();
+        private static readonly List<Action> Waiting = new List<Action>();
+        private static int imports;
+
+        internal sealed class ImportWatcher : AssetPostprocessor
+        {
+            private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom) => imports++;
+        }
+
+        /// <summary>The plan the card offers, or null while alpha it needs is measured; <paramref name="ready"/> runs once it is.</summary>
+        internal static Plan Offer(MyAvatar avatar, Action ready)
+        {
+            string key = Key(avatar);
+            if (Plans.TryGetValue(avatar.GetInstanceID(), out var cached) && cached.key == key) return cached.plan;
+            var pending = new List<Texture2D>();
+            var plan = Build(avatar, pending);
+            if (plan != null) { Plans[avatar.GetInstanceID()] = (key, plan); return plan; }
+            foreach (var texture in pending) if (!Unmeasured.Contains(texture)) Unmeasured.Enqueue(texture);
+            if (ready != null && !Waiting.Contains(ready)) Waiting.Add(ready);
+            EditorApplication.update -= MeasureNext; EditorApplication.update += MeasureNext;
+            return null;
+        }
+
+        private static void MeasureNext()
+        {
+            if (Unmeasured.Count > 0)
+            {
+                var texture = Unmeasured.Dequeue();
+                alphaCache ??= LibraryStore.Read<Dictionary<string, bool>>(AlphaCacheFile);
+                if (texture) alphaCache[texture.imageContentsHash.ToString()] = TextureAnalysis.UsesAlpha(texture);
+                if (Unmeasured.Count > 0) return;
+                SaveAlpha();
+            }
+            EditorApplication.update -= MeasureNext;
+            var ready = Waiting.ToArray(); Waiting.Clear();
+            foreach (var callback in ready)
+                try { callback(); } catch (Exception ex) { Debug.LogException(ex); }
+        }
+
+        private static string Key(MyAvatar avatar)
+        {
+            var key = new System.Text.StringBuilder().Append(imports);
+            foreach (var renderer in AvatarRoot(avatar).GetComponentsInChildren<Renderer>(true))
+            {
+                key.Append('|').Append(renderer.GetInstanceID());
+                if (renderer is SkinnedMeshRenderer skinned && skinned.sharedMesh) key.Append('#').Append(skinned.sharedMesh.GetInstanceID());
+                foreach (var material in renderer.sharedMaterials)
+                    key.Append(',').Append(material ? material.GetInstanceID() + "." + EditorUtility.GetDirtyCount(material) : "-");
+            }
+            return key.ToString();
         }
 
         // Memory in the PC build: an explicit PC format decides it, whatever the editor currently holds.
@@ -336,10 +438,10 @@ namespace Orbiters.MyAvatar.Editor
                     {
                         // Listed before writing: a write that fails half-way is put back too.
                         written.Add((change, importer, Read(importer)));
-                        WriteSettings(importer, Target(change.format, change.maxSize));
+                        WriteSettings(importer, Target(change.format, change.maxSize, change.quality));
                     }
                     foreach (var change in plan.changes.Where(c => c.duplicate))
-                        WriteSettings((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(duplicates[change.texture])), Target(change.format, change.maxSize));
+                        WriteSettings((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(duplicates[change.texture])), Target(change.format, change.maxSize, change.quality));
                 }
                 finally { AssetDatabase.StopAssetEditing(); }
             }
@@ -384,6 +486,7 @@ namespace Orbiters.MyAvatar.Editor
             record.bytesAfter = plan.after;
             TextureChanges.Dirty(avatar);
             Undo.CollapseUndoOperations(group);
+            Plans.Clear();
         }
 
         // Puts import settings back after a failed optimization; one that cannot be restored is reported and the rest go on.
@@ -401,12 +504,14 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Copies the files with their import settings under a new GUID, imported together; the originals stay untouched.
-        private static Dictionary<Texture, Texture2D> Duplicate(List<TexturePlan> changes, string folder)
+        internal static Dictionary<Texture, Texture2D> Duplicate(List<TexturePlan> changes, string folder)
         {
             var result = new Dictionary<Texture, Texture2D>();
             if (changes.Count == 0) return result;
             TextureImport.EnsureFolder(folder + "/Textures");
             var paths = new Dictionary<TexturePlan, string>();
+            // Names differing only in case are one file on Windows and macOS.
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             AssetDatabase.StartAssetEditing();
             try
             {
@@ -414,7 +519,7 @@ namespace Orbiters.MyAvatar.Editor
                 {
                     string name = Path.GetFileNameWithoutExtension(change.path), extension = Path.GetExtension(change.path);
                     string destination = folder + "/Textures/" + name + extension;
-                    for (int i = 1; paths.ContainsValue(destination); i++) destination = folder + "/Textures/" + name + " " + i + extension;
+                    for (int i = 1; !used.Add(destination); i++) destination = folder + "/Textures/" + name + " " + i + extension;
                     string source = FileUtil.GetPhysicalPath(change.path);
                     File.Copy(source, destination);
                     File.WriteAllText(destination + ".meta", Regex.Replace(File.ReadAllText(source + ".meta"), @"(?m)^guid: [0-9a-f]{32}", "guid: " + GUID.Generate()));
@@ -481,6 +586,7 @@ namespace Orbiters.MyAvatar.Editor
             TextureChanges.Dirty(avatar);
             int keptImporters = Reconcile(record.textures);
             Undo.CollapseUndoOperations(group);
+            Plans.Clear();
             var kept = new List<string>();
             if (keptSlots > 0) kept.Add($"{keptSlots} material slot{(keptSlots == 1 ? "" : "s")}");
             if (keptImporters > 0) kept.Add($"{keptImporters} texture import setting{(keptImporters == 1 ? "" : "s")}");

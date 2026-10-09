@@ -36,6 +36,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public List<string> accepted = new List<string>();
         /// <summary>A step changing the project started: after a reload or restart it is checked, never run twice blindly.</summary>
         public bool importing, installingDependencies, cancelRequested;
+        /// <summary>Unity's import of the package finished (<see cref="importGuids"/> only says what it would import).</summary>
+        public bool imported;
         public string packagePath, importPath;
         public List<string> importGuids = new List<string>();
         public List<GalleryFile> preexisting = new List<GalleryFile>();

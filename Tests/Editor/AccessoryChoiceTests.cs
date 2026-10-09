@@ -2,9 +2,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -93,6 +96,58 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(Installed(avatar).Select(a => a.name), Is.EquivalentTo(new[] { "Body Tentacles", "Extra Tentacles" }));
             Assert.That(AccessoryService.PendingOptions(avatar, out _), Is.Empty);
             Assert.That(avatar.accessoryStatus, Does.Not.Contain("left out"));
+        }
+
+        // A waiting choice keeps only what it needs in the scene. "Add both" is one Undo step; an item that fails while being
+        // put on is taken back alone (its copy destroyed, said in a note) and the other stays.
+        [UnityTest] public IEnumerator ADropIsOneUndoStepAndAFailingItemIsTakenBackAlone()
+        {
+            var avatar = Avatar();
+            Prefab("Body Tentacles"); Prefab("Extra Tentacles");
+            yield return Wait(AccessoryService.DropAsync(avatar, new[] { folder }, (_, __) => { }, CancellationToken.None));
+            var pending = JsonUtility.FromJson<AccessoryService.Job>(avatar.accessoryChoice);
+            Assert.That(pending.guids, Is.Empty, "No GUID list in the scene.");
+            Assert.That(pending.imports, Is.Empty);
+            Assert.That(pending.drop.assets.Count, Is.EqualTo(2));
+
+            var hooks = (List<Action<GameObject, Transform>>)typeof(AttachmentHooks).GetField("Hooks", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+            Action<GameObject, Transform> fail = (placed, _) => { if (placed.name == "Extra Tentacles") throw new InvalidOperationException("Fixture failure."); };
+            AttachmentHooks.Register(fail);
+            try
+            {
+                LogAssert.Expect(LogType.Exception, new Regex("Fixture failure"));
+                yield return Wait(AccessoryService.ChooseAsync(avatar, AccessoryService.AllOptions, (_, __) => { }, CancellationToken.None));
+            }
+            finally { hooks.Remove(fail); }
+            Assert.That(Installed(avatar).Select(a => a.name), Is.EqualTo(new[] { "Body Tentacles" }));
+            Assert.That(avatar.transform.childCount, Is.EqualTo(1), "The failed copy was taken back.");
+            Assert.That(avatar.accessoryNotes.Any(n => n.warning && n.text.StartsWith("Extra Tentacles could not be put on", StringComparison.Ordinal)), Is.True);
+            Undo.PerformUndo();
+            Assert.That(avatar.transform.childCount, Is.Zero, "One Undo takes the drop back.");
+        }
+
+        // Notes about an accessory (or an object of it) go once it is gone, removed or undone; notes about nothing on the
+        // avatar stay.
+        [Test] public void NotesOfAGoneAccessoryLeaveWithIt()
+        {
+            var avatar = Avatar();
+            var hat = new GameObject("Hat"); hat.transform.SetParent(avatar.transform, false);
+            var attachment = hat.AddComponent<OrbitersAttachment>();
+            var brim = new GameObject("Brim"); brim.transform.SetParent(hat.transform, false);
+            avatar.accessoryNotes.Add(new MyAvatar.AccessoryNote { accessory = attachment, text = "Install VRCFury.", vrcFury = true });
+            avatar.accessoryNotes.Add(new MyAvatar.AccessoryNote { target = brim, text = "Set up the brim by hand.", warning = true });
+            avatar.accessoryNotes.Add(new MyAvatar.AccessoryNote { text = "A refused file" });
+            UnityEngine.Object.DestroyImmediate(hat);
+            var section = new AccessoriesSection(avatar, new AccessoriesSection.Host
+            {
+                Run = work => work(), AiOn = () => false, SetAi = _ => { }, ApplyTextures = (_, __) => Task.CompletedTask, Background = _ => { },
+            });
+            try
+            {
+                typeof(AccessoriesSection).GetMethod("RefreshNotes", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(section, null);
+                Assert.That(avatar.accessoryNotes.Select(n => n.text), Is.EqualTo(new[] { "A refused file" }));
+            }
+            finally { section.Detach(); }
         }
 
         // The prefab put on by hand earlier is taken over: one copy, managed (Remove can take it off), not a second one.

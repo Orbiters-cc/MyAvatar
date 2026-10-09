@@ -20,6 +20,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private Button takeButton, sheetButton;
         private GalleryCard listingCard;
         private VisualElement picturesStrip, picturesStep, cardPlaceholder;
+        private Label picturesLimit;
         private Texture livePicture;
 
         // ---- 4. Pictures ----
@@ -53,6 +54,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             GalleryUI.Text("Its picture goes here", "creator-pictures__placeholder-text", cardPlaceholder).pickingMode = PickingMode.Ignore;
             var side = GalleryUI.Box("creator-pictures__side", row);
             picturesStrip = GalleryUI.Box("creator-pictures__strip", side);
+            picturesLimit = GalleryUI.Text("", "creator-report__line creator-report__line--error", side);
             var actions = GalleryUI.Box("creator-actions creator-pictures__actions", side);
             takeButton = sheetButton = null;
             if (avatar)
@@ -91,8 +93,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 IncludeBanner = false,
                 ThumbnailSize = PictureSize,
                 ThumbnailLabel = "Picture",
-                CanGenerate = () => !publishing,
-                InputBlocked = () => publishing,
+                CanGenerate = () => GalleryPublisher.Running == null,
+                InputBlocked = () => GalleryPublisher.Running != null,
                 // Every capture adds a picture; the panel keeps following the live camera.
                 GetShot = _ => null,
                 SetShot = (_, image) => AddPicture(image, false),
@@ -156,8 +158,15 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private void AddPicturePath(string path, bool pageOnly)
         {
-            // The first picture goes on the card; the next ones and every ref sheet open on the asset page.
+            // The first picture goes on the card; the next ones and every ref sheet open on the asset page, up to what
+            // the gallery takes: one more is refused (and its copy removed) instead of being left out when publishing.
             if (!pageOnly && !HasCardPicture()) draft.thumbnailPath = path;
+            else if (draft.previewPaths.Count >= GalleryCreatorDraft.MaxPreviews)
+            {
+                GalleryPictures.Delete(path);
+                Message($"The asset's page takes {GalleryCreatorDraft.MaxPreviews} pictures besides the card's: remove one to add another.", true);
+                return;
+            }
             else draft.previewPaths.Add(path);
             draft.picturesSent = false;
             draft.Save();
@@ -241,6 +250,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 if (avatar) GalleryUI.Clickable(empty, () => { if (!studioOpen) OpenStudio(false); }, "creator-picture--pressed");
             }
             ShowCardPicture();
+            // More than the gallery takes (set through the MCP tool): publishing waits until some are removed.
+            int extra = draft.previewPaths.Count - GalleryCreatorDraft.MaxPreviews;
+            picturesLimit.text = extra > 0 ? $"The asset's page takes {GalleryCreatorDraft.MaxPreviews} pictures besides the card's: remove {extra} to publish." : "";
+            picturesLimit.style.display = extra > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+            publishButton?.SetEnabled(CanPublish());
             var summary = picturesStep?.Q<Label>(className: "creator-step__summary");
             if (summary != null) summary.text = PicturesSummary();
             picturesStep?.EnableInClassList("creator-step--done", HasCardPicture());

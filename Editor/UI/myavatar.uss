@@ -236,3 +236,8 @@
 
 /* Gallery assets in "On this avatar" */
 .accessory-item__gallery { margin: 0 0 0 6px; padding: 1px 7px; border-radius: 9px; font-size: 10px; -unity-font-style: bold; color: #b9b1ff; background-color: rgba(138, 125, 255, 0.14); flex-shrink: 0; }
+/* A newer gallery version: the pill turns green like the Update button beside it. */
+.accessory-item__gallery--update { color: #5cf0a2; background-color: rgba(0, 218, 109, 0.14); }
+.accessory-button.accessory-button--update { background-color: #00DA6D; color: #06140c; -unity-font-style: bold; border-width: 0; }
+.accessory-button.accessory-button--update:hover { background-color: #19e27d; }
+.accessory-button.accessory-button--update:disabled { background-color: rgba(0, 218, 109, 0.35); color: #06140c; }

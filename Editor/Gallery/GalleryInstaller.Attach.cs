@@ -62,15 +62,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             {
                 // A reload or restart interrupted the wait: the files decide whether the import happened.
                 job.importing = false;
-                if (job.importGuids.All(g => !string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(g)))) { Move(job, GalleryJob.Attach, "Adding it to the avatar…", 0.85f); return; }
+                if (job.importGuids.All(g => !string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(g)))) { job.imported = true; Move(job, GalleryJob.Attach, "Adding it to the avatar…", 0.85f); return; }
             }
             if (string.IsNullOrEmpty(job.importPath) || !System.IO.File.Exists(job.importPath)) { Move(job, GalleryJob.Preview, "Checking your project…", 0.5f); return; }
-            if (job.importGuids.Count == 0) { Move(job, GalleryJob.Attach, "Adding it to the avatar…", 0.85f); return; }
+            if (job.importGuids.Count == 0) { job.imported = true; Move(job, GalleryJob.Attach, "Adding it to the avatar…", 0.85f); return; }
             job.status = "Importing " + job.assetName + "…"; job.progress = 0.6f;
             GalleryJournal.Save(job);
             // Cancelling now only stops the job once Unity's importer has finished.
             await UnityPackageImport.ImportAsync(job.importPath, CancellationToken.None, () => { job.importing = true; GalleryJournal.Save(job); });
             job.importing = false;
+            job.imported = true;
             while (EditorApplication.isCompiling || EditorApplication.isUpdating) await Task.Delay(150);
             if (job.cancelRequested) { Finish(job, GalleryJob.Cancelled, CancelledText(job)); return; }
             Move(job, GalleryJob.Attach, "Adding it to the avatar…", 0.85f);
@@ -86,7 +87,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var setup = job.manifest.Setup(job.setupKey);
             var prefabs = setup.prefabs.Select(p => (item: p, asset: AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(p.guid)))).ToList();
             var missing = prefabs.Where(p => p.asset == null).Select(p => p.item.name).ToList();
-            if (missing.Count > 0) { Fail(job, $"Unity did not import {string.Join(", ", missing)}. Its files are in the project; Retry adds it again, Cleanup removes them."); return; }
+            if (missing.Count > 0)
+            {
+                // Retry imports the package again instead of looking for the same files once more.
+                job.imported = false;
+                Fail(job, $"Unity did not import {string.Join(", ", missing)}. Retry imports it again; Cleanup removes the files it brought.");
+                return;
+            }
 
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();

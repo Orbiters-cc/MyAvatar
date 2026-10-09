@@ -82,25 +82,11 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         // parameters already in the avatar's menu parameters or FX controller.
         private static string ExistingSetup(Transform root, MyAvatarFaceTracking ours, out GameObject found)
         {
-            found = null;
-            foreach (var transform in root.GetComponentsInChildren<Transform>(true))
-            {
-                if (ours != null && transform.IsChildOf(ours.transform)) continue;
-                string source = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(transform.gameObject);
-                if (IsTemplateAsset(source) && PrefabUtility.GetNearestPrefabInstanceRoot(transform.gameObject) == transform.gameObject)
-                { found = transform.gameObject; return "Adjerry91’s template “" + transform.name + "”"; }
-            }
-            foreach (var component in root.GetComponentsInChildren<MonoBehaviour>(true))
-            {
-                if (component == null || (ours != null && component.transform.IsChildOf(ours.transform))) continue;
-                string space = component.GetType().Namespace ?? "";
-                if (!space.StartsWith("VF.", StringComparison.Ordinal) && !space.StartsWith("nadena.dev", StringComparison.Ordinal)) continue;
-                var property = new SerializedObject(component).GetIterator();
-                while (property.Next(true))
-                    if (property.propertyType == SerializedPropertyType.ObjectReference && property.objectReferenceValue != null &&
-                        IsTemplateAsset(AssetDatabase.GetAssetPath(property.objectReferenceValue)))
-                    { found = component.gameObject; return "a face tracking template on “" + component.name + "”"; }
-            }
+            var skip = ours != null ? ours.transform : null;
+            found = PackageUse.Prefab(root, IsTemplateAsset, skip);
+            if (found != null) return "Adjerry91’s template “" + found.name + "”";
+            var component = PackageUse.Component(root, IsTemplateAsset, skip);
+            if (component != null) { found = component.gameObject; return "a face tracking template on “" + component.name + "”"; }
             var descriptor = root.GetComponent<VRCAvatarDescriptor>();
             if (descriptor == null) return null;
             if (descriptor.expressionParameters != null && descriptor.expressionParameters.parameters != null &&

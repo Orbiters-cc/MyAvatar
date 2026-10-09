@@ -119,16 +119,20 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         internal static Task<object> SetPreferredStoreAsync(string provider) => Send<object>(Url("creator/preferred-store"), new { provider }, HttpMethod.Put);
 
+        // A version is always named with its asset: Orbiters refuses one of another asset.
+        private static string Release(int assetId, int releaseId) => $"creator/assets/{assetId}/versions/{releaseId}";
+
+        /// <summary>A new draft version, or the creator's draft of that version when an earlier answer was lost (resume).</summary>
         internal static Task<Created> CreateReleaseAsync(int assetId, string version, string title, string changelog, string scope) =>
-            Send<Created>(Url($"creator/assets/{assetId}/versions"), new { version, title, changelog, scope });
+            Send<Created>(Url($"creator/assets/{assetId}/versions"), new { version, title, changelog, scope, resume = true });
 
-        internal static Task<Created> UpdateReleaseAsync(int releaseId, object changes) => Send<Created>(Url($"creator/versions/{releaseId}"), changes, HttpMethod.Put);
+        internal static Task<Created> UpdateReleaseAsync(int assetId, int releaseId, object changes) => Send<Created>(Url(Release(assetId, releaseId)), changes, HttpMethod.Put);
 
-        internal static Task<object> DeleteReleaseAsync(int releaseId) => Send<object>(Url($"creator/versions/{releaseId}"), null, HttpMethod.Delete);
+        internal static Task<object> DeleteReleaseAsync(int assetId, int releaseId) => Send<object>(Url(Release(assetId, releaseId)), null, HttpMethod.Delete);
 
-        internal static async Task<GalleryVariant> UploadVariantAsync(int releaseId, object metadata, string packagePath, OrbitersTransfer.Progress progress, CancellationToken cancellation)
+        internal static async Task<GalleryVariant> UploadVariantAsync(int assetId, int releaseId, object metadata, string packagePath, OrbitersTransfer.Progress progress, CancellationToken cancellation)
         {
-            var result = await OrbitersTransfer.UploadMultipartAsync(Url($"creator/versions/{releaseId}/variants"), Token, new[]
+            var result = await OrbitersTransfer.UploadMultipartAsync(Url(Release(assetId, releaseId) + "/variants"), Token, new[]
             {
                 OrbitersTransfer.Part.Field("metadata", JsonConvert.SerializeObject(metadata)),
                 OrbitersTransfer.Part.File("packageFile", packagePath, System.IO.Path.GetFileName(packagePath), "application/octet-stream"),
@@ -136,12 +140,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return Answer<GalleryVariant>(result);
         }
 
-        internal static Task<object> DeleteVariantAsync(int variantId) => Send<object>(Url($"creator/variants/{variantId}"), null, HttpMethod.Delete);
+        internal static Task<object> DeleteVariantAsync(int assetId, int releaseId, int variantId) =>
+            Send<object>(Url(Release(assetId, releaseId) + $"/variants/{variantId}"), null, HttpMethod.Delete);
 
-        internal static Task<Created> PublishReleaseAsync(int releaseId, bool publishListing) =>
-            Send<Created>(Url($"creator/versions/{releaseId}/publish"), new { rightsConfirmed = true, publishListing });
+        /// <summary>Publishes the version with exactly these packages: its others (renamed or removed since) are deleted first.</summary>
+        internal static Task<Created> PublishReleaseAsync(int assetId, int releaseId, bool publishListing, IReadOnlyCollection<int> variantIds) =>
+            Send<Created>(Url(Release(assetId, releaseId) + "/publish"), new { rightsConfirmed = true, publishListing, variantIds });
 
-        internal static Task<Created> WithdrawReleaseAsync(int releaseId) => Send<Created>(Url($"creator/versions/{releaseId}/withdraw"), new { });
+        internal static Task<Created> WithdrawReleaseAsync(int assetId, int releaseId) => Send<Created>(Url(Release(assetId, releaseId) + "/withdraw"), new { });
 
         internal static Task<StoreProducts> StoreProductsAsync(string provider, string query, CancellationToken cancellation) =>
             OrbitersApi.SendAsync<StoreProducts>(OrbitersEnvironment.ApiUrl($"creator-tools/store-products?provider={provider}&q={Uri.EscapeDataString(query ?? "")}"), Token, null, cancellation, null, Failure);

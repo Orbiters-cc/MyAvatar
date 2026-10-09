@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -41,6 +42,73 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.Null(entry.material);
             StringAssert.Contains("about as likely", entry.reason);
         }
+
+        // Names in scripts without spaces: one ideograph is a word, and a name containing it or sharing it still matches.
+        [Test] public void NonLatinNamesMatchTheirMaterial()
+        {
+            var avatar = Avatar(("体", "Skin_A"), ("髪の毛", "Strands_B"), ("目", "Iris_C"));
+            var body = new TextureEntry { texture = Own(new Texture2D(4, 4) { name = "体_BaseColor" }), fileName = "体_BaseColor.png", role = "color" };
+            var bangs = new TextureEntry { texture = Own(new Texture2D(4, 4) { name = "前髪_BaseColor" }), fileName = "前髪_BaseColor.png", role = "color" };
+            TextureMatching.Match(new List<TextureEntry> { body, bangs }, TextureMatching.Slots(avatar), new Dictionary<Texture2D, TextureStats>(), new Dictionary<string, List<TextureMemory.Slot>>());
+            Assert.AreEqual("体", body.material ? body.material.name : null, body.reason);
+            Assert.AreEqual("髪の毛", bangs.material ? bangs.material.name : null, bangs.reason);
+            CollectionAssert.AreEqual(new[] { "髪", "base", "color" }, TextureMatching.Tokens("髪_BaseColor", stem: false));
+            CollectionAssert.AreEqual(new[] { "cheveux", "été" }, TextureMatching.Tokens("Cheveux_été", stem: false));
+        }
+
+        // Poiyomi declares over a hundred texture slots per material: a large avatar still matches locally, and the AI request
+        // carries the slots of the materials the drop is about first, at most the server's limit.
+        [Test] public void LargeAvatarsMatchLocallyAndSendTheMostRelevantSlots()
+        {
+            var parts = Enumerable.Range(0, 100).Select(i => (Code(i), Code(i) + "_Albedo")).ToArray();
+            var avatar = Avatar(parts);
+            var slots = TextureMatching.Slots(avatar);
+            var target = TextureEntry(Code(95) + "_BaseColor.png", "color");
+            var unmatched = TextureEntry("Unrelated_Normal.png", "normal");
+            var entries = new List<TextureEntry> { target, unmatched };
+            TextureMatching.Match(entries, slots, new Dictionary<Texture2D, TextureStats>(), new Dictionary<string, List<TextureMemory.Slot>>());
+            Assert.AreEqual(Code(95), target.material ? target.material.name : null, target.reason);
+            var open = slots.Where(s => !s.secondary && !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
+            Assert.Greater(open.Count, TextureAi.MaxSlots);
+            var sent = TextureAi.Relevant(open, entries);
+            Assert.AreEqual(TextureAi.MaxSlots, sent.Count);
+            Assert.That(open.Where(s => s.material == target.material), Is.SubsetOf(sent));
+            CollectionAssert.AreEqual(open.Where(sent.Contains), sent, "slots keep the avatar's order");
+        }
+
+        // IDs are positions in the request, so an accessory's slots far down a large avatar are "s0", "s1"... and answers map back.
+        [Test] public void AiRequestNumbersSlotsWithinItself()
+        {
+            var parts = Enumerable.Range(0, 100).Select(i => (Code(i), Code(i) + "_Albedo")).ToArray();
+            var slots = TextureMatching.Slots(Avatar(parts));
+            var sent = slots.Where(s => s.materialName == Code(99)).ToList();
+            var entry = TextureEntry("Thing.png", "unknown");
+            var local = sent.First(s => s.property == "_MainTex");
+            var placed = TextureEntry("Placed.png", "color"); placed.material = local.material; placed.property = local.property;
+            object payload = TextureAi.Payload(new List<TextureEntry> { entry, placed }, sent, new Dictionary<Texture2D, TextureStats>());
+            var ids = ((System.Collections.IEnumerable)Get(payload, "slots")).Cast<object>().Select(s => (string)Get(s, "id")).ToList();
+            CollectionAssert.AreEqual(Enumerable.Range(0, sent.Count).Select(i => "s" + i), ids);
+            var textures = ((System.Collections.IEnumerable)Get(payload, "textures")).Cast<object>().ToList();
+            Assert.AreEqual("s" + sent.IndexOf(local), Get(textures[1], "localSlotId"));
+            Assert.IsNull(Get(textures[0], "localSlotId"));
+
+            int occlusion = sent.FindIndex(s => s.property == "_OcclusionMap");
+            var plan = new TextureAi.Plan { assignments = new[] {
+                new TextureAi.Assignment { textureId = "t0", slotId = "s" + occlusion, confidence = .95f, reason = "fixture" },
+                new TextureAi.Assignment { textureId = "t0", slotId = "s" + sent.Count, confidence = .99f, reason = "outside the request" },
+                new TextureAi.Assignment { textureId = "t0", slotId = "x1", confidence = .99f, reason = "malformed" },
+            } };
+            var change = TextureAi.Accept(plan, new List<TextureEntry> { entry }, sent).changes.Single();
+            Assert.AreSame(sent[occlusion], change.slot);
+        }
+
+        private static object Get(object value, string name) => value.GetType().GetProperty(name).GetValue(value);
+
+        // Distinct three-letter names ("baa", "bab"...): no name is a prefix of another.
+        private static string Code(int i) => "B" + (char)('a' + i / 26) + (char)('a' + i % 26);
+
+        private TextureEntry TextureEntry(string fileName, string role) =>
+            new TextureEntry { texture = Own(new Texture2D(4, 4) { name = System.IO.Path.GetFileNameWithoutExtension(fileName) }), fileName = fileName, role = role };
 
         private T Own<T>(T value) where T : Object { owned.Add(value); return value; }
 

@@ -23,7 +23,7 @@ namespace Orbiters.MyAvatar.Editor
     /// <summary>
     /// The avatar's materials: those on Unity's Standard shader move to VRChat's Toon Standard, which VRChat recommends for
     /// avatars, and open surfaces seen from behind (a tail of fur cards, feathers) show both sides. Changes are made on
-    /// copies in My Avatar's folder (its own copies are changed in place), assigned with one Undo step.
+    /// copies in My Avatar's folder, its own materials included (a duplicated avatar shares them), assigned with one Undo step.
     /// </summary>
     internal static class AvatarMaterials
     {
@@ -85,40 +85,56 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var entry in list)
             {
                 var source = entry.Material;
-                bool own = AssetDatabase.GetAssetPath(source).StartsWith("Assets/Orbiters/MyAvatar/", StringComparison.Ordinal);
                 Material result;
                 if (entry.Standard)
                 {
                     result = MaterialRepair.CreateToon(source, Folder + "/SurfaceMaps");
                     if (entry.HiddenBack) MaterialSides.ShowBackFaces(result);
                     AssetDatabase.CreateAsset(result, AssetDatabase.GenerateUniqueAssetPath(Folder + "/" + FileName(source.name) + " Toon.mat"));
-                    replacements.Add(source, result);
-                }
-                else if (own)
-                {
-                    Undo.RecordObject(source, "Show both sides");
-                    MaterialSides.ShowBackFaces(source);
-                    EditorUtility.SetDirty(source);
                 }
                 else
                 {
                     result = new Material(source);
                     MaterialSides.ShowBackFaces(result);
                     AssetDatabase.CreateAsset(result, AssetDatabase.GenerateUniqueAssetPath(Folder + "/" + FileName(source.name) + " Both Sides.mat"));
-                    replacements.Add(source, result);
                 }
+                replacements.Add(source, result);
             }
             var renderers = list.SelectMany(a => a.Renderers).Where(r => r).Distinct().ToArray();
-            Undo.RecordObjects(renderers.Cast<UnityEngine.Object>().ToArray(), "Fix materials");
+            Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(renderers).ToArray(), "Fix materials");
             foreach (var renderer in renderers)
             {
                 renderer.sharedMaterials = renderer.sharedMaterials.Select(m => m && replacements.TryGetValue(m, out var copy) ? copy : m).ToArray();
                 PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             }
-            EditorSceneManager.MarkSceneDirty(avatar.gameObject.scene);
+            Follow(avatar, renderers, replacements);
+            TextureChanges.Dirty(avatar);
             Undo.CollapseUndoOperations(group);
             SceneView.RepaintAll();
             return list.Count;
+        }
+
+        // The texture set's Undo and Redo follow the copies: its snapshot of what the renderers show, and its images' slots,
+        // name the copy. A slot the set left as it was keeps both its states on the copy.
+        private static void Follow(MyAvatar avatar, IList<Renderer> renderers, Dictionary<Material, Material> replacements)
+        {
+            foreach (var snapshot in avatar.undoMaterials.Where(s => s.renderer && renderers.Contains(s.renderer) && s.before != null && s.after != null))
+            {
+                var shown = (avatar.canRedo ? snapshot.before : snapshot.after).ToArray();
+                var other = (avatar.canRedo ? snapshot.after : snapshot.before).ToArray();
+                for (int i = 0; i < shown.Length; i++)
+                {
+                    if (!shown[i] || !replacements.TryGetValue(shown[i], out var copy)) continue;
+                    if (i < other.Length && other[i] == shown[i]) other[i] = copy;
+                    shown[i] = copy;
+                }
+                if (avatar.canRedo) { snapshot.before = shown; snapshot.after = other; } else { snapshot.after = shown; snapshot.before = other; }
+            }
+            foreach (var entry in avatar.textures)
+            {
+                if (entry.material && replacements.TryGetValue(entry.material, out var copy)) entry.material = copy;
+                if (entry.materialBeforeLast && replacements.TryGetValue(entry.materialBeforeLast, out copy)) entry.materialBeforeLast = copy;
+            }
         }
 
         private static string FileName(string name) => string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));

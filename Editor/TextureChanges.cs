@@ -90,6 +90,8 @@ namespace Orbiters.MyAvatar.Editor
             if (applicable.GroupBy(e => (e.material, e.property)).Any(g => g.Count() > 1 && !MaterialSurfaceMaps.CanCombine(g.Key.property, g.Select(e => e.role).ToArray())))
                 throw new InvalidOperationException("Choose only one texture for each material slot.");
             TextureImport.EnsureFolder(folder + "/Materials");
+            // An image the material already shows in that slot (an accessory creator's setup) keeps its import.
+            var shownAlready = applicable.Where(e => TextureOf(e.material, e.property) == e.texture).ToList();
             var replacements = new Dictionary<Material, Material>();
             var reused = applicable.Select(e => e.material).Where(reusable.Contains).Distinct().ToArray();
             var snapshots = avatar.undoMaterials.Where(_ => extend).Select(s => new RendererSnapshot { renderer = s.renderer, before = s.before, after = s.after }).ToList();
@@ -115,6 +117,7 @@ namespace Orbiters.MyAvatar.Editor
                 Undo.SetCurrentGroupName("My Avatar: apply textures");
                 Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(renderers).Concat(reused).ToArray(), "My Avatar: apply textures");
                 foreach (var entry in applicable.Where(e => reusable.Contains(e.material))) Assign(entry.material, entry, folder);
+                Conform(applicable.Except(shownAlready).ToList(), e => replacements.TryGetValue(e.material, out var copy) ? copy : e.material, slots, entries, folder);
                 foreach (var renderer in renderers)
                 {
                     var current = renderer.sharedMaterials;
@@ -137,16 +140,21 @@ namespace Orbiters.MyAvatar.Editor
                         entry.reasonBeforeLast = entry.reason;
                     }
                     if (entry.material && replacements.TryGetValue(entry.material, out var replacement)) entry.material = replacement;
+                }
+                foreach (var entry in entries)
+                {
                     if (applicable.Contains(entry)) { entry.applied = true; entry.appliedTexture = entry.material.GetTexture(entry.property) as Texture2D; }
                     else if (entry.applied && entry.material && entry.material.GetTexture(entry.property) != (entry.appliedTexture ? entry.appliedTexture : entry.texture))
                     {
+                        // A packed slot holds one map per channel: a map put in its other channel regenerates it, this one stays.
+                        if (OtherChannel(entry, applicable)) { entry.appliedTexture = entry.material.GetTexture(entry.property) as Texture2D; continue; }
                         entry.applied = false; entry.material = null; entry.property = null;
                         entry.reason = "Another texture was chosen for this slot.";
                     }
                 }
                 avatar.textures = entries; avatar.batchFolder = folder; avatar.batchScope = scope;
                 Dirty(avatar);
-                foreach (var material in reused) AssetDatabase.SaveAssetIfDirty(material);
+                foreach (var material in reused.Concat(created.Select(c => c.copy))) AssetDatabase.SaveAssetIfDirty(material);
                 Undo.CollapseUndoOperations(groupId);
                 return applicable.Count;
             }
@@ -157,6 +165,31 @@ namespace Orbiters.MyAvatar.Editor
                 // Keep generated files for recovery; never delete assets other objects may reference.
                 throw;
             }
+        }
+
+        // Each image a slot shows as it is gets the import that slot reads (a texture named without a role can land in a
+        // normal or data slot); packed and inverted maps are generated, already linear.
+        private static void Conform(List<TextureEntry> applied, Func<TextureEntry, Material> target, List<TextureSlot> slots, List<TextureEntry> entries, string folder)
+        {
+            var direct = applied.Where(e => TextureOf(target(e), e.property) == e.texture)
+                .Select(e => (entry: e, reading: TextureImport.Reading(slots.First(s => s.material == e.material && s.property == e.property).role))).ToList();
+            if (direct.Count == 0) return;
+            var images = TextureImport.ForSlots(direct.Select(d => (d.entry.texture, d.reading)), entries.Where(e => e.applied && e.texture).Select(e => e.texture).ToHashSet(), folder);
+            foreach (var (entry, reading) in direct)
+            {
+                if (!images.TryGetValue((entry.texture, reading), out var image) || image == entry.texture) continue;
+                var material = target(entry);
+                material.SetTexture(entry.property, image); EditorUtility.SetDirty(material);
+            }
+        }
+
+        // Every map just put in the entry's packed slot filled the other channel (metallic beside smoothness or roughness) and
+        // kept the rest; a packed file (metallic and smoothness at once) replaces both.
+        private static bool OtherChannel(TextureEntry entry, List<TextureEntry> applied)
+        {
+            var added = applied.Where(a => a.material == entry.material && a.property == entry.property).ToList();
+            return MaterialSurfaceMaps.PackedSlot(entry.property) && added.Count > 0 &&
+                added.All(a => MaterialSurfaceMaps.CanCombine(entry.property, new[] { entry.role, a.role }) && !MaterialSurfaceMaps.IsPackedFile(a.fileName));
         }
 
         // What the slots sent to AI show when it is asked, on each material and on the copy this batch made of it.

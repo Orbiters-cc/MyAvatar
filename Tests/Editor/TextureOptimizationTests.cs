@@ -70,6 +70,19 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.IsFalse(TextureOptimization.Same(original, drifted));
         }
 
+        // Crunch only shrinks the download: a crunched texture keeps crunch (DXT5 where BC7 or BC5 would go) and its quality.
+        [Test] public void CrunchedTexturesStayCrunched()
+        {
+            Assert.AreEqual(TextureImporterFormat.DXT1Crunched, TextureOptimization.Crunch(TextureImporterFormat.DXT1));
+            Assert.AreEqual(TextureImporterFormat.DXT5Crunched, TextureOptimization.Crunch(TextureImporterFormat.BC7));
+            Assert.AreEqual(TextureImporterFormat.DXT5Crunched, TextureOptimization.Crunch(TextureImporterFormat.BC5));
+            var target = TextureOptimization.Target(TextureImporterFormat.DXT1Crunched, 512, 50);
+            Assert.IsTrue(target.crunched);
+            Assert.AreEqual(50, target.quality);
+            Assert.AreEqual(4, TextureOptimization.BitsPerPixel(TextureOptimization.Runtime(TextureImporterFormat.DXT1Crunched)));
+            Assert.AreEqual(8, TextureOptimization.BitsPerPixel(TextureOptimization.Runtime(TextureImporterFormat.DXT5Crunched)));
+        }
+
         [Test] public void EmptyRecordIsNotApplied()
         {
             var record = new TextureOptimizationRecord();

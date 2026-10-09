@@ -49,28 +49,43 @@ namespace Orbiters.MyAvatar.Editor
             return result;
         }
 
-        // Whether any texel is less than fully opaque, read at full resolution in strips: a downsampled or thresholded sample
-        // averages small cut-outs and near-opaque alpha (smoothness, soft edges) away.
-        internal static bool UsesAlpha(Texture texture)
+        // Whether any texel is less than fully opaque, read back at 512 px at most. The image is halved one step at a time,
+        // each step averaging 2×2 texels, so every texel weighs in: a lone transparent texel of an 8K image or near-opaque
+        // alpha (smoothness, soft edges) still reads below 255, where a single sample or a threshold would lose it.
+        internal static bool UsesAlpha(Texture texture, int max = 512)
         {
-            int width = texture.width, height = texture.height, rows = Mathf.Clamp((1 << 22) / width, 1, height);
+            int width = texture.width, height = texture.height;
             var previous = RenderTexture.active;
-            var rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
-            var strip = new Texture2D(width, rows, TextureFormat.RGBA32, false, true);
+            Texture source = texture;
+            RenderTexture step = null;
+            Texture2D read = null;
             try
             {
-                Graphics.Blit(texture, rt);
-                RenderTexture.active = rt;
-                for (int y = 0; y < height; y += rows)
+                // A point-filtered image would sample one texel of four: it is copied once at full size first.
+                bool copy = texture.filterMode == FilterMode.Point && Mathf.Max(width, height) > max;
+                do
                 {
-                    int count = Mathf.Min(rows, height - y);
-                    strip.ReadPixels(new Rect(0, y, width, count), 0, 0, false);
-                    var pixels = strip.GetRawTextureData<Color32>();
-                    for (int i = 0, end = width * count; i < end; i++) if (pixels[i].a < 255) return true;
-                }
+                    if (!copy && Mathf.Max(width, height) > max) { width = Mathf.Max(1, (width + 1) / 2); height = Mathf.Max(1, (height + 1) / 2); }
+                    copy = false;
+                    var next = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+                    next.filterMode = FilterMode.Bilinear;
+                    Graphics.Blit(source, next);
+                    if (step) RenderTexture.ReleaseTemporary(step);
+                    source = step = next;
+                } while (Mathf.Max(width, height) > max);
+                RenderTexture.active = step;
+                read = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
+                read.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
+                var pixels = read.GetRawTextureData<Color32>();
+                for (int i = 0; i < pixels.Length; i++) if (pixels[i].a < 255) return true;
                 return false;
             }
-            finally { RenderTexture.active = previous; RenderTexture.ReleaseTemporary(rt); UnityEngine.Object.DestroyImmediate(strip); }
+            finally
+            {
+                RenderTexture.active = previous;
+                if (step) RenderTexture.ReleaseTemporary(step);
+                if (read) UnityEngine.Object.DestroyImmediate(read);
+            }
         }
 
         internal static TextureStats Compute(Color32[] pixels)

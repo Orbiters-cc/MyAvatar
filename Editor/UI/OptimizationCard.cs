@@ -28,7 +28,9 @@ namespace Orbiters.MyAvatar.Editor
             bool applied = TextureOptimization.Applied(record);
             // Offered once a drop placed an image that compression applies to, then as long as something is left to optimize.
             bool dropped = avatar.textures.Any(e => e.applied && e.texture && TextureOptimization.Compressible(e.texture, out _));
-            var plan = dropped ? TextureOptimization.Build(avatar) : null;
+            // Planned once per change of the avatar's materials or assets; while textures are still measured the card waits
+            // (or shows only the result) and is drawn again once they are.
+            var plan = dropped ? TextureOptimization.Offer(avatar, () => { if (root.panel != null) changed(); }) : null;
             // Once optimized, the offer waits for a new texture drop or an Undo: the result stays on screen as the answer.
             bool offer = plan != null && plan.changes.Count > 0 && (!applied || record.batch != avatar.batchFolder);
             if (!applied && !offer) return;
@@ -65,7 +67,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             string estimate = $"{Megabytes(before)} → {Megabytes(after)} texture memory (estimated VRAM on PC)";
             var text = new Label(applied ? estimate + (offer ? $" · {plan.changes.Count} more from the new textures" : "")
-                : $"Cap {plan.changes.Count} texture{(plan.changes.Count == 1 ? "" : "s")} (body {TextureOptimization.BodyMaxSize} px, the rest {TextureOptimization.MaxSize} px) and compress for PC · {estimate}");
+                : $"Cap {plan.changes.Count} texture{(plan.changes.Count == 1 ? "" : "s")} (body and face {TextureOptimization.BodyMaxSize} px, the rest {TextureOptimization.MaxSize} px) and compress for PC · {estimate}");
             text.AddToClassList("optimize-card__text"); texts.Add(text);
             text.tooltip = "Estimated from each texture's format, size and mipmaps, the way VRChat ranks texture memory. Download size is not estimated.";
 
@@ -80,8 +82,8 @@ namespace Orbiters.MyAvatar.Editor
             {
                 // The result replaces the offer in the same, still open card.
                 var button = MyAvatarEditor.Button("Optimize", () => { Folds[id] = (avatar.batchFolder, true); optimize(); });
-                button.tooltip = $"Cap the body's textures at {TextureOptimization.BodyMaxSize} px and every other texture on this avatar at {TextureOptimization.MaxSize} px, and compress them for PC: BC1 for opaque colour, BC7 when alpha is used, " +
-                    "BC5 for normal maps, with mipmaps and mipmap streaming on and crunch off. Ramps, lookup tables and HDR images are left alone.\n" +
+                button.tooltip = $"Cap the body's and face's textures at {TextureOptimization.BodyMaxSize} px and every other texture on this avatar at {TextureOptimization.MaxSize} px, and compress them for PC: BC1 for opaque colour, BC7 when alpha is used, " +
+                    "BC5 for normal maps, with mipmaps and mipmap streaming on. Crunched textures stay crunched. Ramps, lookup tables and HDR images are left alone.\n" +
                     "Textures also used by another avatar in the open scenes, or inside a package, are copied for this avatar first. Undo restores everything.";
                 button.AddToClassList("mcb-button--primary"); button.AddToClassList("optimize-card__button"); buttons.Add(button);
             }

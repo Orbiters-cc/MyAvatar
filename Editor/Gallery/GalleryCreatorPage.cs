@@ -43,10 +43,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             schedule.Execute(() => _ = LoadAsync());
             // The MCP tool edits the same draft: show its version.
             void Replaced() { if (publishing) return; draft = GalleryCreatorDraft.Load(); if (mine != null) Build(); }
-            RegisterCallback<AttachToPanelEvent>(_ => GalleryPublisher.DraftReplaced += Replaced);
+            // A build or publish starting or ending anywhere locks or unlocks the form; a published draft makes way for the next.
+            void Running() { if (draft.Over) draft = GalleryCreatorDraft.Load(); if (mine != null) Build(); }
+            RegisterCallback<AttachToPanelEvent>(_ => { GalleryPublisher.DraftReplaced += Replaced; GalleryPublisher.RunningChanged += Running; });
             RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 GalleryPublisher.DraftReplaced -= Replaced;
+                GalleryPublisher.RunningChanged -= Running;
                 CloseStudio();
                 photoshoot?.Dispose();
                 photoshoot = null;
@@ -90,6 +93,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             var step = GalleryUI.Box("creator-step", steps);
             step.EnableInClassList("creator-step--done", done);
+            // Nothing the running build or publish reads changes under it.
+            step.SetEnabled(number == 5 || GalleryPublisher.Running == null);
             var header = GalleryUI.Box("creator-step__header", step);
             GalleryUI.Text(done ? "✓" : number.ToString(), "creator-step__number", header);
             GalleryUI.Text(title, "creator-step__title", header);
@@ -118,7 +123,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var create = GalleryUI.Box("creator-asset", step);
             create.EnableInClassList("creator-asset--selected", draft.newAsset);
             GalleryUI.Text("+  New asset", "creator-asset__name", create);
-            GalleryUI.Clickable(create, () => { draft.newAsset = true; draft.assetId = 0; draft.releaseId = 0; Build(); }, "buy-store--pressed");
+            GalleryUI.Clickable(create, () => { draft.Target(0); Build(); }, "buy-store--pressed");
             if (draft.newAsset) NewAssetForm(step);
             else ExistingAssetOptions(step, linkable.FirstOrDefault(a => a.id == draft.assetId));
             Label("Preferred store", step);
@@ -141,16 +146,19 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private void ChooseAsset(CreatorAsset asset)
         {
-            draft.newAsset = false;
-            draft.assetId = asset.id;
+            draft.Target(asset.id);
             draft.name = asset.name;
             draft.type = asset.inGallery ? asset.type : draft.type;
             draft.listed = asset.listed;
-            draft.releaseId = asset.releases.FirstOrDefault(r => r.status == "draft")?.id ?? 0;
-            var latest = asset.releases.Where(r => r.status != "draft").Select(r => r.version).OrderByDescending(v => v, Comparer<string>.Create(GalleryUI.CompareVersions)).FirstOrDefault();
-            draft.version = asset.releases.FirstOrDefault(r => r.status == "draft")?.version ?? NextVersion(latest);
+            var open = asset.releases.FirstOrDefault(r => r.status == "draft");
+            draft.UseRelease(open?.id ?? 0);
+            draft.version = open?.version ?? NextVersion(LatestReleased(asset));
             Build();
         }
+
+        /// <summary>The asset's newest published or withdrawn version: a new one must come after it.</summary>
+        internal static string LatestReleased(CreatorAsset asset) => asset?.releases.Where(r => r.status != "draft").Select(r => r.version)
+            .OrderByDescending(v => v, Comparer<string>.Create(GalleryUI.CompareVersions)).FirstOrDefault();
 
         internal static string NextVersion(string latest)
         {
@@ -240,12 +248,23 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private void VersionStep(VisualElement step)
         {
             var row = GalleryUI.Box("creator-row creator-row--fields", step);
-            var version = Field(draft.version, value => draft.version = value);
+            // Orbiters refuses a number that doesn't come after the asset's released versions: said while typing.
+            string latest = draft.assetId > 0 ? LatestReleased(mine?.assets.FirstOrDefault(a => a.id == draft.assetId)) : null;
+            Label order = null;
+            void CheckOrder()
+            {
+                bool older = latest != null && !string.IsNullOrWhiteSpace(draft.version) && GalleryUI.CompareVersions(draft.version.Trim(), latest) <= 0;
+                order.text = older ? $"Use a number after {latest}, its latest released version: Orbiters refuses this one." : "";
+                order.style.display = older ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+            var version = Field(draft.version, value => { draft.version = value; CheckOrder(); });
             version.AddToClassList("creator-field--version");
             row.Add(version);
             var title = Field(draft.title, value => draft.title = value, placeholder: "Title (optional)");
             title.style.marginRight = 0;
             row.Add(title);
+            order = GalleryUI.Text("", "creator-report__line creator-report__line--warning", step);
+            CheckOrder();
             Label("What changed", step);
             step.Add(Field(draft.changelog, value => draft.changelog = value, multiline: true));
             Label("Who gets it", step);

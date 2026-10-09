@@ -129,6 +129,9 @@ namespace Orbiters.MyAvatar.Editor
             Refresh();
             // Images of the drop go to the accessories just added (or to the avatar when nothing was added).
             var images = outcomes.SelectMany(o => o.images ?? new List<string>()).Distinct().Where(File.Exists).ToArray();
+            // The material repair and the textures join the drop's Undo step: one Undo takes the whole drop back. A drop
+            // finished after a reload has none: what follows it later is its own step.
+            int group = outcomes.Select(o => o.undoGroup).FirstOrDefault(g => g > 0);
             try
             {
                 foreach (var outcome in outcomes.Where(o => o.attachment))
@@ -151,7 +154,11 @@ namespace Orbiters.MyAvatar.Editor
                     else await host.ApplyTextures(images, scope.Length > 0 ? scope : null);
                 }
             }
-            finally { foreach (var staging in outcomes.Select(o => o.staging).Distinct()) AccessoryService.Release(avatar, staging); }
+            finally
+            {
+                foreach (var staging in outcomes.Select(o => o.staging).Distinct()) AccessoryService.Release(avatar, staging);
+                if (group > 0) { Undo.CollapseUndoOperations(group); Undo.IncrementCurrentGroup(); }
+            }
             if (host.AiOn()) _ = AskAiAsync(outcomes.Where(o => o.attachment != null && o.plan != null).ToList(), revision);
             // Every drop asks again: on a custom base, does it fit?
             _ = CheckFitsAsync(outcomes.Where(o => o.attachment).Select(o => o.attachment).ToList(), dropped: true);
@@ -212,9 +219,15 @@ namespace Orbiters.MyAvatar.Editor
         private void Apply(AccessoryService.Outcome outcome, AccessoryAi.Result result)
         {
             var attachment = outcome.attachment;
+            // A late answer is its own Undo step: undoing it keeps the drop and whatever was done since.
+            Undo.IncrementCurrentGroup();
+            int group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("Orbiters AI: attach " + attachment.name);
             if (result.target != null && attachment.mode == OrbitersAttachment.AttachMode.Parent && outcome.plan.ParentGuessed)
                 AttachmentInstaller.Retarget(attachment, result.target, snap: false);
             if (result.links.Count > 0) AttachmentInstaller.Link(attachment, result.links);
+            Undo.CollapseUndoOperations(group);
+            Undo.IncrementCurrentGroup();
             AddNotes(result.setup.Select(s => new MyAvatar.AccessoryNote { target = s.target, accessory = attachment, text = s.reason, warning = true })
                 .Concat(result.warnings.Select(w => new MyAvatar.AccessoryNote { accessory = attachment, text = w })).ToArray());
             Refresh();
@@ -310,12 +323,17 @@ namespace Orbiters.MyAvatar.Editor
         {
             notes.Clear();
             var installed = AttachmentInstaller.Installed(avatar.transform);
-            // A fit question is about one accessory: once it is off the avatar (removed, undone), the question goes too.
-            if (avatar.accessoryNotes.RemoveAll(n => !string.IsNullOrEmpty(n.fit) && !(n.accessory is OrbitersAttachment a && installed.Contains(a))) > 0)
+            // A note about an accessory or an object on the avatar goes once that is gone (removed, undone), and a fit
+            // question once its accessory is no longer attached.
+            if (avatar.accessoryNotes.RemoveAll(n => Gone(n.accessory) || Gone(n.target) ||
+                    !string.IsNullOrEmpty(n.fit) && !(n.accessory is OrbitersAttachment a && installed.Contains(a))) > 0)
                 EditorUtility.SetDirty(avatar);
             foreach (var note in avatar.accessoryNotes.Where(n => !(n.accessory is OrbitersAttachment a && installed.Contains(a))))
                 AddNote(notes, note);
         }
+
+        // Bound to an object that was destroyed since; a note bound to nothing is not.
+        internal static bool Gone(UnityEngine.Object value) => !ReferenceEquals(value, null) && !value;
 
         private void AddNote(VisualElement parent, MyAvatar.AccessoryNote note)
         {
@@ -341,8 +359,16 @@ namespace Orbiters.MyAvatar.Editor
             {
                 row.Add(Small("Cancel", () =>
                 {
-                    AttachmentFit.Cancel(fitted);
-                    AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n != note).ToList());
+                    // Bones moved since the fit are the user's: asked about first, put back on a second Cancel.
+                    if (AttachmentFit.Cancel(fitted, force: note.warning))
+                        AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n != note).ToList());
+                    else
+                    {
+                        int moved = fitted.fitted.Count;
+                        note.warning = true;
+                        note.text = $"{fitted.DisplayName}: bones moved since the fit stay as they are ({moved}). Cancel again puts them back too.";
+                        AccessoryService.Status(avatar, avatar.accessoryStatus, true, avatar.accessoryNotes);
+                    }
                 }));
             }
         }
@@ -377,6 +403,7 @@ namespace Orbiters.MyAvatar.Editor
                     gallery.AddToClassList("accessory-item__gallery"); top.Add(gallery);
                 }
                 var spacer = new VisualElement(); spacer.AddToClassList("accessory-item__spacer"); top.Add(spacer);
+                if (attachment.gallery != null && attachment.gallery.Installed) GalleryUpdate(top, attachment);
                 string description = AccessoryService.Describe(attachment);
                 var how = new Label(description) { tooltip = description }; how.AddToClassList("accessory-item__how"); body.Add(how);
                 var item = attachment;

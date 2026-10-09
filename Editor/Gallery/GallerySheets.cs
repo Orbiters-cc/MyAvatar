@@ -130,7 +130,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     var release = (GalleryRelease)record;
                     if (release.status == "draft") header.Add(VersionTimeline.Chip("Draft", Color.gray));
                     if (release.status == "withdrawn") header.Add(VersionTimeline.Chip("Withdrawn", Color.gray));
-                    if (release.status == "published" && asset.access?.state == "creator") header.Add(WithdrawLink(release, withdrawn));
+                    if (release.status == "published" && asset.access?.state == "creator") header.Add(WithdrawLink(asset.id, release, withdrawn));
                 }, asset.releases.FindIndex(r => r.id == fit?.release?.id)));
             }
             GalleryUI.Box(null, body).style.height = 16;
@@ -138,7 +138,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         // Takes the creator's published version out of the gallery: the first press asks, the second withdraws.
         // Copies already installed keep working.
-        private static Button WithdrawLink(GalleryRelease release, Action withdrawn)
+        private static Button WithdrawLink(int assetId, GalleryRelease release, Action withdrawn)
         {
             Button link = null;
             bool armed = false;
@@ -151,7 +151,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     return;
                 }
                 link.SetEnabled(false); link.text = "Withdrawing…";
-                try { await GalleryApi.WithdrawReleaseAsync(release.id); withdrawn(); }
+                try { await GalleryApi.WithdrawReleaseAsync(assetId, release.id); withdrawn(); }
                 catch (Exception ex)
                 {
                     armed = false; link.SetEnabled(true); link.text = "Withdraw"; link.RemoveFromClassList("gallery-link--danger");

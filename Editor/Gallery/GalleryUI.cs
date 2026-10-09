@@ -71,7 +71,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         internal static string Size(long bytes) => Toolkit.Editor.Storage.ArchiveBudget.Format(bytes);
 
-        /// <summary>Compares "1.10.0" and "1.9.2" by their numbers; text after them breaks ties.</summary>
+        /// <summary>
+        /// Compares "1.10.0" and "1.9.2" by their numbers, like the server (semver): a pre-release ("1.0.0-beta") comes
+        /// before its release, pre-release texts break ties, and build text ("+…") does not count.
+        /// </summary>
         internal static int CompareVersions(string a, string b)
         {
             int[] Parts(string v) => (v ?? "").Split('-', '+')[0].Split('.').Select(p => int.TryParse(p, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : 0).ToArray();
@@ -81,7 +84,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 int x = i < left.Length ? left[i] : 0, y = i < right.Length ? right[i] : 0;
                 if (x != y) return x.CompareTo(y);
             }
-            return string.CompareOrdinal(a ?? "", b ?? "");
+            string Pre(string v) { string core = (v ?? "").Split('+')[0]; int dash = core.IndexOf('-'); return dash < 0 ? null : core.Substring(dash + 1); }
+            string preA = Pre(a), preB = Pre(b);
+            if ((preA == null) != (preB == null)) return preA == null ? 1 : -1;
+            return string.CompareOrdinal(preA ?? "", preB ?? "");
         }
 
         internal enum State { Add, Buy, Installed, Update, Working, Question, Failed, Unavailable }
@@ -103,6 +109,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (asset.fit == null || !asset.fit.Compatible) { note = FitNote(asset); return State.Unavailable; }
             return asset.access != null && asset.access.CanAdd ? State.Add : State.Buy;
         }
+
+        /// <summary>The newer version the gallery offers over <paramref name="installed"/>, or null.</summary>
+        internal static string Newer(GalleryAsset asset, OrbitersAttachment.GalleryReceipt installed) =>
+            asset != null && installed != null && StateOf(asset, installed, null, out _) == State.Update ? asset.fit.release.version : null;
 
         internal static string FitNote(GalleryAsset asset)
         {

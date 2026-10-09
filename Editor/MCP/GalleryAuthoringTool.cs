@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -20,21 +21,21 @@ namespace Orbiters.MyAvatar.Editor.MCP
     /// draft as the "Publish to the gallery" window, builds and tests packages with the same rules, and publishes or
     /// withdraws only with a code the user approved.
     /// </summary>
-    [McpForUnityTool("myavatar_gallery", Description = "Create and publish My Avatar gallery assets (clothes, accessories). inspect shows the draft shared with the 'Publish to the gallery' window, scene avatars (target_id) and the API it publishes to. configure merges data into that draft (draftSchema from inspect; variants take prefabPaths or packagePath, and manifest setup prefabs by path; reset:true starts over). list_assets reads the creator's assets and avatar bases. build packages every variant (or `variant`) with the packaging rules; test installs one built variant on target_id. Publishing needs preview_publish, then explicit human approval of the shown summary and rights statement, then confirm_publish with the returned code; withdraw likewise needs preview_withdraw and confirm_withdraw. Never infer approval. Network and build actions return pending jobs (poll status).", RequiresPolling = true, PollAction = "status", MaxPollSeconds = 180)]
+    [McpForUnityTool("myavatar_gallery", Description = "Create and publish My Avatar gallery assets (clothes, accessories). inspect shows the draft shared with the 'Publish to the gallery' window, scene avatars (target_id) and the API it publishes to. configure merges data into that draft (draftSchema from inspect; existingAssetId picks one of the creator's assets, 0 a new one; variants take prefabPaths or packagePath, and manifest setup prefabs by path; reset:true starts over). list_assets reads the creator's assets and avatar bases. build packages every variant (or `variant`) with the packaging rules; test installs one built variant on target_id. Publishing needs preview_publish, then explicit human approval of the shown summary and rights statement, then confirm_publish with the returned code; withdraw likewise needs preview_withdraw and confirm_withdraw. Never infer approval. Network and build actions return pending jobs (poll status).", RequiresPolling = true, PollAction = "status", MaxPollSeconds = 180)]
     public static class GalleryAuthoringTool
     {
         public sealed class Parameters
         {
             [ToolParameter("inspect, configure, list_assets, build, test, preview_publish, confirm_publish, preview_withdraw, confirm_withdraw, status")] public string action { get; set; }
             [ToolParameter("Scene avatar (MyAvatar component or GameObject ID) used to build and test", Required = false)] public int target_id { get; set; }
-            [ToolParameter("configure: fields of the draft to change; preview_withdraw: {releaseId}", Required = false)] public object data { get; set; }
+            [ToolParameter("configure: fields of the draft to change; preview_withdraw: {assetId, releaseId}", Required = false)] public object data { get; set; }
             [ToolParameter("build/test: the variant label (default: every variant for build, the first for test)", Required = false)] public string variant { get; set; }
             [ToolParameter("Job ID returned by an operation", Required = false)] public string job_id { get; set; }
             [ToolParameter("Single-use code from a preview; only pass after explicit user approval", Required = false)] public string confirmation_code { get; set; }
         }
 
         private sealed class Job { public string Id, Action; public Task<object> Work; public double Started; }
-        private sealed class Approval { public string Kind, Fingerprint; public int ReleaseId; public double Expires; }
+        private sealed class Approval { public string Kind, Fingerprint; public int AssetId, ReleaseId; public double Expires; }
         private static readonly Dictionary<string, Job> Jobs = new Dictionary<string, Job>();
         private static readonly Dictionary<string, Approval> Approvals = new Dictionary<string, Approval>();
         private static Job active;
@@ -53,6 +54,8 @@ namespace Orbiters.MyAvatar.Editor.MCP
                     case "inspect": return new SuccessResponse("My Avatar gallery authoring state.", Inspect());
                 }
                 if (active != null && !active.Work.IsCompleted) throw new InvalidOperationException("A gallery operation is running: " + active.Id);
+                // One build or publish at a time in the editor, the window's included.
+                if (GalleryPublisher.Running != null) throw new InvalidOperationException(GalleryPublisher.Running + " is running in the Publish to the gallery window; try again once it ends.");
                 if (EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode) throw new InvalidOperationException("Wait for Unity to be idle in edit mode.");
                 var draft = GalleryCreatorDraft.Load();
                 switch (p.action)
@@ -75,7 +78,7 @@ namespace Orbiters.MyAvatar.Editor.MCP
                         {
                             foreach (var v in variants) await GalleryPublisher.BuildAsync(draft, v, avatar);
                             GalleryPublisher.NotifyDraftReplaced();
-                            return (object)new { variants = variants.Select(VariantSummary), missing = GalleryPublisher.Missing(draft) };
+                            return (object)new { variants = variants.Select(v => VariantSummary(draft, v)), missing = GalleryPublisher.Missing(draft) };
                         });
                     }
                     case "test":
@@ -107,15 +110,22 @@ namespace Orbiters.MyAvatar.Editor.MCP
                     }
                     case "preview_withdraw":
                     {
-                        int releaseId = data?.Value<int?>("releaseId") ?? throw new ArgumentException("Provide data.releaseId (list_assets shows each asset's releases).");
-                        string code = NewApproval(new Approval { Kind = "withdraw", ReleaseId = releaseId });
+                        const string which = "Provide data.assetId and data.releaseId (list_assets shows each asset with its releases).";
+                        int assetId = data?.Value<int?>("assetId") ?? throw new ArgumentException(which);
+                        int releaseId = data?.Value<int?>("releaseId") ?? throw new ArgumentException(which);
+                        string code = NewApproval(new Approval { Kind = "withdraw", AssetId = assetId, ReleaseId = releaseId });
                         return new SuccessResponse("Awaiting explicit user approval to withdraw this version from the gallery (installed copies keep working).",
-                            new { confirmation_code = code, releaseId, withdrawsFrom = global::OrbitersEnvironment.ApiUrl(), expires_in_seconds = 900 });
+                            new { confirmation_code = code, assetId, releaseId, withdrawsFrom = global::OrbitersEnvironment.ApiUrl(), expires_in_seconds = 900 });
                     }
                     case "confirm_withdraw":
                     {
                         var approval = Take(p.confirmation_code, "withdraw");
-                        return Start(p.action, async () => { await GalleryApi.WithdrawReleaseAsync(approval.ReleaseId); GalleryCache.Clear(); return (object)new { withdrawn = approval.ReleaseId }; });
+                        return Start(p.action, async () =>
+                        {
+                            await GalleryApi.WithdrawReleaseAsync(approval.AssetId, approval.ReleaseId);
+                            GalleryCache.Clear();
+                            return (object)new { assetId = approval.AssetId, withdrawn = approval.ReleaseId };
+                        });
                     }
                     default: throw new ArgumentException("Unknown gallery action.");
                 }
@@ -140,16 +150,19 @@ namespace Orbiters.MyAvatar.Editor.MCP
             };
         }
 
-        // Fields the user decides through approval or the window only.
-        private static readonly string[] Protected = { "rights", "assetId", "releaseId", "idempotencyKey", "message", "messageError" };
+        // Fields the user decides through approval or the window only, and what Orbiters answered.
+        private static readonly string[] Protected = { "rights", "assetId", "newAsset", "releaseId", "releaseAssetId", "idempotencyKey", "draftId", "picturesSent", "message", "messageError" };
 
         private static void Configure(GalleryCreatorDraft draft, JObject data)
         {
             if (data.Value<bool?>("reset") == true) { GalleryCreatorDraft.Clear(); draft = GalleryCreatorDraft.Load(); }
             data = (JObject)data.DeepClone();
             data.Remove("reset");
+            // Another asset (or a new one) drops the draft version and uploads that belonged to the previous one.
+            if (data["existingAssetId"] != null) draft.Target(data.Value<int?>("existingAssetId") ?? 0);
+            else if (data.Value<bool?>("newAsset") == true) draft.Target(0);
+            data.Remove("existingAssetId");
             foreach (string key in Protected) data.Remove(key);
-            if (data["existingAssetId"] != null) { draft.assetId = data.Value<int>("existingAssetId"); draft.newAsset = draft.assetId <= 0; data.Remove("existingAssetId"); }
             if (data["variants"] is JArray variants)
                 foreach (var variant in variants.OfType<JObject>())
                 {
@@ -175,9 +188,12 @@ namespace Orbiters.MyAvatar.Editor.MCP
                         prefab["guid"] = guid;
                         if (prefab["name"] == null) prefab["name"] = System.IO.Path.GetFileNameWithoutExtension(path);
                     }
-                    variant.Remove("report"); variant.Remove("uploadedId"); variant.Remove("uploadedSha"); variant.Remove("testJob");
+                    foreach (string key in new[] { "report", "uploadedId", "uploadedRelease", "uploadedFingerprint", "testJob" }) variant.Remove(key);
                 }
             JsonConvert.PopulateObject(data.ToString(), draft, new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace });
+            foreach (var variant in draft.variants) variant.manifest.FixDefault();
+            // New or replaced pictures go to Orbiters with the next publish.
+            if (data["thumbnailPath"] != null || data["previewPaths"] != null || data["replacePreviews"] != null) draft.picturesSent = false;
             draft.rights = false;
             draft.Save();
             GalleryPublisher.NotifyDraftReplaced();
@@ -205,13 +221,15 @@ namespace Orbiters.MyAvatar.Editor.MCP
 
         private static object Summary(GalleryCreatorDraft d) => new
         {
-            asset = d.assetId > 0 ? (object)new { existingAssetId = d.assetId } : new { d.name, d.type, d.shortDescription, d.description, d.free, d.priceCents, d.currency, d.gumroad, d.jinxxy, d.preferredStore, d.thumbnailPath },
-            version = new { d.version, d.title, d.changelog, d.scope, d.releaseId },
+            asset = d.assetId > 0 ? (object)new { existingAssetId = d.assetId } : new { d.name, d.type, d.shortDescription, d.description, d.free, d.priceCents, d.currency, d.gumroad, d.jinxxy, d.preferredStore },
+            // What the gallery card and the asset's page show; an existing asset keeps its own when none is given.
+            pictures = new { card = d.thumbnailPath, page = d.previewPaths, d.replacePreviews, sent = d.picturesSent },
+            version = new { d.version, d.title, d.changelog, d.scope, releaseId = d.Release },
             d.publishListing,
-            variants = d.variants.Select(VariantSummary),
+            variants = d.variants.Select(v => VariantSummary(d, v)),
         };
 
-        private static object VariantSummary(GalleryVariantDraft v) => new
+        private static object VariantSummary(GalleryCreatorDraft d, GalleryVariantDraft v) => new
         {
             v.label, v.source, prefabs = v.prefabGuids.Select(AssetDatabase.GUIDToAssetPath), v.packagePath, v.platforms, v.baseScope, v.baseIds,
             setups = v.manifest.setups.Select(s => new { s.key, s.label, prefabs = s.prefabs.Select(x => new { x.path, attach = x.attach?.mode, x.attach?.bone }) }),
@@ -220,13 +238,17 @@ namespace Orbiters.MyAvatar.Editor.MCP
                 publishable = v.report.Publishable, v.report.bytes, v.report.sha256, v.report.parameterBits, v.report.containsCode, v.report.codeFiles,
                 v.report.errors, v.report.warnings, v.report.excluded, dependencies = v.report.dependencies.Select(x => x.id + " " + x.range),
             },
-            uploaded = v.uploadedId > 0 && v.report != null && v.uploadedSha == v.report.sha256,
+            uploaded = v.report != null && v.UploadedTo(d.Release),
         };
 
+        // What the user approves: the summary and the pictures' contents, so a picture changed on disk after the preview
+        // needs a new approval too.
         private static string Fingerprint(GalleryCreatorDraft draft)
         {
             using var hash = SHA256.Create();
-            return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(Summary(draft)))));
+            var pictures = draft.previewPaths.Prepend(draft.thumbnailPath)
+                .Select(path => !string.IsNullOrEmpty(path) && File.Exists(path) ? Convert.ToBase64String(hash.ComputeHash(File.ReadAllBytes(path))) : null).ToList();
+            return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new { summary = Summary(draft), pictures }))));
         }
 
         private static string NewApproval(Approval approval)

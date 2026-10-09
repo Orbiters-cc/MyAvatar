@@ -19,6 +19,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private static (string token, Task<bool> task, DateTime at) creator;
         private static readonly Dictionary<string, (Task<GalleryAvatarContext> task, DateTime at)> contexts = new Dictionary<string, (Task<GalleryAvatarContext>, DateTime)>();
         private static readonly Dictionary<string, (GalleryPage page, DateTime at)> pages = new Dictionary<string, (GalleryPage, DateTime)>();
+        private static readonly Dictionary<string, (Task<GalleryAsset> task, DateTime at)> assets = new Dictionary<string, (Task<GalleryAsset>, DateTime)>();
 
         [InitializeOnLoadMethod]
         private static void Listen()
@@ -30,7 +31,24 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         internal static void Clear()
         {
             bases = null; creator = default;
-            contexts.Clear(); pages.Clear();
+            contexts.Clear(); pages.Clear(); assets.Clear();
+        }
+
+        /// <summary>
+        /// One asset as the gallery offers it to this avatar now (its newest compatible version), read again after a few
+        /// minutes; null when Orbiters cannot be reached.
+        /// </summary>
+        internal static async Task<GalleryAsset> Asset(MyAvatar avatar, int assetId)
+        {
+            try
+            {
+                var context = await Context(avatar);
+                string key = assetId + "|" + context?.Platform + "|" + context?.BaseId;
+                if (!assets.TryGetValue(key, out var known) || known.task.IsFaulted || DateTime.UtcNow - known.at >= PageLife)
+                    assets[key] = known = (GalleryApi.DetailAsync(assetId, context?.Platform, context?.BaseId, CancellationToken.None), DateTime.UtcNow);
+                return await known.task;
+            }
+            catch (Exception) { return null; }
         }
 
         internal static Task<List<GalleryBase>> Bases()

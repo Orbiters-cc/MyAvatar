@@ -14,7 +14,6 @@ namespace Orbiters.MyAvatar.Editor
     // settings folded in the same frame, and the live test with an iPhone or the simulator).
     internal sealed partial class FaceTrackingSection : AvatarSection
     {
-        private const string StyleSheetPath = "Packages/orbiters.myavatar/Editor/UI/face-tracking.uss";
         private const string OpenKey = "Orbiters.MyAvatar.FaceTracking.QuickSettingsOpen.";
         private const string LogoPath = "Packages/orbiters.myavatar/Editor/UI/VRCFaceTrackingLogo.svg.txt";
         private static readonly string[] SmoothingCaptions =
@@ -36,19 +35,13 @@ namespace Orbiters.MyAvatar.Editor
         internal FaceTrackingSection(MyAvatar avatar) : base("Face tracking", card: false)
         {
             this.avatar = avatar;
-            var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
-            if (sheet) styleSheets.Add(sheet);
-            AddToClassList("ft");
+            ToolHero.Style(this);
             // The live test shows above the frame; the frame keeps the quick settings while it runs.
             live = new VisualElement(); Body.Add(live);
             hero = new VisualElement(); Body.Add(hero);
             note = new Label(); note.AddToClassList("ft-note"); note.style.display = DisplayStyle.None; Body.Add(note);
-            var credit = new VisualElement(); credit.AddToClassList("ft-credit"); Body.Add(credit);
-            var text = new Label("Face tracking blendshapes are animated by"); text.AddToClassList("avatar-caption"); credit.Add(text);
-            var link = MyAvatarEditor.Button("Adjerry91’s Face Tracking Templates", () => Application.OpenURL(FaceTrackingDetection.Repository));
-            link.AddToClassList("avatar-link"); link.AddToClassList("ft-credit__link");
-            link.tooltip = FaceTrackingDetection.Repository + "\nCredit this on your store or product page when you sell an avatar that uses it.";
-            credit.Add(link);
+            ToolHero.Credit(Body, "Face tracking blendshapes are animated by", "Adjerry91’s Face Tracking Templates", FaceTrackingDetection.Repository,
+                FaceTrackingDetection.Repository + "\nCredit this on your store or product page when you sell an avatar that uses it.");
             Subscribe();
             RegisterCallback<DetachFromPanelEvent>(_ => { Unsubscribe(); detached = true; FaceTrackingTest.Current?.Unwatch(this); });
             // Back in a panel (the Inspector rebuilt or docked again): listen again, and catch up on what changed meanwhile.
@@ -111,11 +104,9 @@ namespace Orbiters.MyAvatar.Editor
 
         private (VisualElement frame, VisualElement actions) Hero(string eyebrow, string eyebrowClass, string title, string subtitle, string version = null)
         {
-            var frame = new VisualElement(); frame.AddToClassList("ft-hero"); hero.Add(frame);
-            heroTop = new VisualElement(); heroTop.AddToClassList("ft-hero__top"); frame.Add(heroTop);
-            // The glow sits behind the ring, inside the frame.
-            var badge = new VisualElement(); badge.AddToClassList("ft-hero__badge"); heroTop.Add(badge);
-            var glow = new FaceTrackingGlow(new Color(0f, .85f, .43f, .18f)); glow.AddToClassList("ft-hero__glow"); badge.Add(glow);
+            var frame = new ToolHero(hero, new Color(0f, .85f, .43f, .18f), eyebrow, eyebrowClass, title, subtitle, version);
+            heroTop = frame.Top;
+            var badge = frame.Badge;
             var ring = new FaceTrackingRing(); ring.AddToClassList("ft-hero__ring"); badge.Add(ring);
             // VRCFaceTracking's mark inside the ring; the ring fills with the face's share of the tracking shapes.
             var svg = AssetDatabase.LoadAssetAtPath<TextAsset>(LogoPath);
@@ -128,14 +119,7 @@ namespace Orbiters.MyAvatar.Editor
                                 (report.Missing.Count > 0 ? " (not: " + string.Join(", ", report.Missing) + ")." : ".");
             }
             else ring.schedule.Execute(() => ring.Set(1f, svg != null ? "" : "✓", "set up"));
-            var texts = new VisualElement(); texts.AddToClassList("ft-hero__texts"); heroTop.Add(texts);
-            var eye = new Label(eyebrow); eye.AddToClassList("ft-hero__eyebrow"); if (eyebrowClass != null) eye.AddToClassList(eyebrowClass); texts.Add(eye);
-            var titleRow = new VisualElement(); titleRow.AddToClassList("ft-hero__title-row"); texts.Add(titleRow);
-            var head = new Label(title); head.AddToClassList("ft-hero__title"); titleRow.Add(head);
-            if (!string.IsNullOrEmpty(version)) { var pill = new Label(version); pill.AddToClassList("ft-hero__version"); titleRow.Add(pill); }
-            if (!string.IsNullOrEmpty(subtitle)) { var sub = new Label(subtitle); sub.AddToClassList("ft-hero__subtitle"); texts.Add(sub); }
-            var actions = new VisualElement(); actions.AddToClassList("ft-hero__actions"); texts.Add(actions);
-            return (frame, actions);
+            return (frame.Frame, frame.Actions);
         }
 
         // The ring, title and actions; hidden while the live test shows above the frame.

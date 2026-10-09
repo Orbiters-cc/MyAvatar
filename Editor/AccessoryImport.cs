@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.Storage;
 using UnityEditor;
 using UnityEngine;
 
@@ -22,6 +22,10 @@ namespace Orbiters.MyAvatar.Editor
         // What the archives of one drop may expand to on disk: a clothing ZIP with its textures fits well within these.
         internal const int MaxArchiveEntries = 20000;
         internal const long MaxArchiveBytes = 4L * 1024 * 1024 * 1024;
+        // What a package may name: its tar records (four per asset at most) and their pathnames together. An accessory with
+        // its textures and variants holds a few thousand files.
+        internal const int MaxPackageRecords = 40000;
+        internal const long MaxPackageNameBytes = 4L * 1024 * 1024;
         private static readonly string[] Models = { ".fbx", ".obj" };
         private static readonly string[] Images = { ".png", ".jpg", ".jpeg", ".tga" };
         private static readonly string[] Docs = { ".txt", ".md" };
@@ -52,7 +56,31 @@ namespace Orbiters.MyAvatar.Editor
             public string staging;
         }
 
-        private sealed class Budget { public int entries, archives; public long bytes; }
+        /// <summary>A reviewed package: its copy in the drop's folder holding only the entries reviewed, and that copy's hash.</summary>
+        [Serializable]
+        internal sealed class Package { public string name, path, sha256; }
+
+        /// <summary>What importing a package would do, read from its copy before anything is imported.</summary>
+        internal sealed class Review
+        {
+            public string name;
+            /// <summary>What to import; null when nothing is (refused, or only files for Packages/).</summary>
+            public Package package;
+            /// <summary>Why it is not imported at all, or what was left out of it.</summary>
+            public string refused, note;
+            public List<string> code = new List<string>();
+            /// <summary>GUIDs of the prefabs and models it brings.</summary>
+            public List<string> guids = new List<string>();
+            public List<UnityPackagePreview.Change> replaced = new List<UnityPackagePreview.Change>();
+            public List<Doc> docs = new List<Doc>();
+        }
+
+        // Opened archives of one drop, nested ones included, share these limits.
+        private sealed class Budget : ArchiveBudget
+        {
+            public int archives;
+            public Budget() : base(MaxArchiveEntries, MaxArchiveBytes, MaxArchiveBytes, 0, "drop") { }
+        }
 
         /// <summary>
         /// Whether a drop holds clothes or accessories (packages, archives, prefabs, models), not only textures. Background thread:
@@ -111,11 +139,11 @@ namespace Orbiters.MyAvatar.Editor
             else if (ext == ".zip" && depth < 3)
             {
                 var target = Path.Combine(staging, (++budget.archives).ToString());
-                try { ExtractZip(path, target, budget); }
+                try { using (var zip = File.OpenRead(path)) SafeArchive.Extract(zip, target, budget: budget); }
                 catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException || ex is NotSupportedException || ex is ArgumentException)
                 {
                     DeleteFolder(target);
-                    drop.refused.Add(name + ": not opened, " + (ex is InvalidDataException ? ex.Message : "it is not a readable ZIP."));
+                    drop.refused.Add(name + ": not opened. " + (ex is InvalidDataException ? ex.Message : "It is not a readable ZIP."));
                     return;
                 }
                 Add(drop, target, target, projectRoot, staging, parents, budget, depth + 1);
@@ -244,43 +272,63 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // The package's entries without importing it, with the small text files kept to read its readmes.
-        internal static UnityPackageIndex ReadPackage(string path) => UnityPackageIndex.Read(path, p => Docs.Contains(Ext(p)));
+        internal static UnityPackageIndex ReadPackage(string path) => UnityPackageIndex.Read(path, p => Docs.Contains(Ext(p)),
+            maxExpandedBytes: MaxArchiveBytes, maxEntries: MaxPackageRecords, maxPathnameTotalBytes: MaxPackageNameBytes);
+
+        /// <summary>
+        /// Reads a package from a copy in <paramref name="folder"/>, and keeps for the import a copy holding only what may be
+        /// imported: never its entries for Packages/ (VPM packages), which My Avatar leaves to package managers. The import
+        /// checks the copy's hash, so what is imported is what the user was asked about.
+        /// </summary>
+        internal static async Task<Review> ReviewAsync(string source, string folder, CancellationToken cancellation, string name = null)
+        {
+            name = name ?? Path.GetFileName(source);
+            var review = new Review { name = name };
+            string copy = Path.Combine(folder, Guid.NewGuid().ToString("N") + ".unitypackage");
+            UnityPackageIndex index;
+            UnityPackagePreview preview;
+            try
+            {
+                index = await Task.Run(() => { Directory.CreateDirectory(folder); File.Copy(source, copy); return ReadPackage(copy); }, cancellation);
+                if (index.UnsafePaths.Count > 0) { review.refused = name + ": not imported, it would write files outside Assets and Packages."; return review; }
+                preview = await UnityPackagePreview.CreateAsync(copy, index, cancellation);
+            }
+            catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException)
+            { review.refused = name + ": not imported, it is not a readable Unity package."; return review; }
+            review.docs = PackageDocs(index);
+            review.code = preview.CodeFiles;
+            review.replaced = preview.Replaced;
+            var imported = preview.Added.Concat(preview.Replaced).Concat(preview.Unchanged).ToList();
+            review.guids = imported.Where(c => AccessoryCandidates.IsItem(c.PackagePath)).Select(c => c.Guid).ToList();
+            if (preview.Skipped.Count > 0)
+                review.note = $"{name}: {preview.Skipped.Count} file{(preview.Skipped.Count == 1 ? "" : "s")} for Packages/ left out. My Avatar never changes packages: install them with the VRChat Creator Companion.";
+            if (imported.Count == 0) return review;
+            string import = copy;
+            if (preview.Skipped.Count > 0)
+            {
+                import = Path.Combine(folder, Guid.NewGuid().ToString("N") + ".unitypackage");
+                var keep = new HashSet<string>(imported.Select(c => c.Guid), StringComparer.OrdinalIgnoreCase);
+                await Task.Run(() => UnityPackageFiles.CopyEntries(copy, import, keep), cancellation);
+            }
+            review.package = new Package { name = name, path = import, sha256 = await Task.Run(() => UnityPackageFiles.FileHash(import), cancellation) };
+            return review;
+        }
+
+        /// <summary>Whether the package to import is still the file the user was asked about.</summary>
+        internal static async Task<bool> UnchangedAsync(Package package, CancellationToken cancellation)
+        {
+            if (package == null || !File.Exists(package.path)) return false;
+            string hash;
+            try { hash = await Task.Run(() => UnityPackageFiles.FileHash(package.path), cancellation); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return false; }
+            return string.Equals(hash, package.sha256, StringComparison.OrdinalIgnoreCase);
+        }
 
         internal static List<Doc> PackageDocs(UnityPackageIndex index)
         {
             var docs = new List<Doc>();
             foreach (var entry in index.Entries.Where(e => e.Content != null)) AddDoc(docs, Path.GetFileName(entry.Path), () => Encoding.UTF8.GetString(entry.Content));
             return docs;
-        }
-
-        // Bounded in files and expanded bytes across the whole drop, nested archives included; every file stays inside its folder.
-        private static void ExtractZip(string zip, string target, Budget budget)
-        {
-            string root = Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            using (var archive = ZipFile.OpenRead(zip))
-            {
-                long declared = archive.Entries.Sum(e => e.Length);
-                if (budget.entries + archive.Entries.Count > MaxArchiveEntries) throw new InvalidDataException("it holds too many files.");
-                if (budget.bytes + declared > MaxArchiveBytes) throw new InvalidDataException("it expands to more than 4 GB.");
-                budget.entries += archive.Entries.Count;
-                Directory.CreateDirectory(root);
-                var buffer = new byte[81920];
-                foreach (var entry in archive.Entries)
-                {
-                    string destination = Path.GetFullPath(Path.Combine(root, entry.FullName));
-                    if (!destination.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("it has files that would be written outside its folder.");
-                    if (entry.FullName.EndsWith("/", StringComparison.Ordinal) || entry.FullName.EndsWith("\\", StringComparison.Ordinal)) { Directory.CreateDirectory(destination); continue; }
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                    using (var input = entry.Open())
-                    using (var output = File.Create(destination))
-                        for (int n; (n = input.Read(buffer, 0, buffer.Length)) > 0;)
-                        {
-                            // Sizes declared by the archive can lie: the bytes actually written count.
-                            if ((budget.bytes += n) > MaxArchiveBytes) throw new InvalidDataException("it expands to more than 4 GB.");
-                            output.Write(buffer, 0, n);
-                        }
-                }
-            }
         }
 
         /// <summary>Removes a drop's opened archives. Only folders inside the staging folder are ever deleted.</summary>
@@ -311,6 +359,18 @@ namespace Orbiters.MyAvatar.Editor
         // Imports share a gate with other Orbiters tools; the caller persists its job before a script can reload Unity.
         internal static Task ImportPackageAsync(string path, CancellationToken cancellation, Action starting = null) =>
             UnityPackageImport.ImportAsync(path, cancellation, starting);
+
+        /// <summary>
+        /// The drop is over (put on, dismissed, failed): the models it copied go once nothing uses them, those worn stay as
+        /// long as they are (<see cref="GeneratedAssets"/>).
+        /// </summary>
+        internal static void ReleaseCopies(string batch)
+        {
+            string folder = Folder + "/" + batch;
+            if (string.IsNullOrEmpty(batch) || !AssetDatabase.IsValidFolder(folder)) return;
+            GeneratedAssets.Track(AssetDatabase.FindAssets("", new[] { folder }).Select(AssetDatabase.GUIDToAssetPath).Append(folder));
+            GeneratedAssets.SweepSoon();
+        }
 
         // External models are copied with the files they name, laid out as they were relative to each other, so Unity finds
         // an OBJ's material libraries and their images. A model whose files would land on another model's different files gets
@@ -368,15 +428,41 @@ namespace Orbiters.MyAvatar.Editor
         internal static string ProjectRoot => Path.GetDirectoryName(Application.dataPath).Replace('\\', '/');
         internal static string Staging => Path.Combine(LibraryStore.Folder, "Staging");
 
-        private static string Absolute(string path, string projectRoot) => Full(Path.IsPathRooted(path) ? path : Path.Combine(projectRoot, path));
+        // A project path dragged from the Project window, on disk. A read-only package's "Packages/<name>/..." is not under
+        // Packages/ but in Library/PackageCache/<name>@<version>: looked up there without Unity's API (background thread).
+        private static string Absolute(string path, string projectRoot)
+        {
+            if (Path.IsPathRooted(path)) return Full(path);
+            string full = Full(Path.Combine(projectRoot, path));
+            var parts = path.Replace('\\', '/').Split('/');
+            if (parts.Length < 2 || !parts[0].Equals("Packages", StringComparison.OrdinalIgnoreCase) || File.Exists(full) || Directory.Exists(full)) return full;
+            string cache = PackageCache(projectRoot, parts[1]);
+            return cache != null ? Full(Path.Combine(new[] { cache }.Concat(parts.Skip(2)).ToArray())) : full;
+        }
+
+        private static string PackageCache(string projectRoot, string name)
+        {
+            if (name.Length == 0 || name.Any(c => !(char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_'))) return null;
+            try { return Directory.GetDirectories(Path.Combine(projectRoot, "Library", "PackageCache"), name + "@*").OrderByDescending(Directory.GetLastWriteTimeUtc).FirstOrDefault(); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) { return null; }
+        }
+
         private static string Full(string path) => Path.GetFullPath(path).Replace('\\', '/');
 
-        // "Assets/..." or "Packages/..." when the file is inside the project, else null.
+        // "Assets/..." or "Packages/..." when the file is inside the project (a read-only package's files in
+        // Library/PackageCache included), else null.
         private static string ProjectPath(string full, string projectRoot)
         {
             string prefix = projectRoot.TrimEnd('/') + "/";
             if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
             string relative = full.Substring(prefix.Length);
+            const string cache = "Library/PackageCache/";
+            if (relative.StartsWith(cache, StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = relative.Substring(cache.Length).Split('/');
+                int at = parts[0].IndexOf('@');
+                return parts.Length > 1 && at > 0 ? "Packages/" + parts[0].Substring(0, at) + "/" + string.Join("/", parts.Skip(1)) : null;
+            }
             return relative.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) || relative.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase) ? relative : null;
         }
 

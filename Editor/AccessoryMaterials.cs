@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.Storage;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -10,6 +11,9 @@ using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor
 {
+    // Materials of an accessory that import broken or without their surface maps get a repaired copy, in its own Undo step
+    // (a drop folds it into its own). The copies, and the maps made for them, are generated assets: they go once nothing
+    // uses them (the accessory removed or undone).
     internal static class AccessoryMaterials
     {
         internal static int Repair(MyAvatar avatar, OrbitersAttachment item, string folder = null)
@@ -33,7 +37,9 @@ namespace Orbiters.MyAvatar.Editor
                 if (MaterialSurfaceMaps.NeedsRoughDefault(copy)) MaterialSurfaceMaps.MakeEditable(copy);
                 MaterialSurfaceMaps.DefaultRough(copy);
                 string name = string.Concat(material.name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-                AssetDatabase.CreateAsset(copy, AssetDatabase.GenerateUniqueAssetPath(folder + "/" + name + " Repaired.mat"));
+                string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + name + " Repaired.mat");
+                AssetDatabase.CreateAsset(copy, path);
+                GeneratedAssets.Track(AssetDatabase.GetDependencies(path, false).Where(d => d.StartsWith(folder + "/SurfaceMaps/", StringComparison.Ordinal)).Append(path));
                 replacements.Add(material, copy);
             }
             Undo.IncrementCurrentGroup();

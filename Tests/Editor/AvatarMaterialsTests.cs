@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor;
+using UnityEditor;
 using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor.Tests
@@ -8,12 +10,15 @@ namespace Orbiters.MyAvatar.Editor.Tests
     public sealed class AvatarMaterialsTests
     {
         private readonly List<Object> owned = new List<Object>();
+        private readonly List<string> folders = new List<string>();
 
         [TearDown]
         public void Clean()
         {
             foreach (var o in owned) if (o != null) Object.DestroyImmediate(o);
             owned.Clear();
+            foreach (var path in folders) if (!string.IsNullOrEmpty(path)) AssetDatabase.DeleteAsset(path);
+            folders.Clear();
         }
 
         [Test]
@@ -44,6 +49,42 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.True(advice["Fur"].HiddenBack);
             Assert.False(advice["Fur"].Locked);
             Assert.AreEqual("Fur", advice["Fur"].Renderers.Single().name);
+        }
+
+        // A material of My Avatar's own (a texture set's copy) is shared by a duplicated avatar: showing its back on this
+        // avatar copies it, and this avatar's texture Undo and Redo follow the copy.
+        [Test]
+        public void ShowingBothSidesCopiesMyAvatarsOwnMaterialsAndKeepsTextureUndo()
+        {
+            string folder = "Assets/Orbiters/MyAvatar/MaterialsTest-" + System.Guid.NewGuid().ToString("N");
+            folders.Add(folder);
+            TextureImport.EnsureFolder(folder);
+            var original = Material("VRChat/Mobile/Toon Standard", "Fur");
+            var batch = new Material(original) { name = "Fur" };
+            AssetDatabase.CreateAsset(batch, folder + "/Fur.mat");
+            var root = new GameObject("Avatar"); owned.Add(root);
+            var avatar = root.AddComponent<MyAvatar>();
+            var renderer = Part(root, "Fur", Card(), batch).GetComponent<MeshRenderer>();
+            var duplicate = new GameObject("Avatar (1)"); owned.Add(duplicate);
+            var shared = Part(duplicate, "Fur", Card(), batch).GetComponent<MeshRenderer>();
+            avatar.undoMaterials.Add(new RendererSnapshot { renderer = renderer, before = new[] { original }, after = new[] { batch } });
+            avatar.textures.Add(new TextureEntry { material = batch, property = "_MainTex", applied = true });
+
+            var advice = AvatarMaterials.Inspect(root);
+            Assert.AreEqual(1, AvatarMaterials.Apply(avatar, advice));
+            var copy = renderer.sharedMaterial;
+            Assert.AreNotSame(batch, copy);
+            Assert.True(MaterialSides.ShowsBackFaces(copy) == true);
+            Assert.True(MaterialSides.ShowsBackFaces(batch) == false, "the shared material is left as it was");
+            Assert.AreSame(batch, shared.sharedMaterial);
+            Assert.AreSame(copy, avatar.undoMaterials[0].after[0]);
+            Assert.AreSame(copy, avatar.textures[0].material);
+            TextureChanges.UndoLast(avatar);
+            Assert.AreSame(original, renderer.sharedMaterial);
+            TextureChanges.UndoLast(avatar);
+            Assert.AreSame(copy, renderer.sharedMaterial);
+            folders.Add(AssetDatabase.GetAssetPath(copy));
+            Undo.ClearUndo(renderer); Undo.ClearUndo(avatar);
         }
 
         private Material Material(string shader, string name)

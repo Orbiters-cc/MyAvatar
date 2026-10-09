@@ -130,6 +130,7 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new PosingSection(avatar));
             content.Add(new AvatarCustomizationSection(avatar));
             content.Add(new FaceTrackingSection(avatar));
+            content.Add(new GoGoLocoSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
@@ -249,13 +250,13 @@ namespace Orbiters.MyAvatar.Editor
             int started = revision;
             note = null; results.Clear();
             zone.ShowProgress(.04f, "Finding textures…");
-            var files = await Orbiters.Toolkit.Editor.DedicatedTask.Run(() => TextureImport.Expand(paths), cancellation);
+            var physical = TextureImport.Physical(paths);
+            var files = await Orbiters.Toolkit.Editor.DedicatedTask.Run(() => TextureImport.Expand(physical), cancellation);
             cancellation.ThrowIfCancellationRequested();
             var scoped = scope?.Where(t => t).ToList() ?? new List<Transform>();
             var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar), scoped);
             foreach (var slot in slots) slot.fillOnly = scoped.Count > 0;
             if (slots.Count == 0) throw new InvalidOperationException("No editable texture slots were found below this avatar.");
-            if (slots.Count > 512) throw new InvalidOperationException("This avatar has more than 512 texture slots. Place My Avatar on a smaller avatar root.");
             string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
             var entries = await TextureImport.ImportAsync(files, folder, (value, text) => { if (active) zone.ShowProgress(value, text); }, cancellation);
             cancellation.ThrowIfCancellationRequested();
@@ -275,6 +276,8 @@ namespace Orbiters.MyAvatar.Editor
             var open = slots.Where(s => !s.secondary && s.rendererKind != "effect" && unmatched.Any(e => TextureMatching.Compatible(e.role, s) && TextureMatching.CanAutoAssign(e, s)) &&
                 !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
             bool ask = unmatched.Count > 0 && open.Count > 0 && !string.IsNullOrEmpty(token) && aiEnabled;
+            // A request carries a bounded number of slots: the ones most worth asking about.
+            if (ask) open = TextureAi.Relevant(open, entries);
             object payload = ask ? TextureAi.Payload(unmatched, open, stats) : null;
             zone.ShowProgress(.9f, "Applying to " + entries.Where(e => e.material).Select(e => e.material).Distinct().Count() + " materials…");
             await Task.Yield();
@@ -315,15 +318,24 @@ namespace Orbiters.MyAvatar.Editor
                 TextureChanges.Revise(avatar, entries, folder, result.changes, before);
                 TextureMemory.Record(avatar, entries);
             }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex) { if (active && avatar && aiEnabled && started == revision) { note = null; SetNote(StatusText() + " · Orbiters AI unavailable: " + ex.Message, true); } return; }
+            catch (OperationCanceledException) when (source.IsCancellationRequested) { return; }
+            // The request's own timeout is a cancellation too, but nobody cancelled: the textures stay listed to choose by hand.
+            catch (OperationCanceledException) { Failed("Orbiters AI timed out. Choose a slot for the remaining textures below."); return; }
+            catch (Exception ex) { Failed("Orbiters AI unavailable: " + ex.Message); return; }
             finally
             {
                 if (background == source) { background = null; if (active) SetBackground(null); }
                 source.Dispose();
             }
             if (!active || !avatar || !aiEnabled || started != revision) return;
+            // Matches that arrive after a Save are not in it: Undo and Save come back, and the next Save checkpoints them.
+            saved = false; note = null;
             TextureChanges.Dirty(avatar); RefreshResults();
+
+            void Failed(string text)
+            {
+                if (active && avatar && aiEnabled && started == revision) { note = null; SetNote(StatusText() + " · " + text, true); }
+            }
         }
 
         private void SetBackground(string status)

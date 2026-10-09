@@ -11,7 +11,7 @@ namespace Orbiters.MyAvatar.Editor
 {
     internal sealed class TextureSlot
     {
-        public string id, materialName, shader, property, description, role, existingName, rendererPath, rendererKind;
+        public string materialName, shader, property, description, role, existingName, rendererPath, rendererKind;
         public string existingPath;
         public int existingWidth, existingHeight;
         public Material material;
@@ -73,7 +73,7 @@ namespace Orbiters.MyAvatar.Editor
                             (shader.GetPropertyFlags(i) & ShaderPropertyFlags.HideInInspector) != 0)) continue;
                         string property = shader.GetPropertyName(i), description = CleanDescription(shader.GetPropertyDescription(i));
                         var texture = material.HasProperty(property) ? material.GetTexture(property) : Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, property);
-                        var slot = new TextureSlot { id = "s" + result.Count, material = material, materialName = material.name,
+                        var slot = new TextureSlot { material = material, materialName = material.name,
                             shader = shaderName, property = property, description = description, role = SlotRole(property, description),
                             secondary = Secondary(property, description), existing = texture, existingName = texture ? texture.name : "",
                             existingPath = texture ? AssetDatabase.GetAssetPath(texture) : "", existingWidth = texture ? texture.width : 0, existingHeight = texture ? texture.height : 0,
@@ -200,28 +200,49 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly string[][] Synonyms = { new[] { "hair", "feather", "tuft", "mane" }, new[] { "eye", "iris", "pupil" }, new[] { "body", "skin" },
             new[] { "cloth", "clothe", "clothing", "outfit", "garment" }, new[] { "teeth", "tooth" }, new[] { "shoe", "boot" } };
 
+        // Letters and digits of any script ("髪_Normal", "Cheveux_été"); a run of Chinese, Japanese or Korean is its own token.
         internal static List<string> Tokens(string value, bool stem = true)
         {
-            value = Regex.Replace(value ?? "", "([a-z])([A-Z])", "$1 $2");
-            value = Regex.Replace(value, "([A-Z]+)([A-Z][a-z])", "$1 $2");
-            value = Regex.Replace(value, "([A-Za-z])([0-9])", "$1 $2");
-            value = Regex.Replace(value, "([0-9])([A-Za-z])", "$1 $2");
-            return Regex.Split(value.ToLowerInvariant(), "[^a-z0-9]+").Where(t => t.Length > 0 && !t.All(char.IsDigit)).Select(t => stem ? Stem(t) : t).ToList();
+            value = Regex.Replace(value ?? "", @"(\p{Ll})(\p{Lu})", "$1 $2");
+            value = Regex.Replace(value, @"(\p{Lu}+)(\p{Lu}\p{Ll})", "$1 $2");
+            value = Regex.Replace(value, @"(\p{L})(\p{Nd})", "$1 $2");
+            value = Regex.Replace(value, @"(\p{Nd})(\p{L})", "$1 $2");
+            var split = new System.Text.StringBuilder(value.Length + 8);
+            for (int i = 0; i < value.Length; i++) { if (i > 0 && Wordless(value[i]) != Wordless(value[i - 1])) split.Append(' '); split.Append(value[i]); }
+            return Regex.Split(split.ToString().ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(t => t.Length > 0 && !t.All(char.IsDigit)).Select(t => stem ? Stem(t) : t).ToList();
         }
+
+        // Chinese, Japanese and Korean are written without spaces between words.
+        private static bool Wordless(char c) => c >= '\u3040' && c <= '\u30FF' || c >= '\u31F0' && c <= '\u31FF' || c >= '\u3400' && c <= '\u4DBF' ||
+            c >= '\u4E00' && c <= '\u9FFF' || c >= '\uAC00' && c <= '\uD7AF' || c == '\u3005';
+        private static bool Ideograph(char c) => c >= '\u3400' && c <= '\u4DBF' || c >= '\u4E00' && c <= '\u9FFF' || c == '\u3005';
 
         private static string Stem(string token) => token.Length > 3 && token.EndsWith("s", StringComparison.Ordinal) && !token.EndsWith("ss", StringComparison.Ordinal) &&
             !token.EndsWith("is", StringComparison.Ordinal) && !token.EndsWith("us", StringComparison.Ordinal) ? token.Substring(0, token.Length - 1) : token;
 
-        private static HashSet<string> Identity(string name) => new HashSet<string>(Tokens(name).Where(t => t.Length > 1 && !Generic.Contains(t)));
+        // One ideograph is already a word ("髪" hair, "体" body).
+        private static HashSet<string> Identity(string name) => new HashSet<string>(Tokens(name).Where(t => (t.Length > 1 || Ideograph(t[0])) && !Generic.Contains(t)));
 
         // 1 for equal tokens or a prefix of at least three letters ("bodymatt" ~ "body", "ulti" ~ "ultiv"), 0.6 for synonyms.
+        // Names written without spaces match when one contains the other ("髪" ~ "髪の毛"), 0.6 when they share most of
+        // the shorter one's ideographs ("前髪" ~ "髪の毛").
         private static double Similarity(string a, string b)
         {
             if (a == b) return 1;
             if (Math.Min(a.Length, b.Length) >= 3 && (a.StartsWith(b, StringComparison.Ordinal) || b.StartsWith(a, StringComparison.Ordinal))) return 1;
+            if (a.Any(Wordless) || b.Any(Wordless))
+            {
+                if (a.Contains(b) || b.Contains(a)) return 1;
+                var shorter = (a.Length <= b.Length ? a : b).Where(Ideograph).Distinct().ToList();
+                string longer = a.Length <= b.Length ? b : a;
+                return shorter.Count > 0 && shorter.Count(longer.Contains) * 2 >= shorter.Count ? .6 : 0;
+            }
             foreach (var group in Synonyms) if (group.Any(a.StartsWith) && group.Any(b.StartsWith)) return .6;
             return 0;
         }
+
+        // Main, normal, emission, metallic, occlusion and other well-known maps first, then any slot whose role is known.
+        internal static int Commonness(TextureSlot slot) => Primary.Contains(slot.property) ? 2 : slot.role != "unknown" ? 1 : 0;
 
         private static double Best(string token, IEnumerable<string> bag) => bag.Select(b => Similarity(token, b)).DefaultIfEmpty(0).Max();
 

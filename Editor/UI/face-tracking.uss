@@ -9,6 +9,8 @@
 .ft-hero__glow { position: absolute; left: -22px; top: -22px; width: 122px; height: 122px; }
 .ft-hero__ring { width: 78px; height: 78px; }
 .ft-hero__logo { position: absolute; left: 19px; top: 19px; width: 40px; height: 40px; }
+/* A tool's own picture (GoGoLoco's round logo) fills the badge, over the glow. */
+.ft-hero__picture { position: absolute; left: 3px; top: 3px; width: 72px; height: 72px; }
 .ft-hero__title-row { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .ft-hero__version { height: 18px; margin: 3px 0 0 8px; padding: 0 7px; border-radius: 9px; background-color: rgba(255, 255, 255, 0.07); color: #a8a8a8; font-size: 10px; -unity-font-style: bold; -unity-text-align: middle-center; }
 .ft-hero__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }

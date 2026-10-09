@@ -84,6 +84,26 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public string defaultSetup;
 
         public GallerySetup Setup(string key) => setups.FirstOrDefault(s => s.key == key) ?? setups.FirstOrDefault(s => s.key == defaultSetup) ?? setups.FirstOrDefault();
+
+        /// <summary>A key no setup has ("setup-2", "setup-3"…): the server refuses two setups with one key.</summary>
+        internal string NewKey()
+        {
+            for (int n = setups.Count + 1; ; n++)
+                if (setups.All(s => !string.Equals(s.key, "setup-" + n, StringComparison.OrdinalIgnoreCase))) return "setup-" + n;
+        }
+
+        /// <summary>Removes a setup; when it was the default, the first one left is.</summary>
+        internal void Remove(GallerySetup setup)
+        {
+            setups.Remove(setup);
+            FixDefault();
+        }
+
+        /// <summary>The default is one of the setups (the server refuses another), the first unless it already is.</summary>
+        internal void FixDefault()
+        {
+            if (setups.All(s => s.key != defaultSetup)) defaultSetup = setups.FirstOrDefault()?.key;
+        }
     }
 
     internal sealed class GalleryDependency

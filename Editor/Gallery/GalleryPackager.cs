@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Parameters;
 using UnityEditor;
 using UnityEngine;
@@ -56,6 +57,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 if (reason != null) { report.excluded.Add(path + " · " + reason); continue; }
                 kept.Add(path);
             }
+            // Props Toolkit fits to the avatar (a drawing pen, a hand screen) need a Toolkit that knows them.
+            var toolkit = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(AttachmentHooks).Assembly);
+            if (toolkit != null && prefabs.Any(AttachmentHooks.Fits)) Depend(report, toolkit.assetPath);
             CheckShaders(report, paths);
             if (report.errors.Count > 0) return report;
             Directory.CreateDirectory(Folder);

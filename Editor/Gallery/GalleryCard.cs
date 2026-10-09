@@ -107,6 +107,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private Label progressLabel;
         private VisualElement progressFill;
+        // Seconds after the progress replaces the action before a click on it cancels.
+        private const double CancelDelay = 0.6;
 
         private void BuildActions(GalleryUI.State state, string note)
         {
@@ -128,7 +130,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     progressFill.style.width = Length.Percent(Mathf.Clamp01(Job?.progress ?? 0f) * 100f);
                     progressLabel = GalleryUI.Text(Job?.status ?? "Working…", "gallery-progress__label", progress);
                     progress.tooltip = "Click to cancel";
-                    progress.RegisterCallback<ClickEvent>(_ => primary(this));
+                    // The second click of a double-click on Add lands here: it does not cancel what it just started.
+                    double since = UnityEditor.EditorApplication.timeSinceStartup;
+                    progress.RegisterCallback<ClickEvent>(_ => { if (UnityEditor.EditorApplication.timeSinceStartup - since >= CancelDelay) primary(this); });
                     return;
                 case GalleryUI.State.Add: Primary("Add", "gallery-btn--add", "Download it and put it on this avatar."); break;
                 case GalleryUI.State.Buy: Primary(Asset.price != null && !Asset.price.free ? "Buy · " + Asset.price.Label : "Buy", "gallery-btn--buy", "Choose a store; once bought it is added to your library."); break;

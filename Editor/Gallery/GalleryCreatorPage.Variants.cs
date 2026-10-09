@@ -56,8 +56,19 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             var card = GalleryUI.Box("creator-variant", parent);
             var header = GalleryUI.Box("creator-variant__header", card);
-            header.Add(Field(variant.label, value => variant.label = value, placeholder: "Setup name (VRCFury, Modular Avatar…)"));
+            // Buyers and Orbiters tell packages apart by name: one used twice is said while typing.
+            var twice = GalleryUI.Text("", "creator-report__line creator-report__line--error");
+            void CheckName()
+            {
+                bool taken = draft.variants.Any(v => v != variant && string.Equals(v.Label, variant.Label, StringComparison.OrdinalIgnoreCase));
+                twice.text = taken ? $"Another package is named “{variant.Label}”: give this one its own name." : "";
+                twice.style.display = taken ? DisplayStyle.Flex : DisplayStyle.None;
+                publishButton?.SetEnabled(CanPublish());
+            }
+            header.Add(Field(variant.label, value => { variant.label = value; CheckName(); }, placeholder: "Setup name (VRCFury, Modular Avatar…)"));
             if (draft.variants.Count > 1) header.Add(GalleryUI.Button("Remove", () => { draft.variants.Remove(variant); Build(); }, "gallery-link"));
+            card.Add(twice);
+            CheckName();
 
             Label("From", card);
             var source = new SegmentedControl(new[] { "Prefabs in this project", ".unitypackage" }, index => { variant.source = index == 1 ? "package" : "prefab"; variant.report = null; Build(); });
@@ -147,7 +158,15 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             }
 
             var actions = GalleryUI.Box("creator-actions", card);
-            actions.Add(GalleryUI.Button(variant.report == null ? "Build package" : "Build again", () => _ = BuildVariant(variant), variant.report == null ? "mcb-button--primary" : null));
+            Button build = null;
+            build = GalleryUI.Button(variant.report == null ? "Build package" : "Build again", () =>
+            {
+                // Pressed: it says so at once, and a second press does nothing while it builds.
+                if (building || GalleryPublisher.Running != null) return;
+                build.SetEnabled(false); build.text = "Building…";
+                _ = BuildVariant(variant);
+            }, variant.report == null ? "mcb-button--primary" : null);
+            actions.Add(build);
             if (variant.report != null && variant.report.Publishable && avatar)
                 actions.Add(GalleryUI.Button("Test on " + avatar.name, () => TestVariant(variant)));
             if (variant.report != null) Report(card, variant);
@@ -163,13 +182,20 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             }
         }
 
+        private bool building;
+
         private async Task BuildVariant(GalleryVariantDraft variant)
         {
-            Message("Building " + variant.label + "…", false);
-            await Task.Yield();
-            try { await GalleryPublisher.BuildAsync(draft, variant, avatar); }
-            catch (Exception ex) { Message("The package could not be built: " + ex.Message, true); return; }
-            Message(variant.report.Publishable ? variant.label + " is ready." : variant.label + " needs changes before it can be published.", !variant.report.Publishable);
+            building = true;
+            Message("Building " + variant.Label + "…", false);
+            try
+            {
+                await Task.Yield();
+                await GalleryPublisher.BuildAsync(draft, variant, avatar);
+                Message(variant.report.Publishable ? variant.Label + " is ready." : variant.Label + " needs changes before it can be published.", !variant.report.Publishable);
+            }
+            catch (Exception ex) { Message("The package could not be built: " + ex.Message, true); }
+            finally { building = false; }
             Build();
         }
 
@@ -196,7 +222,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             {
                 var add = GalleryUI.Button("Add a setup choice", () =>
                 {
-                    variant.manifest.setups.Add(new GallerySetup { key = "setup-" + (variant.manifest.setups.Count + 1), label = "Setup " + (variant.manifest.setups.Count + 1), prefabs = new List<GallerySetupPrefab> { GalleryPublisher.Copy(report.prefabs[0]) } });
+                    string key = variant.manifest.NewKey();
+                    variant.manifest.setups.Add(new GallerySetup { key = key, label = "Setup " + key.Substring("setup-".Length), prefabs = new List<GallerySetupPrefab> { GalleryPublisher.Copy(report.prefabs[0]) } });
                     Build();
                 }, "gallery-link");
                 add.style.alignSelf = Align.FlexStart; add.style.marginTop = 4;
@@ -212,7 +239,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             {
                 var head = GalleryUI.Box("creator-variant__header", box);
                 head.Add(Field(setup.label, value => setup.label = value));
-                head.Add(GalleryUI.Button("Remove", () => { variant.manifest.setups.Remove(setup); Build(); }, "gallery-link"));
+                head.Add(GalleryUI.Button("Remove", () => { variant.manifest.Remove(setup); Build(); }, "gallery-link"));
             }
             foreach (var prefab in variant.report.prefabs)
             {

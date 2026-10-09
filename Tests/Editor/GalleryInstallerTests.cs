@@ -194,6 +194,28 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(avatar.GetComponentsInChildren<OrbitersAttachment>(true), Is.Empty);
         }
 
+        [Test] public void RetryImportsAgainUntilTheImportFinished()
+        {
+            // Jobs of an avatar that is not open: Retry picks the step, the run then waits for the avatar.
+            GalleryJob Failed(int assetId, bool imported, int placed = 0) => new GalleryJob
+            {
+                id = Guid.NewGuid().ToString("N"), avatar = "not-an-avatar", avatarName = "Avatar", assetId = assetId, stage = GalleryJob.Failed,
+                importGuids = new List<string> { "0123456789abcdef0123456789abcdef" }, imported = imported, placed = Enumerable.Repeat("placed", placed).ToList(),
+            };
+            var previewed = Failed(9201, imported: false);
+            GalleryInstaller.Retry(previewed);
+            Assert.That(previewed.stage, Is.EqualTo(GalleryJob.Download), "Known files to import are not an import.");
+            var test = Failed(0, imported: false);
+            GalleryInstaller.Retry(test);
+            Assert.That(test.stage, Is.EqualTo(GalleryJob.Validate), "A creator's test starts again from its built package.");
+            var imported = Failed(9202, imported: true);
+            GalleryInstaller.Retry(imported);
+            Assert.That(imported.stage, Is.EqualTo(GalleryJob.Attach));
+            var placed = Failed(9203, imported: true, placed: 1);
+            GalleryInstaller.Retry(placed);
+            Assert.That(placed.stage, Is.EqualTo(GalleryJob.Verify));
+        }
+
         [Test] public void CardStatesFollowTheJobThenTheAvatarThenAccess()
         {
             var asset = new GalleryAsset { access = new GalleryAccess { state = "purchase" }, fit = new GalleryFit { state = "compatible", release = new GalleryRelease { version = "1.2.0" }, variants = { new GalleryVariant() } } };

@@ -28,7 +28,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 listing.RegisterValueChangedCallback(evt => { draft.publishListing = evt.newValue; draft.Save(); });
                 step.Add(listing);
             }
-            publishButton = GalleryUI.Button(publishing ? "Publishing…" : "Publish " + draft.version, () => _ = PublishAsync(), "mcb-button--primary creator-publish");
+            // Another window's or the MCP tool's publish shows here too.
+            string running = GalleryPublisher.Running;
+            publishButton = GalleryUI.Button(running == null ? "Publish " + draft.version : running + "…", () => _ = PublishAsync(), "mcb-button--primary creator-publish");
             publishButton.SetEnabled(CanPublish());
             step.Add(publishButton);
             var message = GalleryUI.Text(draft.message, "creator-message", step);
@@ -38,26 +40,28 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private Button publishButton;
 
-        private bool CanPublish() => !publishing && draft.rights && GalleryPublisher.Missing(draft) == null;
+        private bool CanPublish() => !publishing && GalleryPublisher.Running == null && draft.rights && GalleryPublisher.Missing(draft) == null;
 
         private async Task PublishAsync()
         {
             if (!CanPublish()) return;
             publishing = true;
+            // Pressed: the button says so at once, before the first request.
             publishButton.SetEnabled(false);
-            void Progress(string text) { publishButton.text = text; Message(text, false); }
+            publishButton.text = "Publishing…";
+            void Progress(string text) { if (publishButton != null) publishButton.text = text; Message(text, false); }
             try
             {
                 await GalleryPublisher.PublishAsync(draft, Progress, CancellationToken.None);
                 publishing = false;
-                back();
+                // Only the window still showing this page closes: one rebuilt meanwhile shows the next draft instead.
+                if (panel != null) back();
             }
             catch (Exception ex)
             {
                 publishing = false;
                 Message(ex.Message + " Publish again to continue: what was already sent is kept.", true);
-                publishButton.text = "Publish " + draft.version;
-                publishButton.SetEnabled(CanPublish());
+                if (mine != null) Build();
             }
         }
     }

@@ -129,7 +129,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             try
             {
                 var drop = AccessoryImport.Expand(new[] { zip }, AccessoryImport.ProjectRoot, staging);
-                StringAssert.Contains("outside its folder", drop.refused.Single());
+                StringAssert.Contains("unsafe path", drop.refused.Single());
                 Assert.That(drop.models, Is.Empty);
                 Assert.That(File.Exists(Path.Combine(staging, "escaped.txt")), Is.False);
             }
@@ -146,7 +146,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             try
             {
                 var drop = AccessoryImport.Expand(new[] { zip }, AccessoryImport.ProjectRoot, staging);
-                StringAssert.Contains("too many files", drop.refused.Single());
+                StringAssert.Contains("more than " + AccessoryImport.MaxArchiveEntries + " files", drop.refused.Single());
                 Assert.That(Directory.Exists(Path.Combine(staging, "1")), Is.False);
             }
             finally { AccessoryImport.DeleteStaging(staging); }

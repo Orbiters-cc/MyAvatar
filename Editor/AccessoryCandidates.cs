@@ -41,11 +41,14 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly string[] Helpers = { "world", "bullet", "projectile", "placement", "reference", "helper", "target", "constraint", "raycast" };
         private static readonly string[] Addons = { "extra", "extras", "addon", "addons", "additional", "bonus" };
 
+        /// <summary>Whether a file can be an item to put on: a prefab or a model.</summary>
+        internal static bool IsItem(string path) => !string.IsNullOrEmpty(path) &&
+            (path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".obj", StringComparison.OrdinalIgnoreCase));
+
         internal static Choice Choose(IEnumerable<string> assetPaths)
         {
             var choice = new Choice();
-            var paths = assetPaths.Where(p => p.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".obj", StringComparison.OrdinalIgnoreCase))
-                .Distinct().ToList();
+            var paths = assetPaths.Where(IsItem).Distinct().ToList();
             // A model or prefab another candidate is built from (prefab variants, nested prefabs) is not an entry itself.
             var used = new HashSet<string>(paths.Where(p => p.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
                 .SelectMany(p => AssetDatabase.GetDependencies(p, true).Where(d => d != p)));

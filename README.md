@@ -1,5 +1,22 @@
 # My Avatar
 
+## 0.9.7 — 2026-10-09
+
+- **GoGoLoco in one click**: a Locomotion section, framed like face tracking, offers Franada’s GoGoLoco on every humanoid
+  avatar. **Add** downloads it from its VPM listing when it is missing (with VRCFury when the project has neither VRCFury
+  nor Modular Avatar) and puts its standard prefab ("GogoLoco All", for VRCFury, or for Modular Avatar in a project that
+  only has it) on the avatar in one Undo step, as GoGoLoco's own Add Prefabs window does. Once it is on, the section shows
+  its version with **Select** and **Remove**; a GoGoLoco set up another way (unpacked, or in the descriptor's playable
+  layers) shows as already set up. Franada is credited under the frame, with a link, and in the About window.
+- Face tracking and GoGoLoco share their one-click pieces: the downloads that finish after Unity has imported the
+  packages (`PackageSetup`), finding a setup already on the avatar (`PackageUse`) and the frame with its credit line
+  (`ToolHero`).
+- **Update in the list**: a gallery asset on the avatar shows when the gallery has a newer version for it (its version
+  pill turns green, "1.0.1 → 1.0.3") and an **Update** button installs it in place of the old one, with its progress and
+  a Retry if it fails, like the gallery page's cards (both use `GalleryInstaller.Update`).
+- Gallery packages of props that Toolkit fits to the avatar (the drawing pen, the hand screen) declare the Toolkit
+  version they need, also when the prefab refers to none of Toolkit's files.
+
 ## 0.9.6 — 2026-10-08
 
 - **Face tracking quick settings, simpler**: they fold into the face tracking frame (open right after the setup) and start
@@ -273,12 +290,13 @@ Once a drop has placed an image that can be compressed, a **Quick optimization**
 appears below the drop field with the estimated texture memory before and after. It
 opens by itself when a drop brings something to optimize; otherwise it stays folded
 under its title.
-**Optimize** caps the body material's textures (the largest part of the avatar's body mesh) at 2048 px and every other
+**Optimize** caps the textures of every material on the body and face meshes at 2048 px and every other
 texture the avatar's materials show at 512 px (never upscaling), and sets their PC (Standalone) import settings for the best quality per byte of VRAM:
 BC1 for colour whose alpha is unused (measured on the pixels, not taken from the
 importer), BC7 when alpha is used, BC5 for normal maps; mipmaps and mipmap streaming
-on, crunch off (crunch only shrinks the download, not memory), best compression
-quality. sRGB, alpha-is-transparency and every other setting stay as they are. Ramps,
+on, best compression quality. A crunched texture stays crunched (crunch only shrinks the download, not memory) and
+keeps its crunch quality; it only changes when that takes less memory. Sizes are worked out from the image's own size,
+so a texture capped earlier by this optimization can grow back, while a cap you set yourself is never raised. sRGB, alpha-is-transparency and every other setting stay as they are. Ramps,
 lookup tables, gradients, SDF maps, very thin strips, HDR images, render textures and
 textures that are not plain imported images are left alone. Mobile settings come later.
 
@@ -439,6 +457,12 @@ and assigns them only to renderers under this component.
 Original materials and external images are preserved. New normal maps get Unity's
 normal-map importer; new named mask maps use linear color. Standard shader normal,
 metallic, specular and emission keywords are enabled where appropriate.
+
+The slot an image lands in decides how it is imported, whoever chose it (name matching, Orbiters AI or the slot menu): a
+normal slot gets a normal map, colour slots sRGB colour, data slots (metallic, smoothness, occlusion, masks, height)
+linear data. An image this drop copied in is converted in place; one used elsewhere gets a converted copy beside it, so
+originals never change. A project texture already imported as a normal map counts as one even without "normal" in its
+name. Images can also be dragged from installed packages, read-only ones included.
 
 Only actual visible 2D texture properties on the current shader are considered,
 including locked/optimized shaders such as Poiyomi's `Hidden/Locked/...` shaders.

@@ -353,10 +353,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private void Update(GalleryCard card)
         {
-            var asset = card.Asset;
-            var variant = asset.fit.variants.FirstOrDefault(v => v.manifest?.setups?.Any(s => s.key == card.Installed.setup) == true) ?? asset.fit.variants[0];
-            var job = GalleryInstaller.Start(avatar, asset, asset.fit.release, variant, card.Installed.setup, card.Installed.installId);
-            card.Bind(asset, card.Installed, job);
+            card.Bind(card.Asset, card.Installed, GalleryInstaller.Update(avatar, card.Asset, card.Installed));
         }
 
         private void OpenQuestion(GalleryCard card, GalleryJob job)

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor.Refit;
+using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.VRChat;
 using UnityEditor;
@@ -315,10 +316,14 @@ namespace Orbiters.MyAvatar.Editor
             var itemHips = attachment.links.Where(l => l.to == hips && l.from != null).Select(l => l.from).FirstOrDefault()
                            ?? attachment.GetComponentsInChildren<Transform>(true).FirstOrDefault(t => t != attachment.transform && t.name == hips.name);
             if (itemHips == null) return;
-            var offset = ghost.Hips.position - itemHips.position;
-            if (offset.magnitude < 0.005f || offset.magnitude > 0.5f) return;
-            Undo.RecordObject(attachment.transform, "Line up " + attachment.name + " with the original base");
-            attachment.transform.position += offset;
+            // Measured and moved where the accessory rests, not where a posing preview shows it.
+            using (AccessoryPoseSync.Pause(root))
+            {
+                var offset = ghost.Hips.position - itemHips.position;
+                if (offset.magnitude < 0.005f || offset.magnitude > 0.5f) return;
+                Undo.RecordObject(attachment.transform, "Line up " + attachment.name + " with the original base");
+                attachment.transform.position += offset;
+            }
         }
     }
 }

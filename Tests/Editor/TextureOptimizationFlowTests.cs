@@ -208,6 +208,46 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(AssetDatabase.IsValidFolder(Path.GetDirectoryName(Path.GetDirectoryName(failed)).Replace('\\', '/')), Is.False);
         }
 
+        // Every material of the body mesh keeps up to 2048 px, not only its largest part: a face texture this optimization
+        // capped at 512 before goes back up to its own 1024. Other textures still get 512.
+        [Test] public void BodyMaterialsKeepTheirSizeAndGoBackUpFromAnEarlierCap()
+        {
+            var skin = Image("Skin_BaseColor", 1024, false);
+            var face = Image("Face_BaseColor", 1024, false);
+            var mesh = new Mesh { name = "BodyMesh" }; extraObjects.Add(mesh);
+            mesh.SetVertices(new List<Vector3> { Vector3.zero, Vector3.up, Vector3.right, Vector3.one, new Vector3(2, 0, 0), new Vector3(2, 1, 0) });
+            mesh.subMeshCount = 2;
+            mesh.SetTriangles(new[] { 0, 1, 2, 2, 1, 3, 2, 3, 4, 4, 3, 5 }, 0); mesh.SetTriangles(new[] { 0, 1, 2 }, 1);
+            Material Material(string name, Texture texture) { var m = new Material(Shader.Find("Standard")) { name = name }; m.SetTexture("_MainTex", texture); extraObjects.Add(m); return m; }
+            var body = new GameObject("Body"); body.transform.SetParent(mine.transform, false);
+            var skinned = body.AddComponent<SkinnedMeshRenderer>();
+            skinned.sharedMesh = mesh; skinned.sharedMaterials = new[] { Material("Skin", skin), Material("Face", face) };
+            var importer = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(face));
+            var original = TextureOptimization.Read(importer);
+            var capped = importer.GetPlatformTextureSettings(TextureOptimization.Platform);
+            capped.overridden = true; capped.maxTextureSize = 512; capped.format = TextureImporterFormat.DXT1;
+            importer.SetPlatformTextureSettings(capped); importer.SaveAndReimport();
+            avatar.optimization.textures.Add(new OptimizedTexture { guid = AssetDatabase.AssetPathToGUID(importer.assetPath), applied = true, before = original, after = TextureOptimization.Read(importer) });
+
+            var plan = TextureOptimization.Build(avatar);
+            Assert.AreEqual(1024, plan.changes.Single(c => c.texture == face).maxSize);
+            Assert.That(plan.changes.Where(c => c.texture == skin).All(c => c.maxSize >= 1024), Is.True);
+            Assert.AreEqual(512, plan.changes.Single(c => c.texture == opaque).maxSize);
+        }
+
+        // Crunch shrinks only the download: a crunched texture keeps it, and changes only to take less memory.
+        [Test] public void CrunchedTexturesKeepCrunch()
+        {
+            var crunched = Image("Crunched_BaseColor", 1024, false);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(crunched));
+            importer.textureCompression = TextureImporterCompression.Compressed; importer.crunchedCompression = true; importer.SaveAndReimport();
+            own.SetTexture("_DetailAlbedoMap", crunched);
+            var change = TextureOptimization.Build(avatar).changes.Single(c => c.texture == crunched);
+            Assert.AreEqual(TextureImporterFormat.DXT1Crunched, change.format);
+            Assert.AreEqual(512, change.maxSize);
+            Assert.That(change.after, Is.LessThan(change.before));
+        }
+
         [Test] public void EditedImportSettingsAreKept()
         {
             var importer = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(opaque));

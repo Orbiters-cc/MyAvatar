@@ -70,6 +70,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return job;
         }
 
+        /// <summary>Installs the newest version of <paramref name="asset"/> in place of <paramref name="installed"/>, with its setup.</summary>
+        internal static GalleryJob Update(MyAvatar avatar, GalleryAsset asset, Toolkit.VRChat.OrbitersAttachment.GalleryReceipt installed)
+        {
+            var variant = asset.fit.variants.FirstOrDefault(v => v.manifest?.setups?.Any(s => s.key == installed.setup) == true) ?? asset.fit.variants[0];
+            return Start(avatar, asset, asset.fit.release, variant, installed.setup, installed.installId);
+        }
+
         /// <summary>
         /// A creator's test of a package before publishing it: the same steps as a gallery installation from the built
         /// package (no download), so what buyers get is what the creator saw working on this avatar.
@@ -121,17 +128,20 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             GalleryJournal.Remove(job);
         }
 
-        /// <summary>Retries a failed job from the step it stopped at; nothing done before is done twice.</summary>
+        /// <summary>
+        /// Retries a failed job from the step it stopped at; nothing done before is done twice. Until the import finished,
+        /// it starts over from the package (kept when its checksum still matches; a creator's test from its built file).
+        /// </summary>
         internal static void Retry(GalleryJob job)
         {
             if (job == null || job.stage != GalleryJob.Failed) return;
-            job.stage = job.placed.Count > 0 ? GalleryJob.Verify : job.importGuids.Count > 0 && !job.importing ? GalleryJob.Attach : GalleryJob.Download;
+            job.stage = job.placed.Count > 0 ? GalleryJob.Verify : job.imported ? GalleryJob.Attach : job.assetId > 0 ? GalleryJob.Download : GalleryJob.Validate;
             job.error = null; job.cancelRequested = false;
             GalleryJournal.Save(job);
             _ = RunAsync(job);
         }
 
-        private static string CancelledText(GalleryJob job) => job.importGuids.Count > 0 && job.placed.Count == 0
+        private static string CancelledText(GalleryJob job) => job.imported && job.placed.Count == 0
             ? "Cancelled. Its files were imported but nothing was added to the avatar: Cleanup can remove them."
             : "Cancelled. Nothing was added to the avatar.";
 

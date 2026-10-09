@@ -81,9 +81,12 @@ namespace Orbiters.MyAvatar.Editor.Tests
             TextureChanges.UndoLast(avatar); Assert.AreEqual(0, renderer.sharedMaterial.GetFloat(scalar));
         }
 
-        [TestCase(false)]
-        [TestCase(true)]
-        public void SeparateMetallicAndRoughnessPackCorrectlyInEitherOrder(bool reverse)
+        // Applied together or one after the other (the second one chosen later), both maps stay applied in their channel.
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        [TestCase(true, true)]
+        public void SeparateMetallicAndRoughnessPackCorrectlyInEitherOrder(bool reverse, bool separately)
         {
             var avatar = Avatar(); var source = Standard("Body");
             var renderer = avatar.gameObject.AddComponent<MeshRenderer>(); renderer.sharedMaterial = source;
@@ -97,7 +100,15 @@ namespace Orbiters.MyAvatar.Editor.Tests
             if (reverse) entries.Reverse();
             Match(entries, TextureMatching.Slots(avatar));
             Assert.That(entries.All(e => e.property == "_MetallicGlossMap"), Is.True);
-            Assert.AreEqual(2, TextureChanges.Apply(avatar, entries, folder + "/Batch"));
+            if (separately)
+            {
+                var later = entries[1]; var (material, property) = (later.material, later.property);
+                later.material = null; later.property = null;
+                Assert.AreEqual(1, TextureChanges.Apply(avatar, entries, folder + "/Batch"));
+                later.material = material; later.property = property;
+                Assert.AreEqual(1, TextureChanges.Apply(avatar, entries, folder + "/Batch"));
+            }
+            else Assert.AreEqual(2, TextureChanges.Apply(avatar, entries, folder + "/Batch"));
             var map = renderer.sharedMaterial.GetTexture("_MetallicGlossMap");
             var pixel = SurfacePixel(map);
             Assert.That(pixel.r, Is.EqualTo(153 / 255f).Within(.015f));
@@ -436,6 +447,66 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 Assert.That(original.textureType, Is.EqualTo(settings.type));
                 Assert.That(original.sRGBTexture, Is.EqualTo(settings.srgb));
             }
+        }
+
+        // A file named without a role takes the import of the slot it lands in: the batch's own copy changes in place, a
+        // project texture used as it is gets a copy, and the original stays as it was.
+        [Test] public void ImagesTakeTheImportOfTheSlotTheyLandIn()
+        {
+            string id = Guid.NewGuid().ToString("N"), batch = "Assets/Orbiters/MyAvatar/AuditTest-" + id, own = "Assets/Orbiters/MyAvatar/Textures/AuditTest-" + id;
+            TextureImport.EnsureFolder(own); folders.Add(own); folders.Add(batch);
+            var dropped = Png(own, "Fabric_01", 4, (x, y) => new Color32(128, 128, 255, 255));
+            var project = Png(Folder(), "Cloth_Pattern", 4, (x, y) => new Color32(90, 90, 90, 255));
+            var avatar = Avatar(); var source = Standard("Cloth");
+            var renderer = avatar.gameObject.AddComponent<MeshRenderer>(); renderer.sharedMaterial = source;
+            var entries = new List<TextureEntry> {
+                new TextureEntry { texture = dropped, fileName = "Fabric_01.png", role = "unknown", material = source, property = "_BumpMap" },
+                new TextureEntry { texture = project, fileName = "Cloth_Pattern.png", role = "unknown", material = source, property = "_OcclusionMap" },
+            };
+            Assert.AreEqual(2, TextureChanges.Apply(avatar, entries, batch));
+            Assert.AreSame(dropped, renderer.sharedMaterial.GetTexture("_BumpMap"));
+            Assert.AreEqual(TextureImporterType.NormalMap, ((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(dropped))).textureType);
+            var occlusion = renderer.sharedMaterial.GetTexture("_OcclusionMap");
+            Assert.AreNotSame(project, occlusion);
+            StringAssert.StartsWith(batch + "/Textures/", AssetDatabase.GetAssetPath(occlusion));
+            Assert.IsFalse(((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(occlusion))).sRGBTexture);
+            Assert.IsTrue(((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(project))).sRGBTexture);
+            Assert.IsTrue(entries.All(e => e.applied));
+            TextureChanges.UndoLast(avatar); Assert.AreSame(source, renderer.sharedMaterial);
+            TextureChanges.UndoLast(avatar); Assert.AreSame(occlusion, renderer.sharedMaterial.GetTexture("_OcclusionMap"));
+            Undo.ClearUndo(renderer);
+        }
+
+        // A project texture already set up as a normal map keeps that setup when its name says nothing.
+        [UnityTest] public IEnumerator ProjectNormalMapNamedWithoutARoleIsUsedAsItIs()
+        {
+            var texture = Png(Folder(), "Fabric_02", 4, (x, y) => new Color32(128, 128, 255, 255));
+            string path = AssetDatabase.GetAssetPath(texture);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(path);
+            importer.textureType = TextureImporterType.NormalMap; importer.SaveAndReimport();
+            string batch = "AuditTest-" + Guid.NewGuid().ToString("N");
+            folders.Add("Assets/Orbiters/MyAvatar/Textures/" + batch);
+            var import = TextureImport.ImportAsync(new[] { Path.GetFullPath(path) }, "Assets/Orbiters/MyAvatar/" + batch, (_, __) => { }, CancellationToken.None);
+            yield return Wait(import);
+            Assert.That(import.Result.Single().texture, Is.SameAs(AssetDatabase.LoadAssetAtPath<Texture2D>(path)));
+            Assert.That(import.Result.Single().role, Is.EqualTo("normal"));
+        }
+
+        // "Body.png" and "body.png" from two folders are one file name on Windows: their copies get distinct names.
+        [Test] public void CopiesOfNamesDifferingOnlyInCaseDoNotCollide()
+        {
+            string folder = Folder(), output = Folder();
+            TextureImport.EnsureFolder(folder + "/A"); TextureImport.EnsureFolder(folder + "/B");
+            var upper = Png(folder + "/A", "Body", 4, (x, y) => new Color32(10, 20, 30, 255));
+            var lower = Png(folder + "/B", "body", 4, (x, y) => new Color32(30, 20, 10, 255));
+            var copies = TextureOptimization.Duplicate(new List<TextureOptimization.TexturePlan> {
+                new TextureOptimization.TexturePlan { texture = upper, path = AssetDatabase.GetAssetPath(upper) },
+                new TextureOptimization.TexturePlan { texture = lower, path = AssetDatabase.GetAssetPath(lower) },
+            }, output);
+            Assert.AreEqual(2, copies.Count);
+            var paths = copies.Values.Select(AssetDatabase.GetAssetPath).ToList();
+            Assert.AreEqual(2, paths.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.That(paths.All(p => p.StartsWith(output + "/Textures/", StringComparison.Ordinal)));
         }
 
         [Test] public void AlphaIsMeasuredOnEveryTexel()

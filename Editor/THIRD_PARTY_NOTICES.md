@@ -40,6 +40,10 @@ Unless required by applicable law or agreed to in writing, software distributed 
 language governing permissions and limitations under the License.
 ```
 
+## GoGoLoco
+Locomotion by Franada’s GoGoLoco. My Avatar downloads GoGoLoco from its author’s VPM listing (https://spokeek.github.io/goloco/) and adds its prefab to the avatar when you choose Add in the Locomotion section; it does not ship or modify it. GoGoLoco publishes no license file: its use is under its author’s terms.
+https://linktr.ee/franada
+
 ## VRCFury
 Installs accessories with Armature Link, merges their toggles and animations, and the face tracking template, at build time. Downloaded from VRCFury's own listing (vcc.vrcfury.com), never shipped with My Avatar.
 https://vrcfury.com
