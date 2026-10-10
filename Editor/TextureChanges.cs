@@ -361,9 +361,15 @@ namespace Orbiters.MyAvatar.Editor
         internal const bool Commits = false;
 #endif
 
-        internal static Task<string> SaveAsync(MyAvatar avatar)
+        internal static Task<string> SaveAsync(MyAvatar avatar) => SaveAsync(avatar.gameObject.scene, avatar, "texture change", null);
+
+        /// <summary>
+        /// Saves the modified assets and <paramref name="scene"/>; with Unit Git, also records a local checkpoint named
+        /// <paramref name="checkpoint"/> holding the scene, My Avatar's files for <paramref name="avatar"/> (when given) and
+        /// the <paramref name="touched"/> assets.
+        /// </summary>
+        internal static Task<string> SaveAsync(UnityEngine.SceneManagement.Scene scene, MyAvatar avatar, string checkpoint, IEnumerable<string> touched)
         {
-            var scene = avatar.gameObject.scene;
             if (string.IsNullOrEmpty(scene.path)) throw new InvalidOperationException("Save this scene in Assets first, then click Save.");
             AssetDatabase.SaveAssets();
             if (!EditorSceneManager.SaveScene(scene)) throw new InvalidOperationException("The avatar scene could not be saved.");
@@ -371,7 +377,7 @@ namespace Orbiters.MyAvatar.Editor
             string root = Path.GetDirectoryName(Application.dataPath);
             if (!File.Exists(Path.Combine(root, ".git")) && !Directory.Exists(Path.Combine(root, ".git")))
                 return Task.FromResult("Saved. Initialize the project's Git repository in Unit Git to also record a checkpoint.");
-            return CommitAsync(avatar, root);
+            return CommitAsync(CheckpointPaths(scene, avatar, touched), root, checkpoint);
 #else
             return Task.FromResult("Saved.");
 #endif
@@ -379,9 +385,10 @@ namespace Orbiters.MyAvatar.Editor
 
         // What a checkpoint records: the scene, the dropped textures, generated batches, and the textures whose import
         // settings Quick optimization changed in place (their .meta holds those settings).
-        internal static HashSet<string> CheckpointPaths(MyAvatar avatar)
+        internal static HashSet<string> CheckpointPaths(MyAvatar avatar) => CheckpointPaths(avatar.gameObject.scene, avatar, null);
+
+        internal static HashSet<string> CheckpointPaths(UnityEngine.SceneManagement.Scene scene, MyAvatar avatar, IEnumerable<string> touched)
         {
-            var scene = avatar.gameObject.scene;
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(scene.path))
             {
@@ -390,12 +397,12 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var dependency in AssetDatabase.GetDependencies(scene.path, true).Where(p => p.StartsWith("Assets/Orbiters/MyAvatar/", StringComparison.Ordinal)))
                 { paths.Add(dependency); if (File.Exists(dependency + ".meta")) paths.Add(dependency + ".meta"); }
             }
-            var textures = avatar.textures.Where(t => t.texture).Select(t => AssetDatabase.GetAssetPath(t.texture))
-                .Concat(avatar.optimization.textures.Select(t => AssetDatabase.GUIDToAssetPath(t.guid)));
-            foreach (var texturePath in textures)
-                if (!string.IsNullOrEmpty(texturePath) && texturePath.StartsWith("Assets/", StringComparison.Ordinal))
-                { paths.Add(texturePath); paths.Add(texturePath + ".meta"); }
-            if (!string.IsNullOrEmpty(avatar.batchFolder) && Directory.Exists(avatar.batchFolder))
+            var textures = avatar ? avatar.textures.Where(t => t.texture).Select(t => AssetDatabase.GetAssetPath(t.texture))
+                .Concat(avatar.optimization.textures.Select(t => AssetDatabase.GUIDToAssetPath(t.guid))) : Enumerable.Empty<string>();
+            foreach (var assetPath in textures.Concat(touched ?? Enumerable.Empty<string>()))
+                if (!string.IsNullOrEmpty(assetPath) && assetPath.StartsWith("Assets/", StringComparison.Ordinal))
+                { paths.Add(assetPath); paths.Add(assetPath + ".meta"); }
+            if (avatar && !string.IsNullOrEmpty(avatar.batchFolder) && Directory.Exists(avatar.batchFolder))
                 foreach (var file in Directory.EnumerateFiles(avatar.batchFolder, "*", SearchOption.AllDirectories)) paths.Add(file.Replace('\\', '/'));
             foreach (var path in paths.ToArray())
             {
@@ -407,9 +414,9 @@ namespace Orbiters.MyAvatar.Editor
         }
 
 #if MYAVATAR_UNITGIT
-        private static async Task<string> CommitAsync(MyAvatar avatar, string root)
+        private static async Task<string> CommitAsync(HashSet<string> paths, string root, string checkpoint)
         {
-            var result = await UnitGitReleases.CommitProjectFilesAsync(root, "texture change", CheckpointPaths(avatar).Where(File.Exists).ToArray());
+            var result = await UnitGitReleases.CommitProjectFilesAsync(root, checkpoint, paths.Where(File.Exists).ToArray());
             if (!result.Success) throw new InvalidOperationException("Scene and assets saved, but the Git checkpoint failed: " + result.Message);
             if (result.NoChanges) return "Saved · no new changes to checkpoint.";
             return "Saved · commit " + result.CommitHash.Substring(0, Math.Min(8, result.CommitHash.Length));

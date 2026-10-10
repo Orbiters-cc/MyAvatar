@@ -1,0 +1,62 @@
+/* Likes and reviews in an asset's details: filled rows like the details' dependencies, the thumb-up pill of MCB's custom
+   base likes, green when liked. */
+.reviews { margin-top: 2px; }
+.reviews__header { flex-direction: row; align-items: center; }
+.reviews__count { margin: 14px 0 6px 6px; padding: 0; font-size: 11px; -unity-font-style: bold; color: #8a8a8a; }
+.reviews__hint { margin: 0 0 8px 0; padding: 0; font-size: 11px; color: #8a8a8a; white-space: normal; }
+.reviews__message { flex-direction: row; align-items: center; margin-top: 6px; }
+.reviews__message-text { flex-shrink: 1; margin: 0; padding: 0; font-size: 11px; color: #ff7a7a; white-space: normal; }
+.reviews__message .gallery-link { margin-left: 6px; }
+.reviews__skeleton { height: 46px; border-radius: 12px; background-color: #222222; }
+.reviews__more { flex-direction: row; justify-content: center; margin-top: 2px; }
+
+/* Composer and the edit field */
+.reviews__composer { margin-bottom: 6px; }
+.review-field { margin: 0; }
+.review-field > .unity-text-field__input, .review-field .unity-base-text-field__input { min-height: 34px; padding: 8px 12px; border-radius: 12px; border-width: 0;
+    background-color: #2a2a2a; color: #ffffff; white-space: normal; -unity-text-align: upper-left; font-size: 11px; }
+.review-field__hint { top: 10px; left: 13px; }
+.review-field__actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 8px; }
+.review-field__actions .mcb-button { height: 28px; min-height: 28px; margin: 0 0 0 6px; padding: 0 14px; border-radius: 14px; font-size: 11px; }
+.review .review-field { margin-top: 6px; }
+
+/* A review */
+.review { flex-direction: row; align-items: flex-start; margin-bottom: 6px; padding: 10px; border-radius: 12px; background-color: #242424;
+    opacity: 1; transition-property: opacity; transition-duration: 0.2s; }
+.review--pending { opacity: 0.55; }
+.review__avatar { width: 26px; height: 26px; min-width: 26px; border-radius: 13px; overflow: hidden; background-color: #333333; }
+.review__body { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-left: 10px; }
+.review__header { flex-direction: row; flex-wrap: wrap; align-items: center; min-height: 18px; }
+.review__author { margin: 0; padding: 0; font-size: 12px; -unity-font-style: bold; color: #ffffff; }
+.review__badge { height: 16px; margin: 0 0 0 6px; padding: 0 6px; border-radius: 8px; font-size: 9px; -unity-font-style: bold; -unity-text-align: middle-center;
+    color: #06140c; background-color: #00DA6D; }
+.review__badge--creator { color: #ffffff; background-color: #8a7dff; }
+.review__meta { margin: 0 0 0 6px; padding: 0; font-size: 10px; color: #8a8a8a; }
+.review__text { margin: 3px 0 0 0; padding: 0; font-size: 11px; color: #d6d6d6; white-space: normal; }
+.review__footer { flex-direction: row; align-items: center; margin-top: 7px; }
+
+/* Like pill: the asset's in the title row, smaller under each review */
+.review-like { flex-direction: row; align-items: center; height: 26px; min-height: 26px; margin: 0; padding: 0 10px; border-width: 0; border-radius: 13px;
+    background-color: #2a2a2a; transition-property: background-color, scale; transition-duration: 0.12s; }
+.review-like:hover { background-color: #343434; }
+.review-like:active { scale: 0.94 0.94; }
+.review-like .review-icon { width: 14px; height: 14px; margin-right: 6px; --icon-color: #e6e6e6; }
+.review-like__count { margin: 0; padding: 0; font-size: 11px; -unity-font-style: bold; color: #ffffff; }
+.review-like--liked, .review-like--liked:hover { background-color: rgba(0, 218, 109, 0.14); }
+.review-like--liked .review-icon { --icon-color: #00DA6D; }
+.review-like--liked .review-like__count { color: #00DA6D; }
+.review-like--small { height: 22px; min-height: 22px; padding: 0 8px; border-radius: 11px; background-color: #2e2e2e; }
+.review-like--small .review-icon { width: 11px; height: 11px; margin-right: 5px; }
+.review-like--small .review-like__count { font-size: 10px; }
+.review-like:disabled { opacity: 0.6; }
+.detail-title-row > .review-like { margin-left: auto; }
+
+/* Edit and delete: small round buttons; delete asks once more in place */
+.review__tool { flex-direction: row; align-items: center; justify-content: center; width: 22px; height: 22px; min-height: 22px; margin: 0 0 0 6px; padding: 0;
+    border-width: 0; border-radius: 11px; background-color: #2e2e2e; transition-property: background-color; transition-duration: 0.12s; }
+.review__tool:hover { background-color: #3a3a3a; }
+.review__tool .review-icon { width: 11px; height: 11px; --icon-color: #bdbdbd; }
+.review__tool--delete:hover, .review__tool--armed { background-color: rgba(255, 90, 90, 0.16); }
+.review__tool--delete:hover .review-icon, .review__tool--armed .review-icon { --icon-color: #ff8a8a; }
+.review__tool--armed { width: auto; padding: 0 8px; }
+.review__tool-label { margin: 0 0 0 4px; padding: 0; font-size: 10px; -unity-font-style: bold; color: #ff8a8a; }

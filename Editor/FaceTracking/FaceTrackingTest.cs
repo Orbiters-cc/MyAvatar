@@ -155,8 +155,11 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             Smoothing = marker.smoothing;
             if (Build != null && Build.Done && Build.Expressive != marker.expressiveMouth) { Rebuild(); return; }
             if (rig == null) { Changed?.Invoke(); return; }
-            if (smoothing && Build.Fx != null && FaceTrackingBuild.SetMouthSlowdown(Build.Fx, FaceTrackingBuild.MouthSlowdown(Smoothing)) > 0)
-                CreateRig();
+            if (smoothing && Build.Fx != null)
+            {
+                FaceTrackingBuild.Pace(Build.Fx, Smoothing);
+                if (FaceTrackingBuild.SetMouthSlowdown(Build.Fx, FaceTrackingBuild.MouthSlowdown(Smoothing)) > 0) CreateRig();
+            }
             ApplyToRig();
             Changed?.Invoke();
         }

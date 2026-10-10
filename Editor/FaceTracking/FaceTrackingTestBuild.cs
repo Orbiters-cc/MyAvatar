@@ -219,6 +219,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (standard == null) throw new InvalidOperationException("unknown blendshape standard “" + marker.standard + "”");
             FaceTrackingBuild.Finish(Fx, standard, facePath, face.sharedMesh);
             FaceTrackingBuild.Tune(Fx, facePath, face.sharedMesh, Expressive, FaceTrackingBuild.MouthSlowdown(marker.smoothing));
+            FaceTrackingBuild.Pace(Fx, marker.smoothing);
         }
 
         private static AnimationClip Rewrite(AnimationClip clip, List<(string from, string to, bool delete)> rewrites)

@@ -450,7 +450,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
         }
 
         // A file named without a role takes the import of the slot it lands in: the batch's own copy changes in place, a
-        // project texture used as it is gets a copy, and the original stays as it was.
+        // project texture used as it is gets a copy, and the original stays as it was. Reimported in place, the dropped image
+        // is the same asset but Unity reloads it, so it is compared as an asset, not as the same C# object.
         [Test] public void ImagesTakeTheImportOfTheSlotTheyLandIn()
         {
             string id = Guid.NewGuid().ToString("N"), batch = "Assets/Orbiters/MyAvatar/AuditTest-" + id, own = "Assets/Orbiters/MyAvatar/Textures/AuditTest-" + id;
@@ -464,7 +465,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 new TextureEntry { texture = project, fileName = "Cloth_Pattern.png", role = "unknown", material = source, property = "_OcclusionMap" },
             };
             Assert.AreEqual(2, TextureChanges.Apply(avatar, entries, batch));
-            Assert.AreSame(dropped, renderer.sharedMaterial.GetTexture("_BumpMap"));
+            Assert.AreEqual(dropped.GetInstanceID(), renderer.sharedMaterial.GetTexture("_BumpMap").GetInstanceID());
             Assert.AreEqual(TextureImporterType.NormalMap, ((TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(dropped))).textureType);
             var occlusion = renderer.sharedMaterial.GetTexture("_OcclusionMap");
             Assert.AreNotSame(project, occlusion);
@@ -727,7 +728,11 @@ namespace Orbiters.MyAvatar.Editor.Tests
             foreach (var slot in slots) slot.fillOnly = true;
             var main = slots.Single(s => s.property == "_MainTex");
             var normal = Entry("Default_Normal.png");
-            normal.texture = Png(folder, "Default_Normal", 4, (x, y) => new Color32(128, 128, 255, 255));
+            // Imported as a normal map, as a drop hands it over: a project image imported otherwise would get a converted copy.
+            string normalPath = AssetDatabase.GetAssetPath(Png(folder, "Default_Normal", 4, (x, y) => new Color32(128, 128, 255, 255)));
+            var normalImport = (TextureImporter)AssetImporter.GetAtPath(normalPath);
+            normalImport.textureType = TextureImporterType.NormalMap; normalImport.SaveAndReimport();
+            normal.texture = AssetDatabase.LoadAssetAtPath<Texture2D>(normalPath);
             normal.material = repaired; normal.property = "_BumpMap";
             var entries = new List<TextureEntry> { normal, pattern };
             string batch = folder + "/Batch";

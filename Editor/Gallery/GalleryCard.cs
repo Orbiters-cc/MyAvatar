@@ -24,7 +24,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private readonly Action<GalleryCard> info, primary;
         private readonly VisualElement media, chips, actions;
         private readonly Image image;
-        private readonly Label title, creatorName, meta, status, accessChip, fitChip;
+        private readonly Label title, creatorName, meta, status, accessChip, fitChip, likes;
         private readonly Image creatorAvatar;
         private readonly VectorIcon trusted;
         private VisualElement shimmer;
@@ -50,6 +50,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             creatorName = GalleryUI.Text("", "gallery-creator__name", creator);
             trusted = new VectorIcon(IconGlyph.Check) { tooltip = "Trusted creator: its code installs without a warning." };
             trusted.AddToClassList("gallery-creator__trusted"); creator.Add(trusted);
+            // Its likes, at the end of the creator line.
+            var liked = GalleryUI.Box("gallery-card__likes", creator);
+            liked.Add(new GalleryReviewIcon(GalleryReviewIcon.Kind.Like));
+            likes = GalleryUI.Text("", "gallery-card__likes-count", liked);
             meta = GalleryUI.Text("", "gallery-card__meta", body);
             actions = GalleryUI.Box("gallery-card__actions", body);
             status = GalleryUI.Text("", "gallery-card__status", body);
@@ -65,6 +69,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             creatorName.text = asset.creator?.username ?? "Unknown creator";
             trusted.style.display = asset.creator?.trusted == true ? DisplayStyle.Flex : DisplayStyle.None;
             if (!string.IsNullOrEmpty(asset.creator?.avatarUrl)) GalleryImages.Show(creatorAvatar, asset.creator.avatarUrl);
+            SetLikes(asset.likeCount);
             if (newPicture)
             {
                 image.RemoveFromClassList(GalleryImages.ShownClass);
@@ -155,6 +160,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 AddToClassList("gallery-pop");
                 schedule.Execute(() => RemoveFromClassList("gallery-pop")).StartingIn(180);
             }
+        }
+
+        /// <summary>The asset's like count; liking it in its details updates the card at once.</summary>
+        internal void SetLikes(int count)
+        {
+            if (Asset != null) Asset.likeCount = count;
+            likes.text = count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            likes.parent.style.display = count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         /// <summary>Shows a picture that isn't on Orbiters yet (a creator's listing as buyers will see it).</summary>

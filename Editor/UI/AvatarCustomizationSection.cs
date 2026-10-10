@@ -10,7 +10,8 @@ using UnityEngine.UIElements;
 namespace Orbiters.MyAvatar.Editor
 {
     // The avatar's own options in one frame: who can grab, pose and stretch its hair, ears, tail and toes (their PhysBones),
-    // one row each with an "All" row on top, and its looks when it has them (Rexouium's feather groups and ear size).
+    // one row each with an "All" row on top, and its looks when it has them (Rexouium's feather groups and ear size, Novabeast's
+    // parts, breasts and tail size).
     // Rows are rebuilt only when the PhysBones or chains themselves change; any other edit (an Undo of a choice) updates
     // the rows in place so nothing jumps.
     internal sealed class AvatarCustomizationSection : AvatarSection
@@ -183,9 +184,13 @@ namespace Orbiters.MyAvatar.Editor
         private void BuildLooks()
         {
             looks.Clear();
-            var options = RexouiumOptions.Find(TextureOptimization.AvatarRoot(avatar));
-            if (!options.Any) { looks.style.display = DisplayStyle.None; return; }
+            var root = TextureOptimization.AvatarRoot(avatar);
+            var options = RexouiumOptions.Find(root);
+            var nova = NovabeastOptions.Find(root);
+            if (!options.Any && !nova.Any) { looks.style.display = DisplayStyle.None; return; }
             var title = new Label("Looks"); title.AddToClassList("custom__subtitle"); looks.Add(title);
+            if (nova.Any) BuildNovabeast(nova);
+            if (!options.Any) return;
             if (options.Feathers.Count > 0)
             {
                 var line = new VisualElement(); line.AddToClassList("custom__chips-line"); looks.Add(line);
@@ -196,7 +201,8 @@ namespace Orbiters.MyAvatar.Editor
                     var item = group;
                     var chip = MyAvatarEditor.Button("", null);
                     chip.AddToClassList("custom__chip");
-                    chip.tooltip = "Show the " + item.Label.ToLowerInvariant() + " feathers: what the avatar starts with in VRChat (its “" + item.Parameter + "” menu toggle), shown in the scene too.";
+                    chip.tooltip = "Show the " + item.Label.ToLowerInvariant() + " feathers, in the scene and in VRChat. Feathers hidden here are left out of the upload " +
+                                   "(their meshes, materials and textures), with their “" + item.Parameter + "” menu toggle.";
                     var check = new VectorIcon(IconGlyph.Check); check.AddToClassList("custom__chip-check"); chip.Add(check);
                     var text = new Label(item.Label); text.AddToClassList("custom__chip-text"); text.pickingMode = PickingMode.Ignore; chip.Add(text);
                     void Show(bool on) => chip.EnableInClassList("custom__chip--on", on);
@@ -209,6 +215,63 @@ namespace Orbiters.MyAvatar.Editor
             }
             if (options.Ears != null) looks.Add(Ears(options));
         }
+
+        // Novabeast: its parts as chips (hidden ones stay hidden in VRChat, their toggle left out), its breasts and tail size as sliders.
+        private void BuildNovabeast(NovabeastOptions.Options options)
+        {
+            if (options.Parts.Count > 0)
+            {
+                var line = new VisualElement(); line.AddToClassList("custom__chips-line"); looks.Add(line);
+                var label = new Label("Parts"); label.AddToClassList("custom__chips-label"); line.Add(label);
+                var chips = new VisualElement(); chips.AddToClassList("custom__chips"); line.Add(chips);
+                foreach (var part in options.Parts)
+                {
+                    var item = part;
+                    var chip = MyAvatarEditor.Button("", null);
+                    chip.AddToClassList("custom__chip");
+                    chip.tooltip = "Show the " + item.Label.ToLowerInvariant() + ", in the scene and in VRChat. Hidden here, it stays hidden: its “" + item.Parameter + "” menu toggle is left out of the upload.";
+                    var check = new VectorIcon(IconGlyph.Check); check.AddToClassList("custom__chip-check"); chip.Add(check);
+                    var text = new Label(item.Label); text.AddToClassList("custom__chip-text"); text.pickingMode = PickingMode.Ignore; chip.Add(text);
+                    void Show(bool on) => chip.EnableInClassList("custom__chip--on", on);
+                    Show(NovabeastOptions.Shown(options, item));
+                    // The chip turns at once; the menu default and the scene follow.
+                    chip.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) Show(!chip.ClassListContains("custom__chip--on")); }, TrickleDown.TrickleDown);
+                    chip.clicked += () => NovabeastOptions.SetShown(options, item, chip.ClassListContains("custom__chip--on"));
+                    chips.Add(chip);
+                }
+            }
+            if (options.Breasts != null) looks.Add(Amount(options, options.Breasts, "Breasts, from none to their biggest: what the avatar starts with in VRChat (its Breasts slider), shown in the scene too."));
+            if (options.Tail != null) looks.Add(Amount(options, options.Tail, "Tail size, from its own to the smallest: what the avatar starts with in VRChat (its Tail Size slider), shown in the scene too."));
+        }
+
+        private static VisualElement Amount(NovabeastOptions.Options options, NovabeastOptions.Amount amount, string tip)
+        {
+            var row = new VisualElement(); row.AddToClassList("custom__slider-row"); row.tooltip = tip;
+            var label = new Label(amount.Label); label.AddToClassList("custom__chips-label"); row.Add(label);
+            var track = new VisualElement(); track.AddToClassList("custom__centered"); row.Add(track);
+            var slider = new Slider(0f, 1f); slider.SetValueWithoutNotify(NovabeastOptions.Value(options, amount)); track.Add(slider);
+            var value = new Label(Percent(amount, slider.value)); value.AddToClassList("custom__value"); row.Add(value);
+            IVisualElementScheduledItem apply = null;
+            Action write = null;
+            void Flush() { apply?.Pause(); var pending = write; write = null; pending?.Invoke(); }
+            slider.RegisterValueChangedCallback(evt =>
+            {
+                // The number follows the handle at once; the default and the scene are written once it rests.
+                float at = Mathf.Round(evt.newValue * 100f) / 100f;
+                value.text = Percent(amount, at);
+                write = () => NovabeastOptions.SetValue(options, amount, at);
+                apply?.Pause();
+                apply = slider.schedule.Execute(Flush).StartingIn(60);
+            });
+            slider.RegisterCallback<PointerUpEvent>(_ => Flush(), TrickleDown.TrickleDown);
+            slider.RegisterCallback<DetachFromPanelEvent>(_ => Flush());
+            // Double-click back to none.
+            slider.RegisterCallback<MouseDownEvent>(e => { if (e.clickCount == 2) { slider.value = 0f; Flush(); } }, TrickleDown.TrickleDown);
+            return row;
+        }
+
+        private static string Percent(NovabeastOptions.Amount amount, float value) =>
+            amount.Timed && value <= .01f ? "Off" : Mathf.RoundToInt(value * 100f) + "%";
 
         private static VisualElement Ears(RexouiumOptions.Options options)
         {

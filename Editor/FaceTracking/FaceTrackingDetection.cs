@@ -16,15 +16,31 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         public FaceTrackingStandard Standard;
         public int Found, Needed;
         public List<string> Missing = new List<string>();
+        /// <summary>The standard's core shapes by part: the eyes (with the brows) and the mouth (jaw, lips, cheeks, tongue).</summary>
+        public FaceTrackingPart Eyes = new FaceTrackingPart("Eyes"), Mouth = new FaceTrackingPart("Mouth");
         /// <summary>The template My Avatar set up on this avatar, if any.</summary>
         public MyAvatarFaceTracking Ours;
         /// <summary>Another face tracking setup found on the avatar (what it is), or null.</summary>
         public string Existing;
         public GameObject ExistingObject;
 
-        // "Most of the blendshapes": three quarters of the standard's core shapes.
-        public bool Ready => Standard != null && Needed > 0 && Found * 4 >= Needed * 3;
+        // Worth setting up when one part has most of its shapes: a face made for lip tracking only (or eyes only) still moves.
+        public bool Ready => Standard != null && (Eyes.Ready || Mouth.Ready);
         public bool SetUp => Ours != null || Existing != null;
+        /// <summary>The features this face can show: a part without a single shape of the standard is left out.</summary>
+        public FaceTrackingFeatures Trackable => FaceTrackingDetection.Features(Eyes.Found > 0, Mouth.Found > 0);
+    }
+
+    /// <summary>One part of the face a standard animates: how many of its core shapes the face has, and which are missing.</summary>
+    internal sealed class FaceTrackingPart
+    {
+        public readonly string Name;
+        public int Found, Needed;
+        public readonly List<string> Missing = new List<string>();
+        public FaceTrackingPart(string name) { Name = name; }
+
+        // "Most of the blendshapes": three quarters of the part's core shapes.
+        public bool Ready => Needed > 0 && Found * 4 >= Needed * 3;
     }
 
     internal static class FaceTrackingDetection
@@ -53,14 +69,60 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (report.Face == null) return report;
             var shapes = FaceTrackingNames.Index(Shapes(report.Face.sharedMesh));
             var ours = report.Ours != null ? FaceTrackingStandard.Find(report.Ours.standard) : null;
+            // The standard whose usable parts (those with most of their shapes) cover most of it; else the best covered one.
+            // Ties go to the first: Unified Expressions is what VRCFaceTracking speaks natively.
+            (int usable, int found)? best = null;
             foreach (var standard in ours != null ? new[] { ours } : FaceTrackingStandard.All)
             {
-                var missing = standard.Core.Where(name => FaceTrackingNames.Resolve(name, shapes) == null).ToList();
-                int found = standard.Core.Length - missing.Count;
-                if (report.Standard != null && found * report.Needed <= report.Found * standard.Core.Length) continue;
-                report.Standard = standard; report.Found = found; report.Needed = standard.Core.Length; report.Missing = missing;
+                var (eyes, mouth) = Parts(standard, shapes);
+                int found = eyes.Found + mouth.Found, usable = (eyes.Ready ? eyes.Found : 0) + (mouth.Ready ? mouth.Found : 0);
+                if (best != null && !Better(usable, found, standard.Core.Length, best.Value.usable, best.Value.found, report.Needed)) continue;
+                best = (usable, found);
+                report.Standard = standard; report.Found = found; report.Needed = standard.Core.Length;
+                report.Missing = eyes.Missing.Concat(mouth.Missing).ToList();
+                report.Eyes = eyes; report.Mouth = mouth;
             }
             return report;
+        }
+
+        // a/aTotal against b/bTotal: more of the standard usable first, then more of it found.
+        private static bool Better(int aUsable, int aFound, int aTotal, int bUsable, int bFound, int bTotal)
+        {
+            long usable = (long)aUsable * bTotal - (long)bUsable * aTotal;
+            return usable != 0 ? usable > 0 : (long)aFound * bTotal > (long)bFound * aTotal;
+        }
+
+        /// <summary>The eye and brow shapes of a standard ("EyeClosedLeft", "browDownLeft", "Eye_Left_Blink"); the rest is the mouth's.</summary>
+        internal static bool IsEyes(string coreShape) =>
+            coreShape.StartsWith("eye", StringComparison.OrdinalIgnoreCase) || coreShape.StartsWith("brow", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>How much of <paramref name="standard"/>'s eyes and mouth the face with <paramref name="shapes"/> (<see cref="FaceTrackingNames.Index"/>) has.</summary>
+        internal static (FaceTrackingPart eyes, FaceTrackingPart mouth) Parts(FaceTrackingStandard standard, IReadOnlyDictionary<string, string> shapes)
+        {
+            var eyes = new FaceTrackingPart("Eyes"); var mouth = new FaceTrackingPart("Mouth");
+            foreach (string name in standard.Core)
+            {
+                var part = IsEyes(name) ? eyes : mouth;
+                part.Needed++;
+                if (FaceTrackingNames.Resolve(name, shapes) != null) part.Found++; else part.Missing.Add(name);
+            }
+            return (eyes, mouth);
+        }
+
+        /// <summary>The features of the eyes (pupils and brows with them) and of the mouth (its parts, tongue and cheeks).</summary>
+        internal static FaceTrackingFeatures Features(bool eyes, bool mouth) =>
+            (eyes ? FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Pupils | FaceTrackingFeatures.Brows : FaceTrackingFeatures.None) |
+            (mouth ? FaceTrackingFeatures.All & ~(FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Pupils | FaceTrackingFeatures.Brows) : FaceTrackingFeatures.None);
+
+        /// <summary>
+        /// The features <paramref name="face"/> can show with <paramref name="standard"/>'s template: a part without any of its
+        /// shapes moves nothing, so its parameters are left out (they come back once the face has them). All when unknown.
+        /// </summary>
+        internal static FaceTrackingFeatures Trackable(FaceTrackingStandard standard, Mesh face)
+        {
+            if (standard == null || face == null) return FaceTrackingFeatures.All;
+            var (eyes, mouth) = Parts(standard, FaceTrackingNames.Index(Shapes(face)));
+            return Features(eyes.Found > 0, mouth.Found > 0);
         }
 
         /// <summary>The mesh with the face: the one lip sync uses, else "Body", else the one with the most blendshapes.</summary>

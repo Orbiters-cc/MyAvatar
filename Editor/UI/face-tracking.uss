@@ -154,3 +154,23 @@
 .ft-credit { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 .ft-credit .avatar-caption { margin-top: 0; }
 .mcb-button.avatar-link.ft-credit__link { padding: 0 4px; margin-left: 2px; color: #b8b8b8; }
+
+/* The parts of the face that will move, in the hero: green with most of their shapes, amber with some, grey with none. */
+.ft-parts { flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+.ft-part { flex-direction: row; align-items: center; height: 22px; margin: 0 6px 0 0; padding: 0 9px 0 8px; border-radius: 11px; background-color: rgba(255, 255, 255, 0.05); }
+.ft-part__dot { width: 7px; height: 7px; flex-shrink: 0; margin-right: 6px; border-radius: 4px; background-color: #6f6f6f; }
+.ft-part__name { margin: 0; padding: 0; font-size: 11px; color: #e6e6e6; -unity-font-style: bold; }
+.ft-part__count { margin: 0 0 0 6px; padding: 0; font-size: 10px; color: #9a9a9a; }
+.ft-part--ready { background-color: rgba(0, 218, 109, 0.12); }
+.ft-part--ready .ft-part__dot { background-color: #00DA6D; }
+.ft-part--ready .ft-part__count { color: #9ad9b8; }
+.ft-part--some .ft-part__dot { background-color: #ffb020; }
+.ft-part--none .ft-part__name { color: #9a9a9a; }
+
+/* GoGoLoco's versions: big tiles like the trackers, with the version's icon and its parameter bits. */
+.gogo-variants { margin-top: 14px; padding-top: 12px; border-top-width: 1px; border-color: rgba(255, 255, 255, 0.06); }
+.gogo-variants__title { margin-bottom: 7px; }
+.mcb-button.ft-tracker.gogo-variant { flex-basis: 40%; height: auto; min-height: 112px; padding: 12px 8px 10px 8px; }
+.gogo-variant__icon { width: 40px; height: 40px; margin-bottom: 6px; opacity: 0.85; }
+.ft-tracker--on .gogo-variant__icon, .ft-tracker:hover .gogo-variant__icon { opacity: 1; }
+.ft-bits.gogo-variant__bits { margin: 7px 0 0 0; }

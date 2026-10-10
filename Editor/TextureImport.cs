@@ -13,7 +13,18 @@ namespace Orbiters.MyAvatar.Editor
     {
         internal const int MaxFiles = 48;
         private const string CacheFile = "texture-cache.json";
+        // Where drops copy their images, one folder per drop.
+        internal const string DropFolder = "Assets/Orbiters/MyAvatar/Textures/";
         internal static bool Supported(string path) => new[] { ".png", ".jpg", ".jpeg", ".tga" }.Contains(Path.GetExtension(path).ToLowerInvariant());
+
+        /// <summary>An image a drop copied into the project: wherever it is shown, a drop put it there.</summary>
+        internal static bool Dropped(string assetPath) => assetPath != null && assetPath.StartsWith(DropFolder, StringComparison.Ordinal);
+
+        // The material copies a drop makes, in its batch folder ("Assets/Orbiters/MyAvatar/<batch>/Materials/").
+        private static readonly System.Text.RegularExpressions.Regex DropMaterialPath =
+            new System.Text.RegularExpressions.Regex(@"^Assets/Orbiters/MyAvatar/[0-9a-f]{32}/Materials/", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        internal static bool DropMaterial(Material material) => material != null && DropMaterialPath.IsMatch(AssetDatabase.GetAssetPath(material));
 
         // Paths on disk for a drop: the Project window drags project paths, and a read-only package's "Packages/..." lives in
         // Library/PackageCache. Runs on the main thread, where Unity resolves package paths.
@@ -62,7 +73,7 @@ namespace Orbiters.MyAvatar.Editor
             var pending = new List<PendingFile>();
             string staging = Path.Combine(LibraryStore.Folder, Guid.NewGuid().ToString("N"));
             // One owned folder per drop; the source path, size and time identify repeat drops, so no content hash is needed.
-            string textures = "Assets/Orbiters/MyAvatar/Textures/" + Path.GetFileName(folder);
+            string textures = DropFolder + Path.GetFileName(folder);
             try
             {
                 for (int i = 0; i < paths.Length; i++)
@@ -138,7 +149,7 @@ namespace Orbiters.MyAvatar.Editor
         private static bool Valid(CachedFile cached, FileInfo source, string root)
         {
             if (cached == null || string.IsNullOrEmpty(cached.asset) || cached.length != source.Length || cached.modified != source.LastWriteTimeUtc.Ticks ||
-                !cached.asset.StartsWith("Assets/Orbiters/MyAvatar/Textures/", StringComparison.Ordinal) || cached.asset.Split('/').Contains("..")) return false;
+                !Dropped(cached.asset) || cached.asset.Split('/').Contains("..")) return false;
             string asset = Path.Combine(root, cached.asset);
             return File.Exists(asset) && cached.assetModified == File.GetLastWriteTimeUtc(asset).Ticks && cached.metaModified == File.GetLastWriteTimeUtc(asset + ".meta").Ticks;
         }
@@ -180,7 +191,7 @@ namespace Orbiters.MyAvatar.Editor
         {
             var result = new Dictionary<(Texture2D, string), Texture2D>();
             var needed = uses.Where(u => u.texture && u.reading != null).Distinct().ToList();
-            string root = Path.GetDirectoryName(Application.dataPath), own = "Assets/Orbiters/MyAvatar/Textures/" + Path.GetFileName(folder) + "/";
+            string root = Path.GetDirectoryName(Application.dataPath), own = DropFolder + Path.GetFileName(folder) + "/";
             var inPlace = new List<TextureImporter>();
             var copies = new List<(Texture2D texture, string reading, string path)>();
             foreach (var (texture, reading) in needed)

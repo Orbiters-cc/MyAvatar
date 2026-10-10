@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Orbiters.MyAvatar.Editor.Locomotion;
 using UnityEditor;
 using UnityEngine;
@@ -6,7 +7,8 @@ using UnityEngine.UIElements;
 namespace Orbiters.MyAvatar.Editor
 {
     // GoGoLoco, Franada's locomotion system, in one click, framed like face tracking: offered on every humanoid avatar,
-    // then what is on it (Select, Remove), or the setup made another way.
+    // then what is on it (Select, Remove) with a big tile per version of GoGoLoco to switch between them, or the setup made
+    // another way.
     internal sealed class GoGoLocoSection : AvatarSection
     {
         private const string LogoPath = "Packages/orbiters.myavatar/Editor/UI/GoGoLocoLogo.png";
@@ -83,7 +85,8 @@ namespace Orbiters.MyAvatar.Editor
         {
             string with = GoGoLoco.UsesModularAvatar ? "Modular Avatar" : "VRCFury";
             var frame = Hero("READY FOR GOGOLOCO", null, "GoGoLoco",
-                "Franada’s locomotion system: sit, lie down and pose anywhere, stay in place, and more from the Action Menu in VRChat. It goes on with " + with + "." +
+                "Franada’s locomotion system: sit, lie down and pose anywhere, stay in place, and more from the Action Menu in VRChat. It goes on with " + with +
+                ", as GoGoLoco All; once it is on, you can switch to another version." +
                 (GoGoLoco.Installed ? "" : " GoGoLoco is downloaded first (Creator Companion)."));
             var add = MyAvatarEditor.Button("Add", null);
             add.AddToClassList("ft-primary");
@@ -108,8 +111,9 @@ namespace Orbiters.MyAvatar.Editor
         {
             var prefab = report.Prefab;
             string version = GoGoLoco.Version;
-            Hero("GOGOLOCO ON", null, "GoGoLoco", "“" + prefab.name + "” is on this avatar: its menu is in the Action Menu in VRChat.",
-                version != null ? "v" + version : null);
+            var frame = Hero("GOGOLOCO ON", null, report.Variant != null ? "GoGoLoco " + report.Variant.Name : "GoGoLoco",
+                "“" + prefab.name + "” is on this avatar: its menu is in the Action Menu in VRChat.", version != null ? "v" + version : null);
+            ShowVariants(frame.Frame, prefab);
             var select = MyAvatarEditor.Button("Select", () => { Selection.activeGameObject = prefab; EditorGUIUtility.PingObject(prefab); });
             select.AddToClassList("avatar-link");
             select.tooltip = "Select GoGoLoco on the avatar.";
@@ -124,6 +128,67 @@ namespace Orbiters.MyAvatar.Editor
                 schedule.Execute(() => { GoGoLoco.Remove(prefab); SetEnabled(true); SetNote(null, false); Refresh(); });
             };
             Actions.Add(remove);
+        }
+
+        // One big tile per version, like face tracking's trackers: the one on the avatar lit, the others a press away.
+        private void ShowVariants(VisualElement frame, GameObject prefab)
+        {
+            var current = report.Variant;
+            var variants = GoGoLoco.Variants(current != null ? current.ModularAvatar : GoGoLoco.UsesModularAvatar);
+            if (variants.Count == 0 || (variants.Count == 1 && current != null && variants[0].Path == current.Path)) return;
+            bool removable = GoGoLoco.Removable(prefab);
+            var block = new VisualElement(); block.AddToClassList("gogo-variants"); frame.Add(block);
+            var title = new Label("Version"); title.AddToClassList("ft-setting__title"); title.AddToClassList("gogo-variants__title"); block.Add(title);
+            var tiles = new VisualElement(); tiles.AddToClassList("ft-trackers"); block.Add(tiles);
+            var caption = new Label(); caption.AddToClassList("ft-trackers__caption"); block.Add(caption);
+            var buttons = new List<(GoGoLocoVariant variant, Button tile)>();
+            foreach (var variant in variants)
+            {
+                int bits = variant.BitsOn(root != null ? root.transform : null);
+                var tile = MyAvatarEditor.Button("", null);
+                tile.AddToClassList("ft-tracker"); tile.AddToClassList("gogo-variant");
+                tile.EnableInClassList("ft-tracker--on", current != null && variant.Path == current.Path);
+                var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(variant.IconPath);
+                if (icon != null)
+                {
+                    var picture = new Image { image = icon, scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore };
+                    picture.AddToClassList("gogo-variant__icon"); tile.Add(picture);
+                }
+                var name = new Label(variant.Name); name.AddToClassList("ft-tracker__name"); name.pickingMode = PickingMode.Ignore; tile.Add(name);
+                var sub = new Label(variant.Tagline); sub.AddToClassList("ft-tracker__sub"); sub.pickingMode = PickingMode.Ignore; tile.Add(sub);
+                var cost = new Label(bits == variant.Bits ? bits + " bits" : "+" + bits + " bits");
+                cost.AddToClassList("ft-bits"); cost.AddToClassList("gogo-variant__bits"); cost.pickingMode = PickingMode.Ignore; tile.Add(cost);
+                tile.tooltip = variant.Description + " " + Cost(variant, bits) +
+                               (removable ? "" : "\nGoGoLoco is part of this avatar's own prefab: change its version in that prefab.");
+                tile.SetEnabled(removable);
+                tile.clicked += () => Switch(prefab, variant, buttons, tiles, caption);
+                tiles.Add(tile);
+                buttons.Add((variant, tile));
+            }
+            caption.text = current != null ? current.Description + " " + Cost(current, current.BitsOn(root != null ? root.transform : null))
+                : "“" + prefab.name + "” isn't one of this GoGoLoco's versions: choose one to put it in its place.";
+        }
+
+        private static string Cost(GoGoLocoVariant variant, int bits) =>
+            variant.Bits == 0 ? "" : bits == variant.Bits ? bits + " synced parameter bits."
+                : bits + " synced parameter bits on this avatar (" + variant.Bits + " in all; the rest it shares with the avatar's own, like VRCEmote).";
+
+        // The pressed tile lights at once and the others wait; the prefab is swapped on the next frame (one Undo step).
+        private void Switch(GameObject prefab, GoGoLocoVariant target, List<(GoGoLocoVariant variant, Button tile)> buttons, VisualElement tiles, Label caption)
+        {
+            if (report.Variant != null && report.Variant.Path == target.Path) return;
+            foreach (var (variant, tile) in buttons) tile.EnableInClassList("ft-tracker--on", variant == target);
+            tiles.SetEnabled(false);
+            caption.text = "Switching to GoGoLoco " + target.Name + "…";
+            SetNote(null, false);
+            schedule.Execute(() =>
+            {
+                bool done = GoGoLoco.Switch(prefab, target, out string problem);
+                tiles.SetEnabled(true);
+                SetNote(done ? problem ?? "GoGoLoco " + target.Name + " is on this avatar. Undo goes back." : problem, problem != null);
+                shown = null;
+                Refresh();
+            });
         }
 
         private void ShowOther()

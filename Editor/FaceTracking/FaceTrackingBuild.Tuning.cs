@@ -12,19 +12,21 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
     /// The template's mouth tuned like the Ultirex's hand-made face tracking (OSCmooth), measured on the same face:
     /// <list type="bullet">
     /// <item>smiles and frowns are full at 0.8 instead of 1: VRCFaceTracking seldom reports more;</item>
-    /// <item>smiles, frowns, the lower lip, jaw and tongue keep 70 % of the last frame like the original, not 30 %: the
-    /// template's single smoothing weight suits the eyes, not a mouth that flickers between expressions;</item>
+    /// <item>smiles, frowns, the lower lip, jaw and tongue keep 70 % of the last frame like the original: the template's
+    /// single smoothing weight suits the eyes, not a mouth that flickers between expressions;</item>
     /// <item>on a face sculpted with its own grin (Rexouium, Ultirex), a smile with the upper lip raised becomes that grin,
     /// which also lifts the cheeks and lower lids; its other shapes take the original's weights. Any other face grins with
     /// its own cheek and eye squints.</item>
     /// </list>
-    /// The slower mouth follows the smoothing setting; the rest is the "expressive mouth" setting.
+    /// The slower mouth follows the smoothing setting, like the smoothing others see (<see cref="Pace"/>); the rest is the
+    /// "expressive mouth" setting.
     /// </summary>
     internal static partial class FaceTrackingBuild
     {
         internal const float FullSmile = .8f;
-        // The template's per-frame weight of the new value (about 0.71 at 90 fps) over this: 0.3, as in the original.
-        internal const float SlowSmoothing = 2.35f;
+        // The per-frame weight of the new value at the balanced smoothing (about 0.5 at 90 fps) over this: 0.3, as in the
+        // original; at the smooth one (about 0.36) over the other: 0.2.
+        internal const float SlowSmoothing = 1.68f, SmoothSlowdown = 1.78f;
         // The slower mouth trees made here end with this.
         private const string SlowerMouth = " (slower mouth)";
         internal const string LocalSmoothing = "OSCm/Local/FloatSmoothing";
@@ -205,6 +207,52 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             value.hideFlags = HideFlags.HideInHierarchy;
             if (AssetDatabase.Contains(fx)) AssetDatabase.AddObjectToAsset(value, fx);
             return value;
+        }
+
+        // ---- Smoothing others see ----
+
+        // The template smooths what others receive (ten times a second at best, often less) by 15 × the frame time + 0.05 of
+        // the new value each frame: about 45 ms, so between two updates the face stops and jumps. OSCmooth's remote default
+        // keeps 90 % of the last frame at 90 fps (about 110 ms), which glides from one update to the next.
+        private const string RemoteFloatScaler = "OSCm/Remote/FloatScaler", RemoteFloatMod = "OSCm/Remote/FloatMod",
+            RemoteBinaryScaler = "OSCm/Remote/BinaryScaler", RemoteBinaryMod = "OSCm/Remote/BinaryMod";
+        // The frame time above which the template stops smoothing (below 25 fps, common in busy instances): now below 10 fps.
+        private const float TemplateCutoff = .04f, Cutoff = .1f;
+
+        /// <summary>
+        /// How fast others see the face follow (<paramref name="smoothing"/>: the template's own when responsive, OSCmooth's
+        /// remote smoothing when balanced, slower when smooth), and smoothing kept on down to 10 fps for the wearer and others.
+        /// Changes <paramref name="fx"/> (VRCFury's copy); doing it again with another setting replaces it.
+        /// </summary>
+        internal static string Pace(AnimatorController fx, FaceTrackingSmoothing smoothing)
+        {
+            float scaler = smoothing == FaceTrackingSmoothing.Responsive ? 15f : smoothing == FaceTrackingSmoothing.Smooth ? 7f : 9f;
+            float mod = smoothing == FaceTrackingSmoothing.Responsive ? .05f : 0f;
+            var parameters = fx.parameters;
+            int remote = 0;
+            foreach (var parameter in parameters)
+            {
+                if (parameter.type != AnimatorControllerParameterType.Float) continue;
+                if (parameter.name == RemoteFloatScaler || parameter.name == RemoteBinaryScaler) { parameter.defaultFloat = scaler; remote++; }
+                else if (parameter.name == RemoteFloatMod || parameter.name == RemoteBinaryMod) { parameter.defaultFloat = mod; remote++; }
+            }
+            if (remote > 0) fx.parameters = parameters;
+            int cutoffs = 0;
+            foreach (var tree in fx.layers.Where(l => l.stateMachine != null && IsTracking(l.stateMachine)).SelectMany(l => States(l.stateMachine))
+                         .Select(s => s.motion).OfType<BlendTree>().SelectMany(Trees).Distinct()
+                         .Where(t => t.blendType == BlendTreeType.Simple1D && t.blendParameter == "OSCm/FrameTime" && t.children.Length == 2 && Owned(t, fx)))
+            {
+                var children = tree.children;
+                var at = children.Select(c => c.threshold).OrderBy(x => x).ToArray();
+                // The template's cutoff, or one set here before.
+                if (!(Mathf.Approximately(at[0], TemplateCutoff) || Mathf.Approximately(at[0], Cutoff)) || at[1] - at[0] > .01f) continue;
+                for (int i = 0; i < children.Length; i++) children[i].threshold = children[i].threshold == at[0] ? Cutoff : Cutoff + (at[1] - at[0]);
+                tree.useAutomaticThresholds = false;
+                tree.children = children;
+                EditorUtility.SetDirty(tree);
+                cutoffs++;
+            }
+            return remote == 0 && cutoffs == 0 ? "" : $"Others see the face follow at {scaler} × the frame time{(mod > 0 ? " + " + mod : "")} a frame; smoothing stays on down to 10 fps ({cutoffs} cutoffs).";
         }
 
         // ---- Smoothing ----

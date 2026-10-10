@@ -174,9 +174,15 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             AvatarParameterBudget.BuildRemovedParameters.Add(component =>
             {
                 var marker = component != null ? component.GetComponentInParent<MyAvatarFaceTracking>(true) : null;
-                if (marker == null || marker.synced == FaceTrackingFeatures.All) return null;
-                return Removed(Parameters(component.gameObject).Select(p => p.name), marker.synced);
+                if (marker == null) return null;
+                var synced = Built(marker);
+                return synced == FaceTrackingFeatures.All ? null : Removed(Parameters(component.gameObject).Select(p => p.name), synced);
             });
         }
+
+        /// <summary>The features an upload keeps: the chosen ones the face has shapes for (as <see cref="FaceTrackingBuild"/> does).</summary>
+        internal static FaceTrackingFeatures Built(MyAvatarFaceTracking marker) =>
+            marker == null ? FaceTrackingFeatures.None
+                : marker.synced & FaceTrackingDetection.Trackable(FaceTrackingStandard.Find(marker.standard), marker.face != null ? marker.face.sharedMesh : null);
     }
 }

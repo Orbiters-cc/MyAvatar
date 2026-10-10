@@ -123,6 +123,14 @@
 .materials__detail { margin-top: 1px; color: #8f8f8f; font-size: 10px; white-space: normal; }
 .materials__actions { flex-direction: row; margin-top: 10px; }
 .materials__actions .mcb-button { height: 30px; min-height: 30px; margin: 0; padding: 0 14px; }
+/* Materials that don't render: amber like the other warnings, first in the card. */
+.materials-card__chip--broken { color: #ffb84d; background-color: rgba(255, 184, 77, 0.12); }
+.materials__broken--followed { margin-bottom: 16px; }
+.materials__broken-title { margin: 0; padding: 0; color: #ffb84d; font-size: 11px; -unity-font-style: bold; white-space: normal; }
+.materials__detail--more { color: #707070; }
+.materials__detail--more.warning { color: #ffb84d; }
+.materials__row { transition-property: opacity; transition-duration: 0.12s; }
+.materials__row--fixing { opacity: 0.5; }
 /* Posing */
 .posing-toggles { flex-direction: row; margin: 0 -3px; }
 .posing-toggles .posing-toggle { margin: 0 3px; }

@@ -171,7 +171,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public GalleryAccess access = new GalleryAccess();
         public GalleryFit fit = new GalleryFit();
         public bool listed;
-        public int drafts;
+        public int drafts, likeCount;
         public DateTime? updatedAt;
         // Detail only
         public List<string> previews = new List<string>();

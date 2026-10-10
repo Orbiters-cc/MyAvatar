@@ -7,22 +7,26 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Materials worth changing on this avatar (AvatarMaterials), folded under the texture optimization like it. Open
-    // surfaces whose back is hidden (fur cards, feathers) are fixed by themselves unless the user asked to be asked first
-    // (Orbiters settings); Unity's Standard shader is offered VRChat's Toon Standard. Hidden when there is nothing to say.
+    // Materials worth changing on this avatar (AvatarMaterials), folded under the texture optimization like it. Materials
+    // that don't render (BrokenMaterials) come first and open the card once. Open surfaces whose back is hidden (fur
+    // cards, feathers) are fixed by themselves unless the user asked to be asked first (Orbiters settings); Unity's Standard
+    // shader is offered VRChat's Toon Standard. Hidden when there is nothing to say.
     internal sealed class MaterialsSection : VisualElement
     {
         internal const string AutoFix = "MyAvatar.AutoFixOpenSurfaces";
         // Per avatar: whether the user opened the card. Open surfaces already tried this session are not fixed again.
         private static readonly Dictionary<int, bool> Folds = new Dictionary<int, bool>();
         private static readonly HashSet<int> Tried = new HashSet<int>();
+        // Avatars whose card opened by itself for materials that don't render: once per session, then the user decides.
+        private static readonly HashSet<int> Opened = new HashSet<int>();
 
         private readonly MyAvatar avatar;
         private readonly VisualElement body, list;
         private readonly Label title, chip, note;
         private readonly Button askFirst;
         private IVisualElementScheduledItem pending;
-        private string shown, fixedText;
+        // fixedText: open surfaces fixed by themselves; brokenText: materials that render again. Both keep the card shown.
+        private string shown, fixedText, brokenText;
 
         [InitializeOnLoadMethod]
         private static void Register() => OrbitersFeatures.Register(new OrbitersFeature
@@ -52,9 +56,15 @@ namespace Orbiters.MyAvatar.Editor
             header.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) Show(!Open, remember: true); });
             Show(Open, remember: false);
             EditorApplication.hierarchyChanged += Schedule;
+            // A shader installed or a material fixed elsewhere (MCP, the material's own inspector) changes what renders.
+            EditorApplication.projectChanged += Schedule;
             Undo.undoRedoPerformed += Schedule;
             OrbitersFeatures.Changed += FeatureChanged;
-            RegisterCallback<DetachFromPanelEvent>(_ => { EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; OrbitersFeatures.Changed -= FeatureChanged; });
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                EditorApplication.hierarchyChanged -= Schedule; EditorApplication.projectChanged -= Schedule;
+                Undo.undoRedoPerformed -= Schedule; OrbitersFeatures.Changed -= FeatureChanged;
+            });
             // Once on screen: fixing materials creates assets, which waits until the Inspector is built.
             style.display = DisplayStyle.None;
             schedule.Execute(Refresh);
@@ -82,16 +92,30 @@ namespace Orbiters.MyAvatar.Editor
             var root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
             var advice = AvatarMaterials.Inspect(root);
             if (AutoFixOpenSurfaces(advice)) advice = AvatarMaterials.Inspect(root);
-            style.display = advice.Count == 0 && fixedText == null ? DisplayStyle.None : DisplayStyle.Flex;
+            var broken = BrokenMaterials.Inspect(root);
+            // Undone: they don't render again, the note saying they do goes.
+            if (broken.Count > 0 && brokenText != null) { if (note.text == brokenText) SetNote(null, false); brokenText = null; }
+            style.display = advice.Count == 0 && broken.Count == 0 && fixedText == null && brokenText == null ? DisplayStyle.None : DisplayStyle.Flex;
             askFirst.style.display = fixedText != null && note.text == fixedText && OrbitersFeatures.IsEnabled(AutoFix) ? DisplayStyle.Flex : DisplayStyle.None;
             int suggestions = advice.Count(a => a.Standard || !a.Locked);
-            chip.text = suggestions > 0 ? suggestions + (suggestions == 1 ? " suggestion" : " suggestions") : fixedText != null ? "Fixed" : "";
+            chip.text = broken.Count > 0 ? (broken.Count == 1 ? "1 doesn't render" : broken.Count + " don't render")
+                : suggestions > 0 ? suggestions + (suggestions == 1 ? " suggestion" : " suggestions") : fixedText != null || brokenText != null ? "Fixed" : "";
             chip.style.display = chip.text.Length > 0 ? DisplayStyle.Flex : DisplayStyle.None;
-            chip.EnableInClassList("materials-card__chip--todo", suggestions > 0);
-            string state = string.Join("|", advice.Select(a => a.Material.GetInstanceID() + ":" + a.Standard + a.HiddenBack + a.Renderers.Count)) + "|" + OrbitersFeatures.IsEnabled(AutoFix);
+            chip.EnableInClassList("materials-card__chip--broken", broken.Count > 0);
+            chip.EnableInClassList("materials-card__chip--todo", broken.Count == 0 && suggestions > 0);
+            // A pink avatar opens the card, once: then it stays as the user leaves it.
+            if (broken.Count > 0 && avatar && Opened.Add(avatar.GetInstanceID())) Show(true, remember: true);
+            string state = string.Join("|", advice.Select(a => a.Material.GetInstanceID() + ":" + a.Standard + a.HiddenBack + a.Renderers.Count)) + "|" + OrbitersFeatures.IsEnabled(AutoFix) +
+                           "|" + string.Join("|", broken.Select(b => b.Material.GetInstanceID() + ":" + (b.Target ? b.Target.name : "-") + b.Renderers.Count));
             if (state == shown) return;
             shown = state;
             list.Clear();
+            if (broken.Count > 0)
+            {
+                var view = new BrokenMaterialsView(broken, FixBroken);
+                view.EnableInClassList("materials__broken--followed", advice.Count > 0);
+                list.Add(view);
+            }
             if (advice.Count == 0) return;
             var caption = new Label(Caption(advice));
             caption.AddToClassList("optimize-card__text"); list.Add(caption);
@@ -181,6 +205,27 @@ namespace Orbiters.MyAvatar.Editor
                 }
                 catch (System.Exception ex) { SetNote(ex.Message, true); }
                 button.SetEnabled(true);
+                shown = null;
+                Refresh();
+            });
+        }
+
+        // The press shows at once (rows dim, the button says so); the shaders change on the next frame.
+        private void FixBroken(Button button, List<BrokenMaterial> entries)
+        {
+            button.SetEnabled(false);
+            button.text = "Fixing…";
+            list.Query(className: "materials__row--broken").ForEach(row => row.AddToClassList("materials__row--fixing"));
+            SetNote(entries.Count == 1 ? "Fixing 1 material…" : "Fixing " + entries.Count + " materials…", false);
+            schedule.Execute(() =>
+            {
+                try
+                {
+                    int count = BrokenMaterials.Fix(avatar ? TextureOptimization.AvatarRoot(avatar) : null, avatar, entries);
+                    brokenText = count == 0 ? null : (count == 1 ? "1 material renders again." : count + " materials render again.") + " Undo restores them.";
+                    SetNote(brokenText, false);
+                }
+                catch (System.Exception ex) { SetNote(ex.Message, true); }
                 shown = null;
                 Refresh();
             });

@@ -131,6 +131,7 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new AvatarCustomizationSection(avatar));
             content.Add(new FaceTrackingSection(avatar));
             content.Add(new GoGoLocoSection(avatar));
+            content.Add(new Expressions.MenuSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif

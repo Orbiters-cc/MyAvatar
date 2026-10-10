@@ -59,7 +59,7 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Editor helpers drawn on the avatar (gizmo overlays, hidden previews) are not its materials.
-        private static bool Helper(Transform transform, Transform root)
+        internal static bool Helper(Transform transform, Transform root)
         {
             for (var t = transform; t != null; t = t.parent)
             {
@@ -100,18 +100,28 @@ namespace Orbiters.MyAvatar.Editor
                 }
                 replacements.Add(source, result);
             }
-            var renderers = list.SelectMany(a => a.Renderers).Where(r => r).Distinct().ToArray();
-            Undo.RecordObjects(new UnityEngine.Object[] { avatar }.Concat(renderers).ToArray(), "Fix materials");
-            foreach (var renderer in renderers)
+            Reassign(avatar, list.SelectMany(a => a.Renderers), replacements);
+            Undo.CollapseUndoOperations(group);
+            SceneView.RepaintAll();
+            return list.Count;
+        }
+
+        /// <summary>
+        /// Puts the copies in <paramref name="replacements"/> on <paramref name="renderers"/>, recorded for Undo; the avatar's
+        /// texture set (when there is one) follows them.
+        /// </summary>
+        internal static void Reassign(MyAvatar avatar, IEnumerable<Renderer> renderers, Dictionary<Material, Material> replacements)
+        {
+            var list = renderers.Where(r => r).Distinct().ToArray();
+            Undo.RecordObjects((avatar ? new UnityEngine.Object[] { avatar } : new UnityEngine.Object[0]).Concat(list).ToArray(), "Fix materials");
+            foreach (var renderer in list)
             {
                 renderer.sharedMaterials = renderer.sharedMaterials.Select(m => m && replacements.TryGetValue(m, out var copy) ? copy : m).ToArray();
                 PrefabUtility.RecordPrefabInstancePropertyModifications(renderer);
             }
-            Follow(avatar, renderers, replacements);
+            if (!avatar) return;
+            Follow(avatar, list, replacements);
             TextureChanges.Dirty(avatar);
-            Undo.CollapseUndoOperations(group);
-            SceneView.RepaintAll();
-            return list.Count;
         }
 
         // The texture set's Undo and Redo follow the copies: its snapshot of what the renderers show, and its images' slots,

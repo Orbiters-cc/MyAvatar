@@ -25,6 +25,18 @@ namespace Orbiters.MyAvatar
         [HideInInspector] public List<AccessoryNote> accessoryNotes = new List<AccessoryNote>();
         /// <summary>Accessories whose custom base question was answered "Not now", with the custom base asked about.</summary>
         [HideInInspector] public List<string> fitDismissed = new List<string>();
+        /// <summary>
+        /// Menu items deleted in the menu editor: left out of the upload with what only they drive (their parameters, the
+        /// layers switching them, the objects and materials only those layers show).
+        /// </summary>
+        [HideInInspector] public List<MenuRemoval> menuRemovals = new List<MenuRemoval>();
+        /// <summary>The avatar's own menu (its descriptor's, as its creator made it) is left out of the upload the same way.</summary>
+        [HideInInspector] public bool removeDefaultMenu;
+        /// <summary>
+        /// Values the scene shows for a look chosen in My Avatar (a Novabeast's tail size) and what they were before: the upload
+        /// gets the values its animations start from back, and the look comes from the menu's starting value.
+        /// </summary>
+        [HideInInspector] public List<LookRest> lookRest = new List<LookRest>();
 
         // One line under the accessory drop field: something done, or a manual step with the object to look at.
         [Serializable]
@@ -48,6 +60,30 @@ namespace Orbiters.MyAvatar
             /// <summary>The refit has spots a creator could fit better by hand.</summary>
             public bool fitRough;
         }
+    }
+
+    /// <summary>A property a look shown in the scene changed, and its value before (an animation's rest value).</summary>
+    [Serializable]
+    public sealed class LookRest
+    {
+        public string path, type, property;
+        public float value;
+    }
+
+    /// <summary>A menu item left out of the upload, found where it is in the menu VRChat shows.</summary>
+    [Serializable]
+    public sealed class MenuRemoval
+    {
+        /// <summary>The names of the folders down to the item, and its own.</summary>
+        public List<string> path = new List<string>();
+        /// <summary>For each name of <see cref="path"/>: which item of that name it is in its menu (0 for the first).</summary>
+        public List<int> nth = new List<int>();
+        /// <summary>What it was when it was deleted, to show it among the deleted items: its control type, icon and parameter.</summary>
+        public int type;
+        public Texture2D icon;
+        public string parameter;
+
+        public string Name => path.Count > 0 ? path[path.Count - 1] : "";
     }
 
     [Serializable]

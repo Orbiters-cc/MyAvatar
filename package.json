@@ -1,9 +1,9 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "unity": "2022.3",
-  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, pose it with symmetry and a clothing preview, and set who can grab, pose and stretch its hair, tail and toes. Save also records a Unit Git checkpoint when Unit Git is installed.",
+  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, edit its VRChat menu as it will look in game, pose it with symmetry and a clothing preview, and set who can grab, pose and stretch its hair, tail and toes. Save also records a Unit Git checkpoint when Unit Git is installed.",
   "author": {
     "name": "Orbiters",
     "url": "https://orbiters.cc",
@@ -13,7 +13,7 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.3.19 <0.4.0",
+    "orbiters.toolkit": ">=0.3.20 <0.4.0",
     "orbiters.xraygizmos": ">=0.2.8 <0.3.0",
     "com.vrchat.avatars": ">=3.7.0 <4.0.0"
   },
@@ -56,6 +56,18 @@
         "url": "https://adjerry91.github.io/VRCFaceTracking-Templates/index.json",
         "packages": [
           "adjerry91.vrcft.templates"
+        ]
+      },
+      {
+        "url": "https://lilxyzw.github.io/vpm-repos/vpm.json",
+        "packages": [
+          "jp.lilxyzw.liltoon"
+        ]
+      },
+      {
+        "url": "https://poiyomi.github.io/vpm/index.json",
+        "packages": [
+          "com.poiyomi.toon"
         ]
       },
       {
@@ -108,6 +120,14 @@
       "gogoloco": {
         "displayName": "GoGoLoco",
         "reason": "Franada's locomotion system: sit, lie down and pose anywhere from the Action Menu. My Avatar adds it to the avatar in one click."
+      },
+      "jp.lilxyzw.liltoon": {
+        "displayName": "lilToon",
+        "reason": "Free toon shader many avatars are made with. My Avatar suggests it when materials made for it don't render."
+      },
+      "com.poiyomi.toon": {
+        "displayName": "Poiyomi Toon",
+        "reason": "Free toon shader many avatars are made with. My Avatar suggests it when materials made for it don't render."
       }
     }
   },

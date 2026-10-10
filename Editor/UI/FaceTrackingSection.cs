@@ -9,18 +9,18 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Face tracking with Adjerry91's templates. The section shows only when the face has most of the blendshapes face
-    // tracking needs (then it offers the one-click setup) or when face tracking is set up (then what and how, the quick
-    // settings folded in the same frame, and the live test with an iPhone or the simulator).
+    // Face tracking with Adjerry91's templates. The section shows only when the face has most of the blendshapes of its
+    // eyes or of its mouth (then it offers the one-click setup, saying which parts will move) or when face tracking is set
+    // up (then what and how, the quick settings folded in the same frame, and the live test with an iPhone or the simulator).
     internal sealed partial class FaceTrackingSection : AvatarSection
     {
         private const string OpenKey = "Orbiters.MyAvatar.FaceTracking.QuickSettingsOpen.";
         private const string LogoPath = "Packages/orbiters.myavatar/Editor/UI/VRCFaceTrackingLogo.svg.txt";
         private static readonly string[] SmoothingCaptions =
         {
-            "Snappy: every value follows at once, the mouth as fast as the eyes. Best on a steady 90 fps.",
-            "The template's smoothing, with the mouth a little slower than the eyes. Recommended.",
-            "Calm: everything glides, the mouth most. Hides tracking jitter, at the cost of a slight lag.",
+            "Snappy: the template's own smoothing, values almost as the tracker sends them. Best with a tracker sending 60 frames a second or more.",
+            "Smoothed like OSCmooth: the face glides between the tracker's frames, the mouth a little slower, and others see it glide between network updates instead of jumping. Recommended.",
+            "Calm: everything glides, the mouth most, for you and for others. Hides tracking jitter, at the cost of a slight lag.",
         };
 
         private readonly MyAvatar avatar;
@@ -83,9 +83,10 @@ namespace Orbiters.MyAvatar.Editor
             root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
             report = FaceTrackingDetection.Inspect(root != null ? root.transform : null);
             CheckFace();
-            string state = report.Ours != null ? "ours:" + report.Ours.GetInstanceID() + ":" + report.Found + ":" + report.Standard?.Id + ":" + faceIssue
+            string parts = ":" + report.Eyes.Found + "/" + report.Mouth.Found;
+            string state = report.Ours != null ? "ours:" + report.Ours.GetInstanceID() + ":" + report.Found + parts + ":" + report.Standard?.Id + ":" + faceIssue
                 : report.Existing != null ? "other:" + report.Existing
-                : report.Ready ? "ready:" + report.Standard.Id + ":" + report.Found + ":" + FaceTrackingDetection.TemplatesInstalled : "";
+                : report.Ready ? "ready:" + report.Standard.Id + ":" + report.Found + parts + ":" + FaceTrackingDetection.TemplatesInstalled : "";
             style.display = state.Length == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             if (state != shown)
             {
@@ -132,10 +133,21 @@ namespace Orbiters.MyAvatar.Editor
         private void ShowSuggestion()
         {
             var standard = report.Standard;
-            var (_, actions) = Hero("READY FOR FACE TRACKING", null, "Face tracking available",
-                (report.Found == report.Needed ? "All " : report.Found + " of the ") + report.Needed + " " + standard.Label + " shapes are on “" + report.Face.name +
-                "”. Adjerry91’s template goes on with VRCFury; VRCFaceTracking drives it in VRChat. About " + standard.Bits + " parameter bits, fewer once you pick your tracker." +
+            bool both = report.Eyes.Ready && report.Mouth.Ready;
+            var ready = report.Mouth.Ready ? report.Mouth : report.Eyes;
+            var other = ready == report.Mouth ? report.Eyes : report.Mouth;
+            string coverage = both
+                ? (report.Found == report.Needed ? "All " : report.Found + " of the ") + report.Needed + " " + standard.Label + " shapes are on “" + report.Face.name + "”."
+                : "“" + report.Face.name + "” has " + Shapes(ready, standard) + (other.Found == 0
+                    ? ", and no " + Word(other) + " shapes yet: " + Tracking(other) + " joins in by itself once it has them."
+                    : " and " + Shapes(other, standard) + ": those move too.");
+            string bits = both || other.Found > 0 ? "About " + standard.Bits + " parameter bits, fewer once you pick your tracker."
+                : "Fewer than the template's " + standard.Bits + " parameter bits: the " + Word(other) + " parameters are left out.";
+            var (_, actions) = Hero(both ? "READY FOR FACE TRACKING" : "READY FOR " + Tracking(ready).ToUpperInvariant(), null,
+                both ? "Face tracking available" : char.ToUpperInvariant(Tracking(ready)[0]) + Tracking(ready).Substring(1) + " available",
+                coverage + " Adjerry91’s template goes on with VRCFury; VRCFaceTracking drives it in VRChat. " + bits +
                 (FaceTrackingDetection.TemplatesInstalled ? "" : " The templates are downloaded first (Creator Companion)."));
+            ShowParts(actions);
             var setUp = MyAvatarEditor.Button("Add", null);
             setUp.AddToClassList("ft-primary");
             setUp.tooltip = "Add face tracking to this avatar (one Undo step)." + (report.Missing.Count > 0 ? "\nNot on this face: " + string.Join(", ", report.Missing) + "." : "");
@@ -165,17 +177,49 @@ namespace Orbiters.MyAvatar.Editor
             return link;
         }
 
+        // What each part is called in the card: "eye" shapes and eye tracking, "mouth" shapes and lip tracking.
+        private static string Word(FaceTrackingPart part) => part.Name == "Eyes" ? "eye" : "mouth";
+        private static string Tracking(FaceTrackingPart part) => part.Name == "Eyes" ? "eye tracking" : "lip tracking";
+
+        private static string Shapes(FaceTrackingPart part, FaceTrackingStandard standard) =>
+            (part.Found == part.Needed ? "all " : part.Found + " of the ") + part.Needed + " " + standard.Label + " " + Word(part) + " shapes";
+
+        // The parts of the face that will move, above the actions: a green dot for a part with most of its shapes, amber for
+        // some, grey for none (left out until the face has them).
+        private void ShowParts(VisualElement actions)
+        {
+            var row = new VisualElement(); row.AddToClassList("ft-parts");
+            foreach (var part in new[] { report.Mouth, report.Eyes })
+            {
+                if (part.Needed == 0) continue;
+                var chip = new VisualElement(); chip.AddToClassList("ft-part");
+                chip.AddToClassList(part.Ready ? "ft-part--ready" : part.Found > 0 ? "ft-part--some" : "ft-part--none");
+                var dot = new VisualElement(); dot.AddToClassList("ft-part__dot"); chip.Add(dot);
+                var name = new Label(part.Name == "Eyes" ? "Eyes" : "Lips & mouth"); name.AddToClassList("ft-part__name"); chip.Add(name);
+                var count = new Label(part.Found == 0 ? "missing" : part.Found + "/" + part.Needed); count.AddToClassList("ft-part__count"); chip.Add(count);
+                chip.tooltip = (part.Found == 0 ? "Not tracked: the face has none of the " + part.Needed + " " + Word(part) + " shapes" :
+                                   part.Found + " of the " + part.Needed + " " + Word(part) + " shapes are on the face, tracked") +
+                               (part.Missing.Count > 0 ? ".\nMissing: " + string.Join(", ", part.Missing) + "." : ".");
+                row.Add(chip);
+            }
+            actions.parent.Insert(actions.parent.IndexOf(actions), row);
+        }
+
         private void ShowOurs()
         {
             var marker = report.Ours;
             string standard = report.Standard != null ? report.Standard.Label : marker.standard;
             string coverage = report.Standard == null ? "" : (report.Found == report.Needed ? "All " : report.Found + " of the ") + report.Needed + " " + standard + " shapes are on “" +
                 (marker.face != null ? marker.face.name : "the face") + "”; names that differ are matched at upload.";
+            foreach (var part in new[] { report.Eyes, report.Mouth })
+                if (report.Standard != null && part.Found == 0)
+                    coverage += " No " + Word(part) + " shapes yet: their parameters are left out at upload until the face has them.";
             string version = FaceTrackingDetection.TemplatesVersion;
             var (frame, actions) = faceIssue != null
                 ? Hero("CHECK THE FACE", "warning", "Adjerry91’s face tracking template", faceIssue, version != null ? "v" + version : null)
                 : Hero("FACE TRACKING ON", null, "Adjerry91’s face tracking template", coverage + " Run VRCFaceTracking on your PC with VRChat to use it.",
                     version != null ? "v" + version : null);
+            if (faceIssue == null && report.Standard != null) ShowParts(actions);
             if (faceIssue != null && faceFound != null)
             {
                 var repoint = MyAvatarEditor.Button("Point at “" + faceFound.name + "”", null);
@@ -295,7 +339,7 @@ namespace Orbiters.MyAvatar.Editor
 
             // The trackers
             var tiles = new VisualElement(); tiles.AddToClassList("ft-trackers"); foldBody.Add(tiles);
-            var choices = FaceTrackingFeature.Trackers.Select(t => (t.preset, t.label, t.sub, tooltip: t.note + " " + costs.Total(t.features) + " bits."))
+            var choices = FaceTrackingFeature.Trackers.Select(t => (t.preset, t.label, t.sub, tooltip: t.note + " " + costs.Total(t.features & report.Trackable) + " bits."))
                 .Append((FaceTrackingPreset.Custom, "Custom", "Your choice", "Choose each feature, the smoothing and the expressive mouth yourself."));
             foreach (var (preset, label, sub, tip) in choices)
             {
@@ -316,9 +360,9 @@ namespace Orbiters.MyAvatar.Editor
             var smoothRow = Setting(customPanel, "Smoothing", null, true);
             smoothing = new SegmentedControl(new[]
             {
-                new SegmentedControl.Option("Responsive", null, "Local smoothing 0: values follow at once."),
-                new SegmentedControl.Option("Balanced", null, "Local smoothing 0.25 (the template's), the mouth 2.35× slower."),
-                new SegmentedControl.Option("Smooth", null, "Local smoothing 0.6, the mouth 2.35× slower."),
+                new SegmentedControl.Option("Responsive", null, "Local smoothing 0.25 (the template's), others see the template's smoothing."),
+                new SegmentedControl.Option("Balanced", null, "Local smoothing 0.6 (OSCmooth's), the mouth 1.68× slower; others see OSCmooth's remote smoothing."),
+                new SegmentedControl.Option("Smooth", null, "Local smoothing 0.85, the mouth 1.78× slower; others see the face glide slower still."),
             }, index => Change("Face tracking smoothing", m => m.smoothing = (FaceTrackingSmoothing)index));
             smoothRow.Add(smoothing);
             smoothingCaption = new Label(); smoothingCaption.AddToClassList("ft-setting__caption"); smoothRow.Add(smoothingCaption);
@@ -331,7 +375,9 @@ namespace Orbiters.MyAvatar.Editor
                 if (feature.Parent != FaceTrackingFeatures.None) row.AddToClassList("ft-feature--child");
                 var texts = new VisualElement(); texts.AddToClassList("ft-feature__texts"); row.Add(texts);
                 var name = new Label(feature.Label); name.AddToClassList("ft-feature__name"); texts.Add(name);
-                var detail = new Label(feature.Detail); detail.AddToClassList("ft-feature__detail"); texts.Add(detail);
+                bool shapes = (report.Trackable & feature.Flag) != 0;
+                var detail = new Label(shapes ? feature.Detail : "No shapes for it on this face yet: left out at upload.");
+                detail.AddToClassList("ft-feature__detail"); texts.Add(detail);
                 var bits = new Label(costs.Features[feature.Flag] + " bits"); bits.AddToClassList("ft-bits"); row.Add(bits);
                 var flag = feature.Flag;
                 var toggle = new ToggleSwitch((marker.synced & flag) != 0, on => Change("Face tracking features", m => m.synced = on ? m.synced | flag : m.synced & ~flag));
@@ -416,8 +462,9 @@ namespace Orbiters.MyAvatar.Editor
             {
                 toggle.SetValueWithoutNotify((marker.synced & feature.Flag) != 0);
                 bool parentOn = feature.Parent == FaceTrackingFeatures.None || (effective & feature.Parent) != 0;
-                row.SetEnabled(parentOn);
-                bits.EnableInClassList("ft-bits--off", (effective & feature.Flag) == 0);
+                bool shapes = (report.Trackable & feature.Flag) != 0;
+                row.SetEnabled(parentOn && shapes);
+                bits.EnableInClassList("ft-bits--off", (effective & feature.Flag) == 0 || !shapes);
             }
             expressive.SetValueWithoutNotify(marker.expressiveMouth);
             UpdateCaption();
@@ -428,11 +475,12 @@ namespace Orbiters.MyAvatar.Editor
         {
             var marker = Marker;
             if (marker == null || trackerCaption == null) return;
-            int bits = faceBits >= 0 ? faceBits : costs.Total(marker.synced);
+            var built = FaceTrackingFeatureSet.Built(marker);
+            int bits = faceBits >= 0 ? faceBits : costs.Total(built);
             var tracker = FaceTrackingFeature.Trackers.FirstOrDefault(t => t.preset == marker.preset);
             string name = tracker.label != null ? tracker.label : marker.preset == FaceTrackingPreset.Custom ? "Custom" : "No tracker chosen";
             string text = marker.preset == FaceTrackingPreset.Everything
-                ? (costs.Total(marker.synced) == costs.All ? "Every feature of the template is synced (" + bits + " bits)." : bits + " of the template's " + costs.All + " bits are synced.") +
+                ? (costs.Total(built) == costs.All ? "Every feature of the template is synced (" + bits + " bits)." : bits + " of the template's " + costs.All + " bits are synced.") +
                   " Pick your tracker to leave out what it can't send."
                 : marker.preset == FaceTrackingPreset.Custom ? "Your own choice of features: " + bits + " of " + costs.All + " bits."
                 : tracker.note + " " + bits + " of " + costs.All + " bits.";

@@ -85,6 +85,9 @@
 .gallery-creator__avatar { width: 16px; height: 16px; border-radius: 8px; overflow: hidden; background-color: #333333; margin-right: 5px; flex-shrink: 0; }
 .gallery-creator__name { margin: 0; padding: 1px 0 2px 0; font-size: 10px; color: #bdbdbd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
 .gallery-creator__trusted { width: 11px; height: 11px; margin-left: 4px; flex-shrink: 0; --icon-color: #00DA6D; }
+.gallery-card__likes { flex-direction: row; align-items: center; flex-shrink: 0; margin-left: auto; padding-left: 6px; }
+.gallery-card__likes .review-icon { width: 10px; height: 10px; margin-right: 3px; --icon-color: #8a8a8a; }
+.gallery-card__likes-count { margin: 0; padding: 0; font-size: 10px; color: #8a8a8a; }
 .gallery-card__meta { margin: 6px 0 0 0; padding: 0; font-size: 10px; color: #7f7f7f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gallery-card__actions { flex-direction: row; margin-top: 9px; }
 .gallery-card__actions .mcb-button { height: 26px; min-height: 26px; margin: 0; padding: 0 8px; border-radius: 13px; font-size: 11px; flex-basis: 0; }

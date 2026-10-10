@@ -86,6 +86,27 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             OrbitersTransfer.Progress progress, CancellationToken cancellation) =>
             OrbitersTransfer.DownloadFileAsync(Url($"{assetId}/variants/{variantId}/download"), destination, Token, progress, cancellation, sha256);
 
+        // ---- Likes and reviews (the same as on the asset's website page) ----
+
+        private static string Interactions(int assetId, string path = "") => OrbitersEnvironment.ApiUrl($"assets/{assetId}/interactions{path}");
+
+        internal static Task<AssetInteractions> InteractionsAsync(int assetId, int offset, CancellationToken cancellation) =>
+            Send<AssetInteractions>(Interactions(assetId, offset > 0 ? "?offset=" + offset : ""), cancellation: cancellation);
+
+        internal static Task<LikeState> SetLikeAsync(int assetId, bool liked) =>
+            Send<LikeState>(Interactions(assetId, "/like"), null, liked ? HttpMethod.Put : HttpMethod.Delete);
+
+        internal static Task<GalleryReview> PostReviewAsync(int assetId, string content) => Send<GalleryReview>(Interactions(assetId, "/reviews"), new { content });
+
+        internal static Task<GalleryReview> EditReviewAsync(int assetId, int reviewId, string content) =>
+            Send<GalleryReview>(Interactions(assetId, $"/reviews/{reviewId}"), new { content }, HttpMethod.Put);
+
+        internal static Task<ReviewCount> DeleteReviewAsync(int assetId, int reviewId) =>
+            Send<ReviewCount>(Interactions(assetId, $"/reviews/{reviewId}"), null, HttpMethod.Delete);
+
+        internal static Task<LikeState> SetReviewLikeAsync(int assetId, int reviewId, bool liked) =>
+            Send<LikeState>(Interactions(assetId, $"/reviews/{reviewId}/like"), null, liked ? HttpMethod.Put : HttpMethod.Delete);
+
         // ---- Creators ----
 
         internal static Task<CreatorAssets> CreatorAssetsAsync(CancellationToken cancellation) => Send<CreatorAssets>(Url("creator/assets"), cancellation: cancellation);

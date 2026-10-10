@@ -59,6 +59,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var (chip, chipStyle) = GalleryUI.AccessChip(asset);
             var access = GalleryUI.Text(chip, "gallery-chip" + (chipStyle != null ? " " + chipStyle : ""), titleRow);
             access.tooltip = asset.access?.label;
+            // Likes in the title row, reviews at the end: the same as on the asset's Orbiters page.
+            var reviews = new GalleryReviews(asset, card.SetLikes);
+            titleRow.Add(reviews.Like);
             var creator = GalleryUI.Box("gallery-creator", body);
             var face = new Image { scaleMode = ScaleMode.ScaleAndCrop }; face.AddToClassList("gallery-creator__avatar"); creator.Add(face);
             if (!string.IsNullOrEmpty(asset.creator?.avatarUrl)) GalleryImages.Show(face, asset.creator.avatarUrl);
@@ -133,6 +136,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     if (release.status == "published" && asset.access?.state == "creator") header.Add(WithdrawLink(asset.id, release, withdrawn));
                 }, asset.releases.FindIndex(r => r.id == fit?.release?.id)));
             }
+            body.Add(reviews);
             GalleryUI.Box(null, body).style.height = 16;
         }
 

@@ -1,6 +1,6 @@
 # Third-party notices
 
-My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. The thumbnail fonts at the end ship with My Avatar, under the SIL Open Font License.
+My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. Two exceptions ship with My Avatar: the menu editor's Action Menu view and menu icons, from Gesture Manager (MIT License), and the thumbnail fonts at the end, under the SIL Open Font License.
 
 ## Adjerry91’s Face Tracking Templates
 Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates. My Avatar downloads them through VPM and sets them up when you choose Add in the Face tracking section; it does not ship or modify them. Products utilizing this project must include visible credit on their store or product page: “Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates” with a link to https://github.com/Adjerry91/VRCFaceTracking-Templates. The package also includes its own license agreement (License folder, credit required).
@@ -45,7 +45,7 @@ Locomotion by Franada’s GoGoLoco. My Avatar downloads GoGoLoco from its author
 https://linktr.ee/franada
 
 ## VRCFury
-Installs accessories with Armature Link, merges their toggles and animations, and the face tracking template, at build time. Downloaded from VRCFury's own listing (vcc.vrcfury.com), never shipped with My Avatar.
+Installs accessories with Armature Link, merges their toggles and animations, and the face tracking template, at build time. Downloaded from VRCFury's own listing (vcc.vrcfury.com), never shipped with My Avatar. The menu editor shows the menu VRCFury will build by following VRCFury's documented and observable menu behaviour (written for My Avatar, no VRCFury code is copied) and saves edits with VRCFury's own components; its tests compare the result with VRCFury's real build.
 https://vrcfury.com
 ```
 License Options
@@ -110,7 +110,7 @@ goals above.
 ```
 
 ## Modular Avatar
-Accessories made for Modular Avatar keep their Merge Armature and menu setup. Downloaded through VPM when you add one.
+Accessories made for Modular Avatar keep their Merge Armature and menu setup. Downloaded through VPM when you add one. The menu editor shows the menu Modular Avatar will build by following its menu rules (Menu Installer, Menu Item, Menu Group, Install Target, "More" pages), read from its MIT-licensed source and written for My Avatar; Modular Avatar's components are read through reflection, with no dependency on it.
 https://modular-avatar.nadena.dev
 ```
 Files under Editor/images are licensed for redistribution as part of an official
@@ -174,7 +174,7 @@ SOFTWARE.
 ```
 
 ## Gesture Manager
-Tests gestures, the expression menu and animations in Play Mode, added from the Tools section.
+Tests gestures, the expression menu and animations in Play Mode, added from the Tools section. The menu editor's Action Menu view is Gesture Manager's radial menu, adapted (`Editor/Expressions/UI/RadialMenuView.cs`), and its menu icons ship with My Avatar (`Editor/Expressions/Icons/BSX_GM_*.png`), both under Gesture Manager's MIT License below.
 https://github.com/BlackStartx/VRC-Gesture-Manager
 ```
 MIT License

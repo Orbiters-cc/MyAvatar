@@ -1,0 +1,209 @@
+/* Menu editor: My Avatar's frames around a copy of VRChat's Quick Menu "Expressions" page and of Gesture Manager's radial
+   menu. The window follows My Avatar's palette (16 px frames, 12 px rows, #00DA6D accent); the menu copies follow VRChat's
+   measured colours and sizes (1 px = 1 px of a 436 × 724 capture of the game) and Gesture Manager's. */
+
+.me-window { flex-grow: 1; background-color: #1f1f1f; padding: 14px 16px 14px 16px; }
+
+/* ---- Toolbar ----------------------------------------------------------------------------------------------------------- */
+.me-toolbar { flex-direction: row; align-items: center; margin-bottom: 10px; flex-shrink: 0; }
+.me-toolbar__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.me-toolbar__eyebrow { margin: 0; padding: 0; font-size: 10px; letter-spacing: 1px; color: #00DA6D; -unity-font-style: bold; }
+.me-toolbar__title { margin: 2px 0 0 0; padding: 0; font-size: 15px; color: #ffffff; -unity-font-style: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-history { flex-direction: row; flex-shrink: 0; }
+/* "Remove default menu": a pill before Undo and Redo, red once the default menu is left out. */
+.me-default { flex-direction: row; align-items: center; height: 30px; padding: 0 12px 0 10px; margin: 0 6px 0 8px; border-radius: 15px; background-color: rgba(255, 255, 255, 0.06); flex-shrink: 0; cursor: link; transition-property: background-color, scale, opacity; transition-duration: 0.12s, 0.18s, 0.12s; }
+.me-default:hover { background-color: rgba(255, 255, 255, 0.12); }
+.me-default--pressed { scale: 0.95 0.95; }
+.me-default--on { background-color: rgba(229, 72, 77, 0.18); }
+.me-default--on:hover { background-color: rgba(229, 72, 77, 0.26); }
+.me-default--off { opacity: 0.35; cursor: arrow; }
+.me-default__glyph { width: 12px; height: 12px; margin-right: 6px; --icon-color: #d9d9d9; }
+.me-default--on > .me-default__glyph { --icon-color: #ff9a9e; }
+.me-default__text { margin: 0; padding: 0; font-size: 11px; color: #d9d9d9; -unity-font-style: bold; }
+.me-default--on > .me-default__text { color: #ffb3b6; }
+.me-round { width: 30px; height: 30px; margin: 0 0 0 4px; border-radius: 15px; background-color: rgba(255, 255, 255, 0.06); align-items: center; justify-content: center; cursor: link; transition-property: background-color, scale, opacity; transition-duration: 0.12s, 0.18s, 0.12s; }
+.me-round:hover { background-color: rgba(255, 255, 255, 0.12); }
+.me-round--pressed { scale: 0.9 0.9; }
+.me-round--off { opacity: 0.3; }
+.me-round__glyph { width: 16px; height: 16px; --icon-color: #d9d9d9; }
+
+/* ---- Breadcrumb: where the menu shown is; each folder also takes a dropped item ----------------------------------------- */
+.me-crumbs { flex-direction: row; flex-wrap: wrap; align-items: center; min-height: 26px; margin-bottom: 8px; flex-shrink: 0; }
+.me-crumb { height: 24px; padding: 0 10px; margin: 0 2px 2px 0; border-radius: 12px; -unity-text-align: middle-center; font-size: 11px; color: #bdbdbd; background-color: rgba(255, 255, 255, 0.04); cursor: link; transition-property: background-color, color, scale; transition-duration: 0.12s, 0.12s, 0.18s; }
+.me-crumb:hover { background-color: rgba(255, 255, 255, 0.1); color: #ffffff; }
+.me-crumb--current { color: #ffffff; -unity-font-style: bold; background-color: rgba(255, 255, 255, 0.08); }
+.me-crumb--drop { background-color: rgba(42, 166, 188, 0.28); color: #ffffff; scale: 1.06 1.06; }
+.me-crumb__sep { margin: 0 4px 2px 2px; padding: 0; font-size: 11px; color: #5f5f5f; }
+
+/* ---- Body: the menu on its stage, the selected item beside it ---------------------------------------------------------- */
+.me-body { flex-direction: row; flex-grow: 1; min-height: 0; }
+.me-stage { flex-grow: 1; flex-shrink: 1; min-width: 0; border-radius: 16px; background-color: #121418; border-width: 1px; border-color: rgba(255, 255, 255, 0.05); overflow: hidden; align-items: center; justify-content: center; }
+.me-stage__backdrop { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+/* The Quick Menu and the Action Menu side by side, each under a small caption. */
+.me-menus { flex-direction: row; align-self: stretch; align-items: center; justify-content: space-around; flex-grow: 1; }
+.me-menu { align-items: center; }
+.me-menu__caption { margin: 0 0 10px 0; padding: 0; font-size: 10px; letter-spacing: 1px; color: rgba(255, 255, 255, 0.4); -unity-font-style: bold; -unity-text-align: middle-center; }
+.me-menu__holder { flex-shrink: 0; }
+.me-stage__hint { position: absolute; left: 0; right: 0; bottom: 10px; margin: 0; padding: 0; -unity-text-align: middle-center; font-size: 10px; color: rgba(255, 255, 255, 0.35); white-space: normal; }
+.me-stage__notice { position: absolute; left: 12px; right: 12px; top: 12px; flex-direction: row; align-items: center; padding: 6px 10px; border-radius: 12px; background-color: rgba(255, 176, 32, 0.12); }
+.me-stage__notice-text { flex-grow: 1; flex-shrink: 1; margin: 0; padding: 0; font-size: 11px; color: #ffcf73; white-space: normal; }
+
+.me-side { width: 248px; flex-shrink: 0; margin-left: 12px; }
+.me-side > .unity-scroll-view__content-viewport > .unity-scroll-view__content-container { padding-right: 2px; }
+.me-card { padding: 14px; border-radius: 16px; background-color: #242424; border-width: 1px; border-color: rgba(255, 255, 255, 0.05); }
+.me-card__title { margin: 0 0 10px 0; padding: 0; font-size: 12px; color: #f2f2f2; -unity-font-style: bold; }
+.me-card__text { margin: 0; padding: 0; font-size: 11px; color: #9a9a9a; white-space: normal; }
+.me-tip { flex-direction: row; align-items: flex-start; margin-top: 8px; }
+.me-tip__key { min-width: 18px; height: 18px; padding: 0 5px; margin: 0 8px 0 0; border-radius: 9px; background-color: rgba(0, 218, 109, 0.14); color: #00DA6D; font-size: 10px; -unity-font-style: bold; -unity-text-align: middle-center; flex-shrink: 0; }
+.me-tip__text { flex-grow: 1; flex-shrink: 1; margin: 1px 0 0 0; padding: 0; font-size: 11px; color: #c8c8c8; white-space: normal; }
+
+/* Selected item: its icon (a drop field), its name, what it is and where it comes from. */
+.me-icon-well { width: 96px; height: 96px; align-self: center; margin-bottom: 12px; border-radius: 16px; background-color: #163036; border-width: 3px; border-color: #1F4046; align-items: center; justify-content: center; cursor: link; transition-property: background-color, border-color, scale; transition-duration: 0.12s, 0.12s, 0.18s; }
+.me-icon-well:hover { background-color: #1b3a41; }
+.me-icon-well--drop { border-color: #2AA6BC; background-color: #1d4249; scale: 1.04 1.04; }
+.me-icon-well--pressed { scale: 0.96 0.96; }
+.me-icon-well__image { width: 64px; height: 64px; }
+.me-icon-well__hint { position: absolute; left: 0; right: 0; bottom: 4px; margin: 0; padding: 0; font-size: 9px; color: rgba(255, 255, 255, 0.5); -unity-text-align: middle-center; }
+.me-icon-actions { flex-direction: row; justify-content: center; margin-bottom: 12px; }
+.me-project-icon { margin: -4px 0 12px 0; }
+.me-project-icon > .unity-object-field__input { min-height: 24px; border-radius: 8px; background-color: #1a1a1a; border-color: #333333; }
+.me-field-label { margin: 0 0 4px 2px; padding: 0; font-size: 10px; color: #8f8f8f; letter-spacing: 0.6px; -unity-font-style: bold; }
+.me-name { margin: 0 0 12px 0; }
+.me-name > .unity-text-field__input { min-height: 30px; padding: 0 10px; border-radius: 10px; background-color: #1a1a1a; border-color: #333333; font-size: 12px; color: #ffffff; }
+.me-name:focus > .unity-text-field__input { border-color: #00DA6D; }
+.me-facts { margin-top: 2px; }
+.me-fact { flex-direction: row; align-items: flex-start; margin-top: 6px; }
+.me-fact__key { width: 64px; flex-shrink: 0; margin: 0; padding: 0; font-size: 10px; color: #7a7a7a; }
+.me-fact__value { flex-grow: 1; flex-shrink: 1; margin: 0; padding: 0; font-size: 11px; color: #d0d0d0; white-space: normal; }
+.me-fact__value--muted { color: #8f8f8f; }
+.mcb-button.me-link { height: 22px; min-height: 22px; margin: 0 4px 0 0; padding: 0 9px; border-width: 0; border-radius: 11px; background-color: rgba(255, 255, 255, 0.06); color: #c8c8c8; font-size: 11px; -unity-font-style: normal; }
+.mcb-button.me-link:hover { background-color: rgba(255, 255, 255, 0.12); color: #ffffff; }
+.mcb-button.me-link.pressed { scale: 0.94 0.94; }
+.mcb-button.me-make-folder { height: 32px; min-height: 32px; margin: 12px 0 0 0; border-width: 0; border-radius: 10px; background-color: rgba(42, 166, 188, 0.18); color: #bfeaf2; font-size: 12px; -unity-font-style: bold; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; }
+.mcb-button.me-make-folder:hover { background-color: rgba(42, 166, 188, 0.28); }
+.mcb-button.me-make-folder.pressed { scale: 0.97 0.97; }
+.me-selection { margin: 0 0 2px 0; }
+.me-selection__item { margin: 3px 0 0 0; padding: 0; font-size: 11px; color: #c8c8c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.me-saves { margin-top: 12px; padding-top: 10px; border-top-width: 1px; border-color: #2e2e2e; }
+.mcb-button.me-link.me-link--danger { color: #ff9a9e; background-color: rgba(229, 72, 77, 0.12); }
+.mcb-button.me-link.me-link--danger:hover { color: #ffffff; background-color: rgba(229, 72, 77, 0.26); }
+
+/* The selected item's settings: type, parameter, value, and its parameter's default, saved and synced. */
+.me-settings__title { margin-top: 14px; }
+.me-settings { padding: 8px 10px; border-radius: 12px; background-color: #1c1c1c; }
+.me-setting { flex-direction: row; align-items: center; margin: 3px 0; min-height: 24px; }
+.me-setting__field { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0; }
+.me-settings .unity-base-popup-field__input, .me-settings .unity-base-text-field__input { min-height: 22px; border-radius: 8px; background-color: #151515; border-color: #333333; font-size: 11px; }
+.me-settings .unity-toggle { margin: 0 14px 0 0; }
+.me-settings .unity-toggle__label, .me-settings .unity-toggle > .unity-label { min-width: 0; margin-left: 4px; font-size: 11px; color: #c8c8c8; }
+.me-settings .unity-slider { margin: 0; }
+.me-settings__flags { flex-direction: row; }
+.me-settings__why { margin-top: 6px; }
+
+/* ---- Footer: what Save will do, Cancel, and Save ------------------------------------------------------------------------- */
+.me-footer { flex-direction: row; align-items: center; margin-top: 12px; flex-shrink: 0; }
+.me-status { flex-grow: 1; flex-shrink: 1; min-width: 0; flex-direction: row; align-items: center; margin-right: 12px; }
+.me-status__dot { width: 8px; height: 8px; border-radius: 4px; margin-right: 8px; flex-shrink: 0; background-color: #4a4a4a; }
+.me-status__dot--changes { background-color: #00DA6D; }
+.me-status__dot--warning { background-color: #ffb020; }
+.me-status__text { flex-shrink: 1; margin: 0; padding: 0; font-size: 11px; color: #bdbdbd; white-space: normal; }
+.me-status__text.warning { color: #ffb84d; }
+.me-actions { flex-direction: row; width: 372px; flex-shrink: 0; }
+.mcb-button.me-cancel { height: 40px; min-height: 40px; margin: 0 10px 0 0; flex-grow: 1; flex-basis: 0; border-radius: 10px; background-color: #3a3a3a; font-size: 13px; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; }
+.mcb-button.me-cancel:hover { background-color: #474747; }
+.mcb-button.me-save { height: 40px; min-height: 40px; margin: 0; flex-grow: 2; flex-basis: 0; border-radius: 10px; background-color: #00DA6D; color: #06140c; font-size: 14px; -unity-font-style: bold; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; }
+.mcb-button.me-save:hover { background-color: #19e27d; }
+.mcb-button.me-save .unity-label, .mcb-button.me-save Label { color: #06140c; }
+.mcb-button.me-cancel.pressed, .mcb-button.me-save.pressed { scale: 0.97 0.97; }
+.mcb-button.me-save:disabled { background-color: rgba(0, 218, 109, 0.3); opacity: 1; }
+
+/* ---- Quick Menu "Expressions" (VRChat) ---------------------------------------------------------------------------------- */
+.qm { flex-direction: row; transform-origin: left top; }
+.qm-sidebar { width: 52px; border-top-left-radius: 14px; border-bottom-left-radius: 14px; background-color: #0e0d10; }
+.qm-logo { position: absolute; left: 12px; top: 27px; width: 30px; height: 22px; }
+.qm-panel { width: 260px; border-radius: 10px; border-width: 2px; border-color: #1c2028; background-color: #101319; overflow: hidden; }
+.qm-header { height: 61px; flex-shrink: 0; flex-direction: row; align-items: center; background-color: #1c2028; }
+.qm-menu-button { position: absolute; left: 21px; top: 18px; width: 28px; height: 29px; }
+.qm-menu-button__bar { position: absolute; left: 0; width: 28px; height: 5px; border-radius: 2.5px; background-color: #2aa6bc; }
+.qm-back { cursor: link; border-radius: 6px; }
+.qm-back:hover { background-color: rgba(42, 166, 188, 0.12); }
+.qm-back--drop { background-color: rgba(42, 166, 188, 0.3); }
+.qm-title { position: absolute; left: 58px; right: 0; top: 15px; height: 37px; margin: 0; padding: 0; font-size: 24px; -unity-font-style: bold; color: #2e6570; -unity-text-outline-width: 0.4px; -unity-text-outline-color: #2e6570; -unity-text-align: middle-center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qm-grid { flex-grow: 1; }
+
+.qm-tile { position: absolute; width: 102px; height: 95px; border-radius: 8px; border-width: 3px; border-color: #1f4046; background-color: #163036; transition-property: left, top, background-color, border-color, scale, opacity; transition-duration: 0.16s, 0.16s, 0.1s, 0.1s, 0.14s, 0.12s; transition-timing-function: ease-out, ease-out, ease-out, ease-out, ease-out-back, ease-out; }
+.qm-tile--wide { width: 223px; height: 81px; }
+.qm-tile:hover { background-color: #1a3a41; }
+.qm-tile--pressed { scale: 0.95 0.95; background-color: #1d4249; }
+.qm-tile--selected { border-color: #2aa6bc; }
+.qm-tile--into { background-color: #1f4a52; border-color: #48d6ee; scale: 1.06 1.06; }
+.qm-tile--lifted { opacity: 0; }
+.qm-tile--static { transition-property: background-color, border-color, scale, opacity; }
+.qm-tile--file { border-color: #48d6ee; background-color: #1d4249; }
+.qm-tile--disabled { opacity: 0.55; }
+/* Held on an item: the two are about to make a folder (iOS's "forming a folder"). */
+.qm-tile--fold { scale: 1.08 1.08; border-color: #48d6ee; background-color: #1f4a52; }
+.qm-fold { position: absolute; width: 120px; height: 113px; border-radius: 16px; border-width: 2px; border-color: rgba(72, 214, 238, 0.5); background-color: rgba(72, 214, 238, 0.14); }
+.qm-ghost--fold { scale: 0.86 0.86; opacity: 0.85; }
+.qm-tile__icon { position: absolute; left: 20px; top: 4px; width: 56px; height: 56px; }
+.qm-tile--wide .qm-tile__icon { left: 80.5px; top: 0; width: 56px; height: 56px; }
+.qm-tile__badge { position: absolute; left: 50px; top: 38px; width: 28px; height: 28px; border-radius: 14px; background-color: #393c44; align-items: center; justify-content: center; }
+.qm-tile__glyph { width: 17px; height: 17px; }
+.qm-tile__label { position: absolute; left: 0; right: 0; top: 65px; height: 28px; margin: 0; padding: 0; font-size: 18px; -unity-font-style: bold; color: #bdbdbd; -unity-text-align: middle-center; white-space: normal; -unity-text-outline-width: 0.35px; -unity-text-outline-color: #bdbdbd; }
+.qm-tile--wide .qm-tile__label { top: 50px; }
+.qm-tile__dot { position: absolute; right: 24px; top: 7px; width: 7px; height: 7px; border-radius: 4px; background-color: #00DA6D; }
+.qm-rename { position: absolute; left: -1px; right: -1px; top: 63px; height: 30px; margin: 0; }
+.qm-rename > .unity-text-field__input { min-height: 28px; padding: 0 4px; border-radius: 6px; border-width: 2px; border-color: #48d6ee; background-color: #0d1f23; font-size: 14px; -unity-font-style: bold; color: #ffffff; -unity-text-align: middle-center; }
+.qm-gap { position: absolute; width: 102px; height: 95px; border-radius: 8px; border-width: 2px; border-color: rgba(72, 214, 238, 0.55); background-color: rgba(42, 166, 188, 0.08); transition-property: left, top; transition-duration: 0.16s; transition-timing-function: ease-out; }
+.qm-ghost { position: absolute; scale: 1.06 1.06; opacity: 0.92; transition-property: none; }
+.qm-empty { position: absolute; left: 17px; right: 17px; top: 150px; margin: 0; padding: 0; font-size: 12px; color: #4f6d73; -unity-text-align: middle-center; white-space: normal; }
+
+/* ---- Action Menu (Gesture Manager's radial menu) ------------------------------------------------------------------------- */
+.rm { width: 340px; height: 340px; }
+.rm-hint { position: absolute; left: 0; right: 0; top: 157px; margin: 0; padding: 0; font-size: 10px; color: rgba(255, 255, 255, 0.75); -unity-text-align: middle-center; white-space: normal; }
+.rm-title { position: absolute; left: 0; right: 0; top: -6px; margin: 0; padding: 0; font-size: 12px; color: #9ad7e0; -unity-font-style: bold; -unity-text-align: middle-center; }
+.rm-rename { position: absolute; width: 120px; height: 26px; margin: 0; }
+.rm-fold { position: absolute; width: 76px; height: 76px; border-radius: 38px; border-width: 3px; border-color: #48d6ee; background-color: rgba(72, 214, 238, 0.16); }
+
+/* ---- The select box at an item's top left (Quick Menu tiles and Action Menu slices) -------------------------------------- */
+.me-check { position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 4px; border-width: 1.5px; border-color: rgba(255, 255, 255, 0.32); background-color: rgba(8, 14, 18, 0.55); align-items: center; justify-content: center; opacity: 0.7; cursor: link; transition-property: opacity, background-color, border-color, scale; transition-duration: 0.1s, 0.1s, 0.1s, 0.14s; }
+.me-check:hover { opacity: 1; border-color: rgba(255, 255, 255, 0.6); }
+.me-check:active { scale: 0.9 0.9; }
+.qm-tile:hover > .me-check { opacity: 1; }
+.me-check--on { opacity: 1; background-color: #2aa6bc; border-color: #48d6ee; }
+.me-check__mark { width: 11px; height: 11px; --icon-color: rgba(255, 255, 255, 0); }
+.me-check--on > .me-check__mark { --icon-color: #ffffff; }
+.me-check--radial { left: 16px; top: 10px; }
+
+/* ---- The red cross at an item's top right: left out of the upload -------------------------------------------------------- */
+.me-delete { position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; border-radius: 8px; background-color: #d9363e; align-items: center; justify-content: center; opacity: 0.8; cursor: link; transition-property: opacity, background-color, scale; transition-duration: 0.1s, 0.1s, 0.14s; }
+.me-delete:hover { opacity: 1; background-color: #ef4a52; scale: 1.12 1.12; }
+.qm-tile:hover > .me-delete { opacity: 1; }
+.me-delete--pressed { scale: 0.85 0.85; }
+.me-delete__mark { width: 9px; height: 9px; --icon-color: #ffffff; }
+.me-delete--radial { right: auto; left: 68px; top: 10px; }
+
+/* ---- Under the Action Menu: what the upload leaves out, put back with a click --------------------------------------------- */
+.me-deleted { margin-top: 12px; max-width: 440px; align-items: center; }
+.me-deleted__caption { margin: 0 0 6px 0; padding: 0; font-size: 10px; letter-spacing: 1px; color: rgba(255, 255, 255, 0.4); -unity-font-style: bold; -unity-text-align: middle-center; }
+.me-deleted__row { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.me-chip { flex-direction: row; align-items: center; height: 26px; padding: 0 10px 0 4px; margin: 0 3px 4px 3px; border-radius: 13px; border-width: 1px; border-color: #1f4046; background-color: #142328; cursor: link; transition-property: background-color, border-color, scale; transition-duration: 0.1s, 0.1s, 0.14s; }
+.me-chip:hover { background-color: #1a3a41; border-color: #2aa6bc; }
+.me-chip--pressed { scale: 0.94 0.94; }
+.me-chip--group { padding-left: 10px; border-color: rgba(229, 72, 77, 0.45); background-color: rgba(229, 72, 77, 0.1); }
+.me-chip--group:hover { background-color: rgba(229, 72, 77, 0.2); border-color: #e5484d; }
+.me-chip--open { border-color: #ffb020; }
+.me-chip__icon { width: 18px; height: 18px; margin-right: 5px; opacity: 0.6; }
+.me-chip__text { margin: 0; padding: 0; font-size: 11px; color: #a9c2c7; white-space: nowrap; }
+.me-restore { margin-top: 4px; padding: 8px 10px 4px 10px; border-radius: 12px; background-color: rgba(255, 176, 32, 0.1); align-items: center; }
+.me-restore__text { margin: 0 0 6px 0; padding: 0; font-size: 11px; color: #ffcf73; white-space: normal; -unity-text-align: middle-center; }
+.rm-rename > .unity-text-field__input { min-height: 24px; padding: 0 4px; border-radius: 6px; border-width: 2px; border-color: #48d6ee; background-color: #0d1f23; font-size: 12px; color: #ffffff; -unity-text-align: middle-center; }
+
+/* ---- The "Edit menu" card in My Avatar: a Quick Menu folder tile as its badge, a "beta" chip by its title ------------------ */
+.me-beta { margin: 3px 0 0 8px; }
+.mcb-button.ft-ghost.me-card-default--on { color: #ffb3b6; background-color: rgba(229, 72, 77, 0.16); }
+.mcb-button.ft-ghost.me-card-default--on:hover { background-color: rgba(229, 72, 77, 0.26); }
+.me-badge { position: absolute; left: 6px; top: 6px; width: 66px; height: 66px; border-radius: 12px; border-width: 3px; border-color: #1f4046; background-color: #163036; }
+.me-badge__icon { position: absolute; left: 10px; top: 3px; width: 40px; height: 40px; }
+.me-badge__circle { position: absolute; left: 32px; top: 30px; width: 22px; height: 22px; border-radius: 11px; background-color: #393c44; align-items: center; justify-content: center; }
+.me-badge__glyph { width: 13px; height: 13px; }

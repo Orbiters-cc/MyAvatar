@@ -61,6 +61,73 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.IsNull(FaceTrackingNames.Resolve("MouthStretchLeft", index));
         }
 
+        // Ultinova's face on Novabeast: SRanipal's lip set as "LipTrack_*", a grin, and no eye or brow shapes yet.
+        private static readonly string[] LipsOnly =
+        {
+            "blink", "lookUp", "lookDown", "smile", "squint", "vrc.v_aa", "LipTrack_CheekPuff", "LipTrack_CheeksIn", "LipTrack_JawFoward",
+            "LipTrack_JawOpen", "LipTrack_LipCornerLowDown", "LipTrack_LipCornerTopUp", "LipTrack_LipFrown", "LipTrack_LipSmile",
+            "LipTrack_LowerLipRollOut", "LipTrack_LowerLipUp", "LipTrack_MouthDown", "LipTrack_Pout_Pucker", "LipTrack_TongueLeft",
+            "LipTrack_TongueRight", "LipTrack_TongueRaise", "LipTrack_TongueUp", "LipTrack_TongueUpLeft", "LipTrack_TongueUpRight",
+            "LipTrack_UpperLipDown", "LipTrack_UpperLipIn", "LipTrack_UpperLipLeft", "LipTrack_UpperLipRight", "LipTrack_UpperLipRollOut",
+            "LipTrack_CheekPuff_L", "LipTrack_CheekPuff_R", "LipTrack_CheeksIn_L", "LipTrack_CheeksIn_R", "LipTrack_LipCornerLowDown_L",
+            "LipTrack_LipCornerLowDown_R", "LipTrack_LipCornerTopUp_L", "LipTrack_LipCornerTopUp_R", "LipTrack_LipFrownLeft",
+            "LipTrack_LipFrownRight", "LipTrack_LipSmileLeft", "LipTrack_LipSmileRight", "LipTrack_TongueExtend", "Grin_L", "Grin_R",
+        };
+
+        [Test]
+        public void AFaceWithOnlyLipShapesIsOfferedLipTracking()
+        {
+            var root = new GameObject("Avatar"); owned.Add(root);
+            var body = new GameObject("Body").AddComponent<SkinnedMeshRenderer>();
+            body.transform.SetParent(root.transform, false);
+            body.sharedMesh = Mesh(LipsOnly);
+
+            var report = FaceTrackingDetection.Inspect(root.transform);
+
+            Assert.AreEqual(FaceTrackingStandard.SRanipal, report.Standard, "the standard whose mouth it has");
+            Assert.True(report.Ready, "most of the mouth's shapes are enough");
+            Assert.True(report.Mouth.Ready);
+            Assert.False(report.Eyes.Ready);
+            Assert.AreEqual(0, report.Eyes.Found);
+            Assert.AreEqual(14, report.Eyes.Needed);
+            Assert.AreEqual(24, report.Mouth.Found);
+            Assert.AreEqual(32, report.Mouth.Needed);
+            CollectionAssert.Contains(report.Eyes.Missing, "Eye_Left_Blink");
+            CollectionAssert.DoesNotContain(report.Mouth.Missing, "Jaw_Open");
+            Assert.AreEqual(FaceTrackingDetection.Features(false, true), report.Trackable);
+            Assert.AreEqual(0, (int)(report.Trackable & (FaceTrackingFeatures.Eyes | FaceTrackingFeatures.Pupils | FaceTrackingFeatures.Brows)));
+            Assert.AreEqual(report.Trackable, FaceTrackingDetection.Trackable(FaceTrackingStandard.SRanipal, body.sharedMesh));
+
+            // The upload leaves the eyes' parameters out until the face has eye shapes; the mouth's and the state stay.
+            var removed = FaceTrackingFeatureSet.Removed(new[] { "FT/v2/EyeLidLeft", "FT/v2/BrowExpressionLeft", "FT/v2/PupilDilation", "EyeTrackingActive",
+                "FT/v2/JawOpen", "FT/v2/TongueOut", "LipTrackingActive", "FT/v2/EyeTrackingActive" }, FaceTrackingFeatures.All & report.Trackable);
+            CollectionAssert.AreEquivalent(new[] { "FT/v2/EyeLidLeft", "FT/v2/BrowExpressionLeft", "FT/v2/PupilDilation", "EyeTrackingActive", "FT/v2/EyeTrackingActive" }, removed);
+            var marker = root.AddComponent<MyAvatarFaceTracking>();
+            marker.standard = FaceTrackingStandard.SRanipal.Id; marker.face = body;
+            Assert.AreEqual(report.Trackable, FaceTrackingFeatureSet.Built(marker), "everything chosen, the eyes left out");
+            marker.synced &= ~FaceTrackingFeatures.Cheeks;
+            Assert.AreEqual(report.Trackable & ~FaceTrackingFeatures.Cheeks, FaceTrackingFeatureSet.Built(marker));
+        }
+
+        [Test]
+        public void AFaceWithOnlyEyeShapesIsOfferedEyeTracking()
+        {
+            var root = new GameObject("Avatar"); owned.Add(root);
+            var body = new GameObject("Body").AddComponent<SkinnedMeshRenderer>();
+            body.transform.SetParent(root.transform, false);
+            body.sharedMesh = Mesh(new[] { "EyeClosedLeft", "EyeClosedRight", "EyeWideLeft", "EyeWideRight", "EyeSquintLeft", "EyeSquintRight",
+                "BrowDownLeft", "BrowDownRight", "BrowInnerUp", "BrowOuterUpLeft", "BrowOuterUpRight", "vrc.v_aa" });
+
+            var report = FaceTrackingDetection.Inspect(root.transform);
+
+            Assert.AreEqual(FaceTrackingStandard.UnifiedExpressions, report.Standard);
+            Assert.True(report.Ready);
+            Assert.True(report.Eyes.Ready);
+            Assert.AreEqual(11, report.Eyes.Found);
+            Assert.AreEqual(0, report.Mouth.Found);
+            Assert.AreEqual(FaceTrackingDetection.Features(true, false), report.Trackable);
+        }
+
         [Test]
         public void AFaceWithoutTrackingShapesIsNotOffered()
         {
@@ -106,7 +173,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var idle = pen.AddState("Idle"); var draw = pen.AddState("Draw");
             idle.AddTransition(draw).AddCondition(AnimatorConditionMode.Equals, 1, "GestureLeft");
 
-            var (renamed, gated) = FaceTrackingBuild.Finish(fx, FaceTrackingStandard.SRanipal, "Body", face);
+            var (renamed, gated, _) = FaceTrackingBuild.Finish(fx, FaceTrackingStandard.SRanipal, "Body", face);
 
             Assert.AreEqual(2, renamed);
             Assert.AreEqual(1, gated, "only the expressions moving shapes face tracking drives");
@@ -223,6 +290,109 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.AreSame(rest, any.destinationState);
             Assert.True(any.conditions.Single().parameter == FaceTrackingBuild.ExpressionsDisabled && any.conditions.Single().mode == AnimatorConditionMode.If);
             Assert.False(any.canTransitionToSelf, "at rest nothing restarts");
+        }
+
+        // Novabeast: its hand expressions use their own shapes ("smile", "furrow"), none of those tracking drives. They still
+        // follow "Disable Facial Expressions"; an arm flex and a blink layer of the same mesh are no expressions.
+        [Test]
+        public void ExpressionsWithTheirOwnShapesFollowDisableFacialExpressions()
+        {
+            var face = Mesh(Rexouium.Concat(new[] { "smile", "furrow", "ultra arm flex right", "blink" }));
+            var fx = new AnimatorController(); owned.Add(fx);
+            fx.AddParameter("GestureRight", AnimatorControllerParameterType.Int);
+            fx.AddParameter(FaceTrackingBuild.EyeTracking, AnimatorControllerParameterType.Float);
+            Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Mouth", (Clip(("LipTrack_TongueExtend", 100f)), "FT/v2/TongueOut"));
+            AnimatorStateTransition Gesture(string layer, string shape)
+            {
+                var machine = Layer(fx, layer);
+                var idle = machine.AddState("Idle"); machine.defaultState = idle;
+                var shown = machine.AddState(shape); shown.motion = Clip((shape, 100f));
+                var to = machine.AddAnyStateTransition(shown); to.AddCondition(AnimatorConditionMode.Equals, 1, "GestureRight");
+                return to;
+            }
+            var smile = Gesture("Right Hand", "smile");
+            var flex = Gesture("Flex", "ultra arm flex right");
+            var blink = Gesture("Blink", "blink");
+            blink.AddCondition(AnimatorConditionMode.IfNot, 0, FaceTrackingBuild.EyeTracking);
+
+            FaceTrackingBuild.Finish(fx, FaceTrackingStandard.SRanipal, "Body", face);
+
+            Assert.True(smile.conditions.Any(c => c.parameter == FaceTrackingBuild.ExpressionsDisabled && c.mode == AnimatorConditionMode.IfNot), "the toggle (and tracking) rests the expressions");
+            Assert.False(flex.conditions.Any(c => c.parameter == FaceTrackingBuild.ExpressionsDisabled), "an arm flex is no expression");
+            Assert.False(blink.conditions.Any(c => c.parameter == FaceTrackingBuild.ExpressionsDisabled), "blinks only wait for eye tracking");
+            var eye = blink.conditions.Single(c => c.parameter == FaceTrackingBuild.EyeTracking);
+            Assert.AreEqual(AnimatorConditionMode.Less, eye.mode, "the avatar's Bool condition reads the template's Float");
+        }
+
+        [Test]
+        public void TheHandsLeaveATrackedMouthAloneAndKeepMovingTheEars()
+        {
+            var face = Mesh(Rexouium.Concat(new[] { "EarsUp" }));
+            var fx = new AnimatorController(); owned.Add(fx);
+            fx.AddParameter("GestureRight", AnimatorControllerParameterType.Int);
+            fx.AddParameter("GestureRightWeight", AnimatorControllerParameterType.Float);
+            fx.AddParameter(FaceTrackingBuild.LipTracking, AnimatorControllerParameterType.Float);
+            Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Mouth", (Clip(("LipTrack_TongueExtend", 100f)), "FT/v2/TongueOut"));
+            // Rexouium's ear layer: a right fist raises the ears and, with the trigger pulled, sticks the tongue out (its bones
+            // and its PhysBone).
+            var avatar = new GameObject("Avatar"); owned.Add(avatar);
+            var jaw = new GameObject("Jaw").transform; jaw.SetParent(new GameObject("Head").transform); jaw.parent.SetParent(avatar.transform);
+            var tongue = new GameObject("Tongue1").transform; tongue.SetParent(jaw);
+            var dynamics = new GameObject("Tongue_Dyn"); dynamics.transform.SetParent(avatar.transform);
+            // The test assembly doesn't reference VRChat's dynamics: the PhysBone by its type name.
+            var physBoneType = System.Type.GetType("VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBone, VRC.SDK3.Dynamics.PhysBone");
+            var physBone = new SerializedObject(dynamics.AddComponent(physBoneType));
+            physBone.FindProperty("rootTransform").objectReferenceValue = tongue;
+            physBone.ApplyModifiedPropertiesWithoutUndo();
+            AnimationClip Pose(float ears, float tongueOut, float immobile)
+            {
+                var clip = Clip(("EarsUp", ears));
+                AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Head/Jaw/Tongue1", typeof(Transform), "m_LocalPosition.y"), AnimationCurve.Constant(0, 1, tongueOut));
+                AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Tongue_Dyn", physBoneType, "immobile"), AnimationCurve.Constant(0, 1, immobile));
+                return clip;
+            }
+            var ears = Layer(fx, "EarGesture_Right");
+            var idle = ears.AddState("Idle"); ears.defaultState = idle;
+            var fist = ears.AddState("Fist");
+            fist.motion = Tree("Fist Blend Tree", "GestureRightWeight", (0f, Pose(100f, .03f, 1f)), (1f, Pose(100f, .12f, 0f)));
+            var toFist = ears.AddAnyStateTransition(fist); toFist.AddCondition(AnimatorConditionMode.Equals, 1, "GestureRight");
+
+            FaceTrackingBuild.Finish(fx, FaceTrackingStandard.SRanipal, "Body", face, avatar.transform);
+
+            Assert.False(toFist.conditions.Any(c => c.parameter == FaceTrackingBuild.ExpressionsDisabled), "the ears keep following the hands");
+            var quiet = (BlendTree)fist.motion;
+            Assert.AreEqual(FaceTrackingBuild.LipTracking, quiet.blendParameter);
+            Assert.AreEqual("Fist Blend Tree", quiet.children[0].motion.name, "without lip tracking the gesture is as it was");
+            var tracked = (BlendTree)quiet.children[1].motion;
+            foreach (var clip in tracked.children.Select(c => (AnimationClip)c.motion))
+            {
+                var bindings = AnimationUtility.GetCurveBindings(clip);
+                Assert.True(bindings.Any(b => b.propertyName == "blendShape.EarsUp"), "the ears still move");
+                Assert.False(bindings.Any(b => b.path == "Head/Jaw/Tongue1" || b.path == "Tongue_Dyn"), "the tongue is face tracking's alone");
+            }
+        }
+
+        [Test]
+        public void OthersSeeTheFaceGlideAndSmoothingStaysOnAtLowFrameRates()
+        {
+            var fx = new AnimatorController(); owned.Add(fx);
+            foreach (var (name, value) in new[] { ("OSCm/Remote/FloatScaler", 15f), ("OSCm/Remote/FloatMod", .05f), ("OSCm/Remote/BinaryScaler", 15f), ("OSCm/Remote/BinaryMod", .05f), ("OSCm/Remote/EyeLidMod", .2f) })
+                fx.AddParameter(new AnimatorControllerParameter { name = name, type = AnimatorControllerParameterType.Float, defaultFloat = value });
+            var cutoff = Tree("Smoothing Cutoff", "OSCm/FrameTime", (.04f, Clip()), (.041f, Clip()));
+            Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Remote", (cutoff, "FT/DirectBlend"), (Clip(("LipTrack_JawOpen", 100f)), "FT/v2/JawOpen"));
+            float Default(string name) => fx.parameters.Single(p => p.name == name).defaultFloat;
+
+            FaceTrackingBuild.Pace(fx, FaceTrackingSmoothing.Balanced);
+
+            Assert.AreEqual(9f, Default("OSCm/Remote/FloatScaler")); Assert.AreEqual(9f, Default("OSCm/Remote/BinaryScaler"));
+            Assert.AreEqual(0f, Default("OSCm/Remote/FloatMod")); Assert.AreEqual(0f, Default("OSCm/Remote/BinaryMod"));
+            Assert.AreEqual(.2f, Default("OSCm/Remote/EyeLidMod"), "blinks keep the template's pace");
+            CollectionAssert.AreEqual(new[] { .1f, .101f }, cutoff.children.Select(c => c.threshold), "smoothing stays on down to 10 fps");
+
+            FaceTrackingBuild.Pace(fx, FaceTrackingSmoothing.Responsive);
+            Assert.AreEqual(15f, Default("OSCm/Remote/BinaryScaler"), "responsive: the template's own pace");
+            Assert.AreEqual(.05f, Default("OSCm/Remote/BinaryMod"), 1e-6f);
+            CollectionAssert.AreEqual(new[] { .1f, .101f }, cutoff.children.Select(c => c.threshold));
         }
 
         [Test]
@@ -502,7 +672,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
             CollectionAssert.AreEquivalent(new[] { "EyeTrackingActive", "FT/v2/EyeLidLeft", FaceTrackingBuild.LocalSmoothingParameter, "Hat" }, parameters.parameters.Select(p => p.name),
                 "the mouth and the tongue (which needs it) are left out; the avatar's own parameters stay");
-            Assert.AreEqual(.6f, parameters.parameters.Single(p => p.name == FaceTrackingBuild.LocalSmoothingParameter).defaultValue, 1e-5f);
+            Assert.AreEqual(.85f, parameters.parameters.Single(p => p.name == FaceTrackingBuild.LocalSmoothingParameter).defaultValue, 1e-5f);
             CollectionAssert.AreEqual(new[] { "Hat" }, menu.controls.Select(c => c.name), "the menu toggle of a removed parameter goes");
         }
 

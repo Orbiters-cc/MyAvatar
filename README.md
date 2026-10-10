@@ -1,5 +1,91 @@
 # My Avatar
 
+## 0.9.8 — 2026-10-10
+
+- **Likes and reviews in the gallery**: an asset's details show its likes beside its name and its reviews at the end, the
+  same as on its Orbiters page. Signed in, you like it with the thumb (green once liked), like other people's reviews,
+  and write your own review, then edit it in place or delete it with a second press. Reviewers who own the asset are
+  marked **Owns it**, the creator **Creator**.
+- Everything shows at once: a like counts before Orbiters answers (quick double presses send only the last wish), a new
+  review appears dimmed until it is saved, and a failure puts back what Orbiters holds with a short note.
+- **Like counts on the cards**, at the end of the creator line; liking an asset in its details updates its card.
+- **Materials that don't render**: the Materials card opens on an avatar drawn pink (its shader is missing, fails to
+  compile or is unsupported, Poiyomi's generated shader of a locked material included), says per material what it was
+  made for and the shader it moves to, and **Fix materials** fixes them all in one Undo step, keeping each original
+  beside it as "name (old)". See [Materials that don't render](#materials-that-dont-render). The `myavatar_materials`
+  MCP tool does the same.
+- **Face tracking for part of a face**: the Face tracking card now shows up when the face has most of the shapes of its
+  mouth, or of its eyes, not only of both (e.g. Ultinova's lip tracking shapes without eye shapes). It says which parts
+  move and which are missing; an upload leaves out the parameters of a part the face has no shapes for, and takes them
+  back once it has some.
+- **GoGoLoco versions**: once GoGoLoco is on, the Locomotion card shows a big tile per version the installed GoGoLoco
+  ships (1.8.6: **All**, locomotion, poses and emotes with its Base, Action and Sitting layers; **Beyond**, All plus
+  flying from seats it carries, with an FX layer), each with the synced bits it adds to this avatar. A press switches
+  the prefab in one Undo step, where the old one was, keeping its name and active state; nothing of the old one stays.
+- **Edit menu**: the new Menu card opens the avatar's VRChat menu exactly as it will be in the game, VRCFury (SPS
+  included) and Modular Avatar included: the Quick Menu's Expressions page and the Action Menu as Gesture Manager draws
+  it, side by side. Rename items in place in either, give them an icon (drop a picture on them or choose one), drag them
+  to another place, into a folder or back up, hold one on another to make a folder of the two (or tick items and
+  **Create folder**), then **Save** (one Undo step, then the scene and assets are saved like the texture Save) or
+  **Cancel**; Ctrl+Z and Ctrl+Y step through every change. The card is marked beta. See [Menu](#menu).
+- **Textures find added parts**: a dropped set named after its numbered material ("hair_Material.002_Normal" for
+  Blender's "Material.002") goes to that material, and so does one named after the object holding a part or its model
+  file ("Spiky hair" above the hair's "NurbsPath.001"). The avatar's own name and the skeleton say nothing about one
+  part, so a "Rexouium_…" file is not pulled onto a Rexouium hair. Where an earlier drop guessed is no hint either:
+  a set that once landed on the wrong material (the body's MiscMatt instead of the hair) finds its part when dropped
+  again, while images in slots you chose still count, also when the drop used the project file as it is.
+- **Export prefixes don't name parts**: in a folder of several sets exported with one prefix ("<model> hoodies hairs for
+  substance_EyeMatt.001_BaseColor", "…_MiscMatt…"), the words they start with are ignored and what follows names the
+  part, even when other files in the folder don't have the prefix ("hairs" no longer pulls the eyes to the feathers),
+  and when one set is dropped alone beside sets already on the avatar: words all those sets share ("Matt", ".001")
+  don't count either, so EyeMatt goes to the eyes and not to MiscMatt.
+  A set made for a Blender "Material.002" the avatar doesn't have (a part since removed) is left for you to choose
+  instead of guessed onto another part.
+- **Face tracking that glides**: the smoothing presets work like OSCmooth. Locally, **Balanced** (the default) starts at
+  0.6 and **Smooth** at 0.85; **Responsive** keeps the template's 0.25. Others now see the face glide between the values
+  VRChat sends them at the preset's pace (each frame Balanced moves 9 × the frame time of the way, Smooth 7, Responsive
+  the template's 15, which got there long before the next value and then held, so the face moved in steps), and
+  smoothing stays on down to 10 fps instead of switching off below 25.
+- **"Disable Facial Expressions" works on every avatar**: hand-gesture layers that show the face's own expression shapes
+  ("smile", "furrow" on a Novabeast), not only those face tracking also drives, rest while it is on (and while the face
+  is tracked); layers moving only a body part (ears, tail, an arm flex) or blinking keep going. An avatar's own Bool
+  `EyeTrackingActive` conditions read the template's Float correctly once merged.
+- **Glowing eyes keep their colors after Fix materials**: lilToon's emission tinted by the main texture
+  (`_EmissionMainStrength`) becomes Poiyomi's "base color as map" (and back), so a white emission mask no longer lays a
+  white veil over the eyes, stronger in dark maps.
+- **The tongue stays in for others**: while lip tracking is on, the avatar's other hand-gesture layers (the Rexouium's
+  ear gestures put the tongue out) play without their jaw, tongue and mouth curves: the ears still move and the tracked
+  mouth is left alone.
+- **Leave menu items out of the upload**: in Edit menu, the red cross at an item's top right (or **Leave out** in the
+  side panel) takes it out of both menus at once. It waits under the Action Menu, in **Left out of the upload**, and a
+  click puts it back where it was. When that place has filled up since, the item goes on a "Next" page: VRCFury's, or,
+  without VRCFury, a "Next" folder made at the eighth place with the place's last item and this one.
+- **Remove default menu**, on the Menu card and in Edit menu: the avatar's own menu (the descriptor's, e.g. the
+  Rexouium's Credits, Avatar Appearance, Body, Head and Gesture Speeds) is left out of the upload; what VRCFury, Modular
+  Avatar, MCB and Orbiters add stays. One chip puts it back.
+- **What a left-out item takes with it**, on the upload's copy only, after VRCFury: its parameter keeps its default (its
+  synced bits are freed) unless another item still sets it, conditions on it are decided, states and blend tree branches
+  that can no longer play go, a layer left playing one constant pose is written into the avatar and removed, objects left
+  hidden for good are deleted, and materials and animations nothing uses any more stay out of the upload. Logic the menu
+  didn't switch stays: the Rexouium's petting still answers to its contacts. A Rexouium with its default menu removed
+  keeps 27 parameters (55 synced bits) at their default, loses 21 layers and 21 objects, and uploads 14 materials
+  instead of 26 (its alternate fur colours are gone).
+- **Parameter budgets count the avatar as uploaded**: XRay Gizmos' chart and My Avatar's bit counts leave out the
+  synced parameters left-out items free (the same ones the upload frees: those only they set, the avatar's own, a Full
+  Controller's or a VRCFury Toggle's), as soon as an item is left out, the default menu removed or a look hidden.
+- **Hidden Rexouium feathers don't upload**: a feather group hidden under **Looks** is left out with its menu toggle, and
+  its meshes, materials and textures with it.
+- **Novabeast looks**: under **Looks**, a Novabeast shows its chest fluff, collar, goggles and mane as chips and its
+  breasts and tail size as sliders, shown in the scene. A hidden part stays hidden in VRChat (its toggle leaves the menu
+  and its synced bit is freed; it is a shape of the body mesh, so the mesh stays); a slider sets where it starts.
+- **Item settings in Edit menu**: the side panel shows the selected item's type (toggle, button, slider...), parameter,
+  value, what it starts at and whether it is saved and synced, and changes them. **Save** writes them to your own
+  VRCFury Toggle (toggle, hold button or slider, its default, saved) or to the avatar's own menu (type, parameter, value)
+  and parameters (default, saved, synced); an item from a package says its settings stay as its creator made them.
+- **Default icons**: Orbiters' toggles, sliders and folders without an icon get a white dot, a gauge or a folder (64 ×
+  64 PNGs in `Assets/Orbiters/Menu Icons/`), new ones when they are made and older ones at upload; VRCFury's **Next**
+  pages get a white arrow unless Override Menu Settings gives them an icon. Edit menu shows them as uploaded.
+
 ## 0.9.7 — 2026-10-09
 
 - **GoGoLoco in one click**: a Locomotion section, framed like face tracking, offers Franada’s GoGoLoco on every humanoid
@@ -322,6 +408,29 @@ disabled. It optimizes at upload; with VRCFury or Modular Avatar its author
 recommends that over **Create Optimized Copy**. My Avatar is not associated with
 d4rkAvatarOptimizer.
 
+## Materials that don't render
+
+An avatar bought for another shader, or for another version of it, often renders pink: its materials name a shader
+that is not in the project. My Avatar lists them first in the **Materials** card (which opens by itself once) and
+reads what each one was made for from what it saved: its shader GUID (lilToon's variants keep theirs across versions),
+Poiyomi's markers and the original shader of a locked material, lilToon's version, and VRChat's fallback tag.
+
+- **Its own family is installed**: it moves back onto it with every saved setting. A locked Poiyomi material whose
+  generated shader is missing is unlocked onto the shader it was locked from (its version under Poiyomi's Old Versions
+  when that is the one), the way Poiyomi does it; Poiyomi locks it again when you upload.
+- **Another family**: Poiyomi Toon if installed, else lilToon, else VRChat's Toon Standard (opaque materials), else
+  Standard. It keeps its texture, color, normal map, emission, culling and blending (opaque, cutout or transparent); from
+  lilToon to Poiyomi (and back) also its shadow colors, lilToon-style rim light and backlight, which both shaders share.
+  Each row says what is not carried over (outline, matcap, 2nd texture layer...). Installing the original shader
+  instead keeps everything: the card offers lilToon or Poiyomi Toon from VPM when one of them is what is missing.
+- Particles, trails and lines are only moved within their own family; otherwise the row asks for a particle shader.
+
+**Fix materials** fixes them all in one Undo step. Materials in `Assets` are changed where they are, so every avatar
+using one renders again, and each original is kept beside it as "name (old).mat" (its own GUID, labelled
+`MyAvatarBackup`, never listed as broken itself; it renders again as made once its shader is installed); materials inside a package or a model are copied to `Assets/Orbiters/MyAvatar/MaterialEdits/`
+and assigned to this avatar's renderers only. The Console lists what changed. The `myavatar_materials` MCP tool
+(`inspect`, `fix`) does the same on any scene avatar, with or without My Avatar on it.
+
 ## Thumbnail
 
 The thumbnail is shown on a copy of VRChat's in-game avatar card, measured on the game
@@ -392,7 +501,10 @@ avatar's own armature named like a part but driven by no PhysBone are offered un
 avatar, with settings suited to the part and the part's current permissions.
 
 Under **Looks**, a Rexouium shows its feather groups as chips (what the avatar starts with in VRChat, shown in the scene
-too) and its ear size.
+too) and its ear size. A hidden feather group is left out of the upload with its menu toggle, its meshes, materials and
+textures with it. A Novabeast shows its chest fluff, collar, goggles and mane as chips and its breasts and tail size as
+sliders. A hidden part stays hidden in VRChat: its toggle leaves the menu and its synced bit is freed (it is a shape of
+the body mesh, which stays). A slider sets where it starts in VRChat; the upload starts from the avatar's own pose.
 
 ## Avatar budget
 
@@ -409,12 +521,96 @@ Buttons for tools that go with My Avatar, each marked **Install** until it is in
 
 An install goes through VPM like any optional dependency; the tool opens once Unity has reloaded.
 
+## Menu
+
+The **Menu** card opens **Edit menu**: the avatar's Expressions menu as VRChat will show it once uploaded, instantly and
+without building anything. It starts from the menu on the avatar descriptor. With Modular Avatar in the project, its
+build comes first: Menu Installers add their menu or the Menu Items, Menu Groups and Install Targets on their object
+(to the main menu or the menu they name), and a menu of more than 8 items keeps 7 and continues in **More**. Then
+comes what VRCFury's build does: Full Controller menus merge in (folders of the same name merge), SPS adds its folder
+(the socket toggles, Stealth, Auto and Dual Mode, the DPS Tip Light), Toggles, Puppets and Gesture locks add their items
+at their menu paths (creating folders), Move Menu Item and Set Icon run, items are sorted by the component that added
+them, Reorder Menu Item runs, and a menu of more than 8 items continues on a **Next** page (with Override Menu Settings'
+text and icon). MCB's sliders, GoGoLoco and My Avatar's face tracking are VRCFury components, so they show too. The menu
+follows the avatar live: change a toggle or a menu asset and it updates.
+
+- The **Quick Menu** and the **Action Menu** show side by side, on the same page: an edit in one shows in the other at
+  once. The Quick Menu is the Expressions page of VRChat's Quick Menu, measured from the game (Reset Avatar first on the
+  main menu, two columns of tiles, each item's type as a badge, long names shrunk to fit). The Action Menu is Gesture
+  Manager's radial menu (BlackStartX, MIT License).
+- Click a folder to open it; the breadcrumb or back goes up. Click an item to see what it is and where it comes from.
+- **Select**: tick the small box at an item's top left (in either menu) to select it without opening it, folders
+  included; several items can be ticked. One ticked item shows its name and icon beside the menu; with any selection,
+  **Create folder (submenu)** puts the items in a new folder at the first one's place.
+- **Rename**: double-click an item (or F2), or type in the side panel.
+- **Icon**: drop a picture on an item, from the Project window or from your computer, or choose one in the side panel.
+  A picture from your computer is imported on Save into `Assets/Orbiters/MyAvatar/Menu Icons/` with the settings VRChat
+  wants for menu icons (at most 256 pixels, compressed, no mipmaps).
+- **Settings**: the side panel shows the selected item's type, parameter and value, what it starts at when the avatar
+  loads, and whether its parameter is saved and synced, and changes them. They are written on Save to your own VRCFury
+  Toggle (toggle, hold button or slider, its default, saved) or to the avatar's own menu (type, parameter, value) and
+  parameters asset (default, saved, synced); an item from a package says its settings stay as its creator made them.
+- **Leave out**: the red cross at an item's top right (or **Leave out** in the side panel) takes it out of both menus on
+  pointer down. Left-out items wait under the Action Menu, in **Left out of the upload**; a click puts one back where
+  it was. A place filled up since goes on over a "Next" page: VRCFury splits it, and without VRCFury a "Next" folder
+  (with the arrow) takes the eighth place, holding the place's last item and the one put back. When even that can't be
+  done, the editor offers up to six folders with room.
+- **Remove default menu** (in the toolbar, or on the Menu card): leaves out the avatar's own menu, the descriptor's and
+  its submenus, keeping what VRCFury, Modular Avatar, MCB and Orbiters add. It shows as one chip under the Action Menu.
+- **Move**: drag an item between two others to move it there, onto a folder's middle to put it inside (hover it to
+  open it and drop deeper), onto **Next** for the next page, or onto back or a breadcrumb to move it up. Released in
+  place, outside the menu or anywhere it can't go, it goes back and nothing changes.
+- **New folder**: hold a dragged item on another item's middle (its icon in the Action Menu) until the target lights up,
+  then release: a new folder takes the target's place with both inside, named in place ("New folder"). Saving makes it
+  a new menu next to the avatar's menus (or in `Assets/Orbiters/MyAvatar/Menus/` when those are in a package) when it is
+  in the avatar's own menu, else VRCFury's Move Menu Item moves its items to its path.
+- Every change is a Unity Undo step (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z). Nothing is written before **Save**; **Cancel**
+  forgets the changes. Closing the window with changes asks first.
+
+**Save** writes each change where it belongs, in one Undo step:
+
+- the avatar's own menu assets are edited (names, icons, order, items moved between them); a menu asset from a package
+  or used by another avatar is copied into `Assets/Orbiters/MyAvatar/Menus/` first and the copy put in its place;
+- your own VRCFury Toggles and Puppets (in your scene, not from a package's prefab) get their new menu path and icon,
+  and your own Modular Avatar Menu Items their new name (label) and icon;
+- everything else (Full Controller menus, prefabs from packages, the folders VRCFury makes for menu paths) is left as it
+  is and changed with VRCFury's own Move Menu Item, Set Icon, Reorder Menu Item and Override Menu Settings, on one
+  object at the end of the avatar, **Menu edits (My Avatar)**, rewritten at every Save.
+
+Then, like the texture Save, it saves the assets and the avatar's scene (with Unit Git, also a local "menu change"
+checkpoint; nothing is pushed). Ctrl+Z still puts the menu back as it was.
+
+Left-out items and **Remove default menu** are kept on the My Avatar component; the menu assets don't change. They act
+at upload, on the build copy after VRCFury: the items go (a folder left empty goes too, and pages close up), and so does
+what only they switched. Each parameter only they set keeps its default, freeing its synced bits, unless an item still
+in the menu sets it; conditions on it are decided, states and blend tree branches that can no longer play are removed,
+a layer left playing one constant pose is written into the avatar and removed, objects left hidden for good are deleted,
+and materials, textures and animations nothing uses any more stay out of the upload; the parameter budgets (XRay Gizmos,
+My Avatar) count those bits as free already. What the menu didn't switch keeps
+working (the Rexouium's petting still answers to its contacts: only its menu switch goes). The Console sums it up after
+each upload ("[My Avatar] Menu: ..."). An object only moved out of sight rather than switched off stays, like the
+Rexouium's credits plane, which rests shrunk inside its chest once its Credits item is gone.
+
+Orbiters' toggles, sliders and folders without an icon get a white dot, a gauge or a folder (64 × 64 PNGs in
+`Assets/Orbiters/Menu Icons/`), and VRCFury's **Next** pages a white arrow unless Override Menu Settings gives them an
+icon.
+
+Before keeping anything, Save works out the menu again from what it wrote: when VRCFury would not build exactly the menu
+you edited, nothing is kept and the editor says why. VRCFury finds items by name, so two items with the same name in one
+menu can't trade places; rename one first. A folder that opens the same menu as another folder (a submenu used twice,
+or one looping back to a menu above it) moves like any other item when it is in the avatar's own menu assets, and keeps
+opening that menu. Such a folder that VRCFury or Modular Avatar adds (a Full Controller's or an installer's) stays where
+it is: VRCFury's Move Menu Item would copy its menu instead of moving it.
+
 ## Face tracking
 
-When the avatar's face (the mesh lip sync uses) has most of the blendshapes face tracking uses, the **Face tracking**
-section offers **Add** (Face tracking available). My Avatar works out which standard the face fits best: Unified Expressions,
-ARKit (Perfect Sync) or SRanipal, also when the shapes are named another way (e.g. Rexouium's "LipTrack_JawOpen",
-"Eye_LookUp_L", "EyesWide_L"). One click then:
+When the avatar's face (the mesh lip sync uses) has most of the blendshapes face tracking uses for its mouth, its eyes
+(with the brows) or both, the **Face tracking** section offers **Add** (Face tracking, Lip tracking or Eye tracking
+available). My Avatar works out which standard the face fits best: Unified Expressions, ARKit (Perfect Sync) or SRanipal,
+also when the shapes are named another way (e.g. Rexouium's "LipTrack_JawOpen", "Eye_LookUp_L", "EyesWide_L"). Chips
+under the text show each part: green with most of its shapes, amber with some, grey when missing (the tooltip lists the
+missing shapes). A part without any of its shapes is left out of the upload's parameters (no bits spent on it) and comes
+back by itself once the face has its shapes. One click then:
 
 - downloads Adjerry91's Face Tracking Templates (and VRCFury) through VPM when they are missing; the setup finishes once
   Unity has reloaded its scripts;
@@ -425,6 +621,13 @@ face's own shapes, the avatar's hand-gesture expressions pause while VRCFaceTrac
 and blinks the avatar animates itself wait while the eyes are tracked. The templates' files and the avatar's own
 controllers are never changed. The template adds about 140 to 170 parameter bits; VRCFury compresses parameters when the
 avatar goes over 256. **Remove** takes it off again.
+
+The **Smoothing** setting chooses how the face follows the tracker, the way OSCmooth does: **Responsive** is the
+template's, **Balanced** (the default) and **Smooth** are calmer. Each sets the local smoothing the face starts with
+(0.25, 0.6 or 0.85; the template's Local Smoothing slider still changes it in game), how fast others see the face move
+toward each value VRChat sends them, and how much slower than the rest the mouth follows. Smoothing stays on down to
+10 fps. While lip tracking is on, the avatar's other hand-gesture layers play without their jaw, tongue and mouth curves,
+so a gesture never pulls the tracked mouth (or sticks the tongue out) while the ears still move.
 
 Face tracking blendshapes are animated by [Adjerry91's Face Tracking Templates](https://github.com/Adjerry91/VRCFaceTracking-Templates).
 If you sell an avatar that uses them, their author asks for that credit, with the link, on your store or product page.
@@ -469,8 +672,10 @@ including locked/optimized shaders such as Poiyomi's `Hidden/Locked/...` shaders
 A locked shader only keeps the features that were enabled when it was locked: if a
 texture set member needs a slot the material lacks (for example emission), the
 Inspector says so; enable the feature (unlocking if needed) and drop again.
-Custom shaders can require their own feature toggles. The tool does not convert
-roughness to smoothness, repack texture channels, change UVs or switch shaders.
+Custom shaders can require their own feature toggles. A roughness image put in a
+smoothness slot (or the reverse) is inverted into a generated map, and maps put in a packed slot (metallic beside
+smoothness or roughness) are packed into one generated image that keeps the slot's other channels; dropped files never
+change. A drop never changes UVs or switches shaders.
 
 Undo becomes **Redo** after restoring the previous materials. Redo
 restores the saved assignments immediately without importing or requesting AI.

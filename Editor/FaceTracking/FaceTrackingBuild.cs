@@ -19,9 +19,11 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
     /// <item>blendshapes the template animates under its standard's names animate the face's own shapes for them
     /// (<see cref="FaceTrackingNames"/>), so an avatar named its own way tracks without renaming anything;</item>
     /// <item>the avatar's hand-gesture expressions hold the face still while VRCFaceTracking drives it
-    /// (FacialExpressionsDisabled, set by the template), and blinks it animates wait while eye tracking is on;</item>
-    /// <item>the marker's quick settings: the smoothing, the mouth's tuning, and the features others see (the parameters
-    /// of the others are left out of VRCFury's copy of the expression parameters and menu).</item>
+    /// (FacialExpressionsDisabled, set by the template), its other hand gestures leave a tracked mouth alone (jaw and
+    /// tongue included), and blinks it animates wait while eye tracking is on;</item>
+    /// <item>the marker's quick settings: the smoothing (for the wearer and for others, <see cref="Pace"/>), the mouth's
+    /// tuning, and the features others see (the parameters of the others are left out of VRCFury's copy of the expression
+    /// parameters and menu).</item>
     /// </list>
     /// The template's files and the avatar's own controllers are never changed.
     /// </summary>
@@ -35,17 +37,24 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         private sealed class Plan
         {
             public FaceTrackingStandard Standard; public string FacePath; public Mesh Face;
+            /// <summary>The avatar (the build copy): where its jaw and tongue are. Null leaves them out.</summary>
+            public Transform Root;
             public FaceTrackingSmoothing Smoothing; public bool Expressive;
             /// <summary>The template's parameters of the features others don't see.</summary>
             public HashSet<string> Removed;
         }
 
-        /// <summary>The template's Local Smoothing to start with: 0 snaps, 1 smooths most (0.25 is the template's own).</summary>
+        /// <summary>
+        /// The template's Local Smoothing to start with: 0 snaps, 1 smooths most. Each frame takes 15 × the frame time plus
+        /// 0.69 − 0.59 × this of the new value: at 90 fps the template's own 0.25 keeps 29 % of the last frame (the face jumps
+        /// from one tracker frame to the next), 0.6 keeps half of it like OSCmooth's local default, 0.85 two thirds.
+        /// </summary>
         internal static float StartingSmoothing(FaceTrackingSmoothing smoothing) =>
-            smoothing == FaceTrackingSmoothing.Responsive ? 0f : smoothing == FaceTrackingSmoothing.Smooth ? .6f : .25f;
+            smoothing == FaceTrackingSmoothing.Responsive ? .25f : smoothing == FaceTrackingSmoothing.Smooth ? .85f : .6f;
 
-        /// <summary>How much slower than the eyes the mouth follows (1: as fast).</summary>
-        internal static float MouthSlowdown(FaceTrackingSmoothing smoothing) => smoothing == FaceTrackingSmoothing.Responsive ? 1f : SlowSmoothing;
+        /// <summary>How much slower than the eyes the mouth follows (1: as fast): it keeps 70 % of the last frame at 90 fps, 80 % when smooth.</summary>
+        internal static float MouthSlowdown(FaceTrackingSmoothing smoothing) =>
+            smoothing == FaceTrackingSmoothing.Responsive ? 1f : smoothing == FaceTrackingSmoothing.Smooth ? SmoothSlowdown : SlowSmoothing;
         private static readonly ConditionalWeakTable<GameObject, Plan> Plans = new ConditionalWeakTable<GameObject, Plan>();
 
         // Before VRCFury (-10000): its components, and the marker's face reference, are still there.
@@ -77,9 +86,11 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 if (standard != null)
                     Plans.Add(avatar, new Plan
                     {
-                        Standard = standard, FacePath = facePath, Face = face.sharedMesh,
+                        Standard = standard, FacePath = facePath, Face = face.sharedMesh, Root = avatar.transform,
                         Smoothing = marker.smoothing, Expressive = marker.expressiveMouth,
-                        Removed = FaceTrackingFeatureSet.Removed(FaceTrackingFeatureSet.Parameters(marker.gameObject).Select(p => p.name), marker.synced),
+                        // A part of the face without its shapes (eyes on a face made for lip tracking) costs no bits.
+                        Removed = FaceTrackingFeatureSet.Removed(FaceTrackingFeatureSet.Parameters(marker.gameObject).Select(p => p.name),
+                            marker.synced & FaceTrackingDetection.Trackable(standard, face.sharedMesh)),
                     });
                 return true;
             }
@@ -103,19 +114,24 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     Debug.LogWarning("[My Avatar] Face tracking: the FX controller “" + fx.name + "” is the avatar's own asset (VRCFury did not build this avatar), so its blendshape names and gestures were left as they are.");
                     return true;
                 }
-                var (renamed, gated) = Finish(fx, plan.Standard, plan.FacePath, plan.Face);
+                var (renamed, gated, quieted) = Finish(fx, plan.Standard, plan.FacePath, plan.Face, plan.Root);
                 var tuned = Tune(fx, plan.FacePath, plan.Face, plan.Expressive, MouthSlowdown(plan.Smoothing));
+                string paced = Pace(fx, plan.Smoothing);
                 string settings = Configure(descriptor, StartingSmoothing(plan.Smoothing), plan.Removed);
-                Debug.Log($"[My Avatar] Face tracking ({plan.Standard.Label}): {renamed} template blendshape curves animate this face's own shapes, {gated} expression layers wait while tracking. {tuned} {settings}");
+                Debug.Log($"[My Avatar] Face tracking ({plan.Standard.Label}): {renamed} template blendshape curves animate this face's own shapes, {gated} expression layers wait while tracking, {quieted} other gesture states leave the tracked mouth alone. {tuned} {paced} {settings}");
                 return true;
             }
         }
 
-        /// <summary>Renames the template's blendshape curves and gates gestures and blinks in <paramref name="fx"/> (VRCFury's copy).</summary>
-        internal static (int renamed, int gated) Finish(AnimatorController fx, FaceTrackingStandard standard, string facePath, Mesh face)
+        /// <summary>
+        /// Renames the template's blendshape curves and gates gestures and blinks in <paramref name="fx"/> (VRCFury's copy);
+        /// <paramref name="root"/> (the build copy) has the jaw and tongue the hands no longer move while the mouth is tracked.
+        /// </summary>
+        internal static (int renamed, int gated, int quieted) Finish(AnimatorController fx, FaceTrackingStandard standard, string facePath, Mesh face, Transform root = null)
         {
-            var plan = new Plan { Standard = standard, FacePath = facePath, Face = face };
-            return (Rename(fx, plan), Gate(fx, plan));
+            var plan = new Plan { Standard = standard, FacePath = facePath, Face = face, Root = root };
+            int renamed = Rename(fx, plan);
+            return (renamed, Gate(fx, plan, out int quieted), quieted);
         }
 
         /// <summary>
@@ -241,7 +257,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         // ---- Hand gestures and blinks ----
 
-        private static int Gate(AnimatorController fx, Plan plan)
+        private static int Gate(AnimatorController fx, Plan plan, out int quieted)
         {
             Parameter(fx, ExpressionsDisabled, AnimatorControllerParameterType.Bool);
             var eye = Parameter(fx, EyeTracking, AnimatorControllerParameterType.Float);
@@ -252,17 +268,22 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             var tracked = new HashSet<string>(fx.layers.Where(l => l.stateMachine != null && IsTracking(l.stateMachine))
                 .SelectMany(l => States(l.stateMachine)).SelectMany(s => Shapes(s.motion, plan.FacePath)), StringComparer.Ordinal);
             int gated = 0;
+            var resting = new HashSet<AnimatorStateMachine>();
             foreach (var layer in fx.layers)
             {
                 var machine = layer.stateMachine;
                 if (machine == null || IsTracking(machine)) continue;
                 var states = States(machine).ToList();
                 var transitions = Transitions(machine).ToList();
-                if (!states.Any(s => Shapes(s.motion, plan.FacePath).Any(tracked.Contains))) continue;
-                // Expressions: while the face is tracked the layer rests. Nothing leaves the rest state (hand gestures, menu
-                // toggles, Entry and Exit alike), and Any State brings an expression shown back to it.
+                var shapes = new HashSet<string>(states.SelectMany(s => Shapes(s.motion, plan.FacePath)), StringComparer.Ordinal);
+                if (shapes.Count == 0) continue;
+                // Expressions: the face's shapes tracking drives, or its own expression shapes ("smile", "furrow"), not a body
+                // part's (ears, tail, an arm flex) nor blinks alone. While the face is tracked, or "Disable Facial Expressions"
+                // is on, the layer rests. Nothing leaves the rest state (hand gestures, menu toggles, Entry and Exit alike),
+                // and Any State brings an expression shown back to it.
+                bool expression = shapes.Any(tracked.Contains) || shapes.Any(s => !IsBlink(s) && !BodyPart(s));
                 var rest = machine.defaultState;
-                if (rest != null && transitions.Any(t => t.conditions.Any(c => GestureParameters.Contains(c.parameter))))
+                if (expression && rest != null && transitions.Any(t => t.conditions.Any(c => GestureParameters.Contains(c.parameter))))
                 {
                     foreach (var transition in transitions)
                         if (transition.destinationState != rest && !transition.conditions.Any(c => c.parameter == ExpressionsDisabled))
@@ -273,8 +294,15 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                         conditions = new[] { new AnimatorCondition { mode = AnimatorConditionMode.If, parameter = ExpressionsDisabled } },
                     });
                     machine.anyStateTransitions = machine.anyStateTransitions.Append(back).ToArray();
+                    resting.Add(machine);
                     gated++;
                 }
+                // The avatar's own Bool "EyeTrackingActive" is the template's Float once merged: its If and IfNot read it
+                // as over or under a half.
+                if (eye.type == AnimatorControllerParameterType.Float)
+                    foreach (var transition in transitions.Where(t => t.conditions.Any(c => c.parameter == EyeTracking && (c.mode == AnimatorConditionMode.If || c.mode == AnimatorConditionMode.IfNot))))
+                        transition.conditions = transition.conditions.Select(c => c.parameter != EyeTracking || c.mode != AnimatorConditionMode.If && c.mode != AnimatorConditionMode.IfNot ? c
+                            : new AnimatorCondition { parameter = EyeTracking, mode = c.mode == AnimatorConditionMode.If ? AnimatorConditionMode.Greater : AnimatorConditionMode.Less, threshold = .5f }).ToArray();
                 // Blinks the avatar animates itself wait while the eyes are tracked: transitions into a state that closes
                 // the eyes, not those back to one holding them open.
                 foreach (var transition in transitions.Where(t => t.destinationState != null && Raised(t.destinationState.motion, plan.FacePath).Any(blinks.Contains)))
@@ -284,6 +312,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                         else Require(transition, AnimatorConditionMode.Less, .5f, EyeTracking);
                     }
             }
+            // The hands' other layers (ears, feathers) keep moving, without the mouth.
+            quieted = Quiet(fx, plan, tracked, resting);
             return gated;
         }
 
@@ -293,6 +323,18 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             transition.conditions = transition.conditions.Append(new AnimatorCondition { mode = mode, threshold = threshold, parameter = parameter }).ToArray();
 
         private static bool IsBlink(string shape) => shape.IndexOf("blink", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static readonly HashSet<string> BodyParts = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "arm", "leg", "hand", "finger", "foot", "feet", "toe", "claw", "tail", "wing", "ear", "feather", "fthr", "horn", "hair",
+            "mane", "fluff", "chest", "breast", "belly", "butt", "hip", "muscle", "flex", "bicep", "pec", "fat", "thigh", "calf",
+            "shoulder", "neck", "spine", "body", "collar", "goggle", "glasses", "hat",
+        };
+
+        // A shape of a body part rather than of the face's expression: "ultra arm flex right", "EarsUp", "Tail_FurStandUp".
+        private static bool BodyPart(string shape) =>
+            System.Text.RegularExpressions.Regex.Split(System.Text.RegularExpressions.Regex.Replace(shape, "([a-z])([A-Z])", "$1 $2").ToLowerInvariant(), "[^a-z]+")
+                .Any(w => BodyParts.Contains(w) || w.Length > 3 && w.EndsWith("s", StringComparison.Ordinal) && BodyParts.Contains(w.Substring(0, w.Length - 1)));
 
         // The template's own layers read VRCFaceTracking's parameters.
         private static bool IsTracking(AnimatorStateMachine machine) =>
