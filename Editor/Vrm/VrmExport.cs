@@ -61,7 +61,10 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             settings = settings ?? avatar.vrmExport;
             string title = string.IsNullOrWhiteSpace(settings.title) ? root.name : settings.title;
             var thumbnail = avatar.thumbnail;
-            var passes = avatar.uploadOptimization.Passes & ~VrChatOnly;
+            var optimization = avatar.uploadOptimization;
+            var passes = optimization.Passes & ~VrChatOnly;
+            // Custom carries the level's own distance and polygon budget, not Custom's sliders.
+            float sharpFrom = optimization.SharpFrom, polygonQuality = optimization.PolygonQuality;
             GameObject built = null;
             job.Build = HiddenAvatarBuild.Start(root, type => type.Name == "ParameterCompressorHook", copy =>
             {
@@ -69,6 +72,8 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                 {
                     own.uploadOptimization.level = passes == OptimizationPasses.None ? OptimizationLevel.Off : OptimizationLevel.Custom;
                     own.uploadOptimization.custom = passes;
+                    own.uploadOptimization.sharpFrom = sharpFrom;
+                    own.uploadOptimization.polygonQuality = polygonQuality;
                 }
                 // The shapes the VRM's expressions set survive the build steps that remove unused ones.
                 built = copy;
