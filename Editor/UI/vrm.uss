@@ -1,0 +1,22 @@
+/* Export to VRM: the face tracking frame (face-tracking.uss) and the optimization tiles and badge (optimization.uss), a form
+   panel like Custom's switches. Same palette and radii: 14 px panels, 12 px rows, 8 px fields, #00DA6D accent. */
+
+.mcb-button.ft-tracker.vrm-version { flex-basis: 45%; height: 64px; min-height: 64px; }
+
+.vrm-form { margin-top: 12px; }
+.vrm-row { flex-direction: row; align-items: center; min-height: 30px; margin-top: 4px; }
+.vrm-row__label { width: 110px; flex-shrink: 0; margin: 0; padding: 0; color: #9a9a9a; font-size: 11px; }
+.vrm-field { flex-grow: 1; flex-shrink: 1; min-width: 80px; margin: 0; }
+.vrm-field > .unity-base-field__input, .vrm-field .unity-text-field__input, .vrm-field .unity-base-text-field__input { min-height: 26px; padding: 2px 10px; border-radius: 8px; border-width: 0; background-color: #2a2a2a; color: #ffffff; font-size: 11px; }
+.vrm-field__hint { position: absolute; left: 12px; top: 6px; margin: 0; padding: 0; color: #666666; font-size: 11px; }
+
+.vrm-choices { flex-direction: row; flex-grow: 1; }
+.mcb-button.vrm-choice { height: 26px; min-height: 26px; margin: 0 6px 0 0; padding: 0 12px; border-radius: 13px; border-width: 0; background-color: #2a2a2a; color: #b0b0b0; font-size: 11px; }
+.mcb-button.vrm-choice:hover { background-color: #333333; color: #ffffff; }
+.mcb-button.vrm-choice--on, .mcb-button.vrm-choice--on:hover { background-color: rgba(0, 218, 109, 0.16); color: #00DA6D; -unity-font-style: bold; }
+
+.vrm-form .ft-feature { margin-top: 6px; }
+.ft-feature.vrm-license { margin-top: 10px; background-color: #2f2a22; }
+
+.vrm-actions { flex-direction: row; align-items: center; margin-top: 12px; }
+.ft-note.vrm-status { flex-grow: 1; flex-shrink: 1; margin: 0; white-space: normal; }

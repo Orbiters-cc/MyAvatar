@@ -8,10 +8,10 @@ namespace Orbiters.MyAvatar.Editor.Tests
     {
         [Test] public void FormatFollowsNormalAndMeasuredAlpha()
         {
-            Assert.AreEqual(TextureImporterFormat.DXT1, TextureOptimization.Format(false, false));
-            Assert.AreEqual(TextureImporterFormat.BC7, TextureOptimization.Format(false, true));
-            Assert.AreEqual(TextureImporterFormat.BC5, TextureOptimization.Format(true, false));
-            Assert.AreEqual(TextureImporterFormat.BC5, TextureOptimization.Format(true, true));
+            Assert.AreEqual(TextureFormat.DXT1, TextureOptimization.Format(false, false));
+            Assert.AreEqual(TextureFormat.BC7, TextureOptimization.Format(false, true));
+            Assert.AreEqual(TextureFormat.BC5, TextureOptimization.Format(true, false));
+            Assert.AreEqual(TextureFormat.BC5, TextureOptimization.Format(true, true));
         }
 
         [Test] public void BitsPerPixelMatchVramFormats()
@@ -55,43 +55,19 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.IsNull(TextureOptimization.Exclusion("Assets/Flute.png", "Flute", "_MainTex Main", 1024, 1024));
         }
 
-        [Test] public void SameComparesOnlyWhatMatters()
+        // Crunch only shrinks the download: DXT5 where BC7 or BC5 would go, the same memory as the blocks it holds.
+        [Test] public void CrunchKeepsTheMemoryOfItsBlocks()
         {
-            var target = TextureOptimization.Target(TextureImporterFormat.DXT1, 512);
-            Assert.IsTrue(target.overridden && target.mipmaps && target.streaming && !target.crunched && target.quality == 100 && target.maxSize == 512);
-            var compression = target; compression.compression = 0;
-            Assert.IsTrue(TextureOptimization.Same(target, compression));
-            var size = target; size.maxSize = 1024;
-            Assert.IsFalse(TextureOptimization.Same(target, size));
-            var original = new ImporterState { overridden = false, maxSize = 2048, format = -1, mipmaps = true };
-            var drifted = original; drifted.maxSize = 4096;
-            Assert.IsTrue(TextureOptimization.Same(original, drifted));
-            drifted.streaming = true;
-            Assert.IsFalse(TextureOptimization.Same(original, drifted));
-        }
-
-        // Crunch only shrinks the download: a crunched texture keeps crunch (DXT5 where BC7 or BC5 would go) and its quality.
-        [Test] public void CrunchedTexturesStayCrunched()
-        {
-            Assert.AreEqual(TextureImporterFormat.DXT1Crunched, TextureOptimization.Crunch(TextureImporterFormat.DXT1));
-            Assert.AreEqual(TextureImporterFormat.DXT5Crunched, TextureOptimization.Crunch(TextureImporterFormat.BC7));
-            Assert.AreEqual(TextureImporterFormat.DXT5Crunched, TextureOptimization.Crunch(TextureImporterFormat.BC5));
-            var target = TextureOptimization.Target(TextureImporterFormat.DXT1Crunched, 512, 50);
-            Assert.IsTrue(target.crunched);
-            Assert.AreEqual(50, target.quality);
-            Assert.AreEqual(4, TextureOptimization.BitsPerPixel(TextureOptimization.Runtime(TextureImporterFormat.DXT1Crunched)));
-            Assert.AreEqual(8, TextureOptimization.BitsPerPixel(TextureOptimization.Runtime(TextureImporterFormat.DXT5Crunched)));
-        }
-
-        [Test] public void EmptyRecordIsNotApplied()
-        {
-            var record = new TextureOptimizationRecord();
-            Assert.IsFalse(TextureOptimization.Applied(record));
-            record.textures.Add(new OptimizedTexture { applied = false });
-            Assert.IsFalse(TextureOptimization.Applied(record));
-            record.textures[0].applied = true;
-            Assert.IsTrue(TextureOptimization.Applied(record));
-            Assert.AreEqual(1, TextureOptimization.Changed(record));
+            Assert.AreEqual(TextureFormat.DXT1Crunched, TextureOptimization.Crunch(TextureFormat.DXT1));
+            Assert.AreEqual(TextureFormat.DXT1Crunched, TextureOptimization.Crunch(TextureFormat.DXT1Crunched));
+            Assert.AreEqual(TextureFormat.DXT5Crunched, TextureOptimization.Crunch(TextureFormat.BC7));
+            Assert.AreEqual(TextureFormat.DXT5Crunched, TextureOptimization.Crunch(TextureFormat.BC5));
+            Assert.IsTrue(TextureOptimization.Crunched(TextureFormat.DXT5Crunched));
+            Assert.IsFalse(TextureOptimization.Crunched(TextureFormat.DXT5));
+            Assert.AreEqual(TextureFormat.DXT1Crunched, TextureOptimization.RuntimeFormat(TextureImporterFormat.DXT1Crunched));
+            Assert.AreEqual(TextureFormat.BC5, TextureOptimization.RuntimeFormat(TextureImporterFormat.BC5));
+            Assert.AreEqual(TextureOptimization.FormatBytes(TextureFormat.DXT1, 512, 512, true), TextureOptimization.FormatBytes(TextureFormat.DXT1Crunched, 512, 512, true));
+            Assert.AreEqual(TextureOptimization.FormatBytes(TextureFormat.DXT5, 512, 512, true), TextureOptimization.FormatBytes(TextureFormat.DXT5Crunched, 512, 512, true));
         }
     }
 }

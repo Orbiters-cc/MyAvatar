@@ -493,23 +493,6 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(import.Result.Single().role, Is.EqualTo("normal"));
         }
 
-        // "Body.png" and "body.png" from two folders are one file name on Windows: their copies get distinct names.
-        [Test] public void CopiesOfNamesDifferingOnlyInCaseDoNotCollide()
-        {
-            string folder = Folder(), output = Folder();
-            TextureImport.EnsureFolder(folder + "/A"); TextureImport.EnsureFolder(folder + "/B");
-            var upper = Png(folder + "/A", "Body", 4, (x, y) => new Color32(10, 20, 30, 255));
-            var lower = Png(folder + "/B", "body", 4, (x, y) => new Color32(30, 20, 10, 255));
-            var copies = TextureOptimization.Duplicate(new List<TextureOptimization.TexturePlan> {
-                new TextureOptimization.TexturePlan { texture = upper, path = AssetDatabase.GetAssetPath(upper) },
-                new TextureOptimization.TexturePlan { texture = lower, path = AssetDatabase.GetAssetPath(lower) },
-            }, output);
-            Assert.AreEqual(2, copies.Count);
-            var paths = copies.Values.Select(AssetDatabase.GetAssetPath).ToList();
-            Assert.AreEqual(2, paths.Distinct(StringComparer.OrdinalIgnoreCase).Count());
-            Assert.That(paths.All(p => p.StartsWith(output + "/Textures/", StringComparison.Ordinal)));
-        }
-
         [Test] public void AlphaIsMeasuredOnEveryTexel()
         {
             string folder = Folder();
@@ -520,30 +503,6 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(alpha[near], Is.True);
             Assert.That(alpha[cutout], Is.True);
             Assert.That(alpha[opaque], Is.False);
-        }
-
-        // MA-9: A → B, then B → C; Undo optimization brings back A without reporting a slot kept by hand.
-        [Test] public void UndoAfterTwoOptimizationsRestoresTheFirstMaterial()
-        {
-            var avatar = Avatar();
-            var renderer = avatar.gameObject.AddComponent<MeshRenderer>();
-            Material a = Standard("A"), b = Standard("B"), c = Standard("C");
-            renderer.sharedMaterial = c;
-            avatar.optimization.swaps.Add(new MaterialSwap { renderer = renderer, index = 0, before = a, after = b });
-            avatar.optimization.swaps.Add(new MaterialSwap { renderer = renderer, index = 0, before = b, after = c });
-            Assert.That(TextureOptimization.Revert(avatar), Is.Null);
-            Assert.That(renderer.sharedMaterial, Is.SameAs(a));
-            Undo.ClearUndo(renderer);
-        }
-
-        // MA-10: a texture optimized in place outside the generated folders is part of the Save checkpoint.
-        [Test] public void CheckpointIncludesImportSettingsChangedInPlace()
-        {
-            var texture = Png(Folder(), "Outside", 4, (x, y) => new Color32(1, 2, 3, 255));
-            var avatar = Avatar();
-            string path = AssetDatabase.GetAssetPath(texture);
-            avatar.optimization.textures.Add(new OptimizedTexture { guid = AssetDatabase.AssetPathToGUID(path), applied = true });
-            Assert.That(TextureChanges.CheckpointPaths(avatar), Does.Contain(path + ".meta"));
         }
 
         // MA-11: separate roughness is converted into packed smoothness, never assigned raw as metallic.

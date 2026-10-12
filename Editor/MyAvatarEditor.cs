@@ -105,7 +105,7 @@ namespace Orbiters.MyAvatar.Editor
                 new VisualElement[] { undo, save }, enabled => _ = SetAiAsync(enabled));
             zone.SetAi(aiConnected, aiEnabled); content.Add(zone);
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
-            // Materials worth changing, folded under the texture optimization like it.
+            // Materials worth changing, folded under the drop zone.
             content.Add(new MaterialsSection(avatar));
             // The way into the asset gallery; it hides while clothes and accessories are switched off.
             var hero = new Gallery.GalleryHero(avatar, OpenGallery);
@@ -132,6 +132,9 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new FaceTrackingSection(avatar));
             content.Add(new GoGoLocoSection(avatar));
             content.Add(new Expressions.MenuSection(avatar));
+            content.Add(new OptimizationSection(avatar));
+            content.Add(new ChecksSection(avatar));
+            content.Add(new VrmSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif
@@ -404,18 +407,6 @@ namespace Orbiters.MyAvatar.Editor
                 TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);
                 TextureMemory.Record(avatar, avatar.textures); TextureChanges.Dirty(avatar); return Task.CompletedTask;
             }), RefreshResults);
-            OptimizationCard.Populate(results, avatar, () => _ = Run(Optimize), () => _ = Run(() => {
-                note = TextureOptimization.Revert(avatar); noteWarning = note != null; return Task.CompletedTask;
-            }), RefreshResults);
-        }
-
-        // Import settings change on the main thread; the drop zone shows the progress first, like a texture drop.
-        private async Task Optimize()
-        {
-            var cancellation = operation.Token;
-            note = null; results.Clear();
-            await TextureOptimization.OptimizeAsync(avatar, (value, text) => { if (active) zone.ShowProgress(value, text); }, cancellation);
-            await Task.Delay(260, cancellation);
         }
 
         // Blendshape Links still ships with MCB; the button opens it when MCB is installed.

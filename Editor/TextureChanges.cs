@@ -397,8 +397,7 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var dependency in AssetDatabase.GetDependencies(scene.path, true).Where(p => p.StartsWith("Assets/Orbiters/MyAvatar/", StringComparison.Ordinal)))
                 { paths.Add(dependency); if (File.Exists(dependency + ".meta")) paths.Add(dependency + ".meta"); }
             }
-            var textures = avatar ? avatar.textures.Where(t => t.texture).Select(t => AssetDatabase.GetAssetPath(t.texture))
-                .Concat(avatar.optimization.textures.Select(t => AssetDatabase.GUIDToAssetPath(t.guid))) : Enumerable.Empty<string>();
+            var textures = avatar ? avatar.textures.Where(t => t.texture).Select(t => AssetDatabase.GetAssetPath(t.texture)) : Enumerable.Empty<string>();
             foreach (var assetPath in textures.Concat(touched ?? Enumerable.Empty<string>()))
                 if (!string.IsNullOrEmpty(assetPath) && assetPath.StartsWith("Assets/", StringComparison.Ordinal))
                 { paths.Add(assetPath); paths.Add(assetPath + ".meta"); }

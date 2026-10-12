@@ -732,6 +732,38 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.AreEqual(20f, Value(grinning, "EyeSquintLeft"), .01f, "and the lower lids");
         }
 
+        // An iris that shrinks while the eyes open wide shows far too much eye white: tracking keeps the iris and eases the
+        // wide eyes; a face whose tracking doesn't shrink the iris keeps its wide eyes.
+        [Test]
+        public void TrackingNeverStacksAShrinkingIrisOnWideEyes()
+        {
+            foreach (bool iris in new[] { true, false })
+            {
+                var shapes = iris ? new[] { "EyeIrisSmall", "EyeWideLeft" } : new[] { "Iris Shrink", "EyeWideLeft" };
+                var face = Mesh(shapes);
+                var fx = new AnimatorController(); owned.Add(fx);
+                var wideOpen = Clip(("EyeWideLeft", 100f));
+                var shrunk = Clip(iris ? ("EyeIrisSmall", 100f) : ("EyeConstrictLeft", 100f));
+                var wide = Tree("Eye Wide Left Blend", "OSCm/Proxy/FT/v2/EyeWideLeft", (0f, Clip(("EyeWideLeft", 0f))), (1f, wideOpen));
+                var pupil = Tree("Pupil Blend", "OSCm/Proxy/FT/v2/PupilDilation", (0f, shrunk), (1f, Clip()));
+                Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Face Tracking", (Direct("Eyes", (wide, "EyeTrackingActive"), (pupil, "EyeTrackingActive")), "FT/DirectBlend"));
+
+                var tuning = FaceTrackingBuild.Tune(fx, "Body", face, expressive: false);
+
+                if (iris)
+                {
+                    Assert.AreEqual(3, tuning.EyeWhite, "the iris curve and both wide-eye curves");
+                    Assert.AreEqual(0f, Value(shrunk, "EyeIrisSmall"), "the iris keeps its size");
+                    Assert.AreEqual(25f, Value(wideOpen, "EyeWideLeft"), .01f, "wide eyes open a quarter as far");
+                }
+                else
+                {
+                    Assert.AreEqual(0, tuning.EyeWhite, "only a shrinking iris stacks with wide eyes");
+                    Assert.AreEqual(100f, Value(wideOpen, "EyeWideLeft"));
+                }
+            }
+        }
+
         // The phone's frames play a moment late, between the two around that moment: every frame shows, evenly.
         [Test]
         public void PhoneFramesPlayBackBetweenTheFramesAroundTheMoment()

@@ -1,5 +1,83 @@
 # My Avatar
 
+## 0.9.9 — 2026-10-12
+
+- **Optimization**: a new section, framed like face tracking, gathers everything that makes the avatar lighter. It shows
+  the rank VRChat gives the avatar now (from the SDK, on the platform the project builds for) and offers **Small**, **Big** or **Custom**
+  optimization of the copy VRChat gets when you upload; the avatar in your scene never changes. **Small** removes what
+  nothing shows or uses: objects that start hidden and that no animation shows, disabled components no animation turns
+  on, PhysBones that move nothing, unused PhysBone colliders, blendshapes nothing animates or that animations only ever
+  set to the weight they have (baked in at their weight),
+  bones a mesh lists without using, empty material slots and slots sharing an opaque material, and textures materials
+  still point at that their shader doesn't use (after Poiyomi locks). **Big** also merges the meshes that are always
+  shown into the one animations use, and turns bones that only end a PhysBone chain into its endpoint. **Custom** has a
+  switch per change. Under the choice, an estimate of what VRChat would rank the uploaded copy (a hidden copy put
+  through the same changes and measured with the SDK) lists every stat that changes and says what holds each rank. The
+  frame's ring shows how much lighter the upload downloads than the avatar as it is (every change counted).
+  See [Optimization](#optimization).
+- **Download size**: the section estimates the file players download, drawn as VRChat's own loading bar draws it over
+  an avatar that starts downloading ("0% / 16.8 MB", its stripe drifting left), now and at upload, with how long the
+  avatar takes to show once downloaded, in orange over VRChat's limits (200 MB, 10 MB on Quest). Textures, meshes,
+  blendshapes, animations and shaders are counted at the size the build stores them, then compressed as VRChat
+  compresses them: textures are measured on the data the build stores (the upload's copies included), the rest with
+  ratios measured on real bundles. On MasculineCanine (Big) it says 14.5 MB for a 15.3 MB bundle, which VRChat shows
+  about 5% smaller (a 17.7 MB bundle showed as 16.8 MB in game).
+- The section shows one platform, the one the project builds for: PC, or Quest when the build target is Android (rank,
+  download, load time, texture memory and what the upload does to the textures).
+- **Big** also hides the body under clothing worn all the time (triangles opaque clothing covers from every side go),
+  folds bones that never move into the bone they hang from, and gives a Quest upload ASTC textures (6x6, 8x8 for masks)
+  at half the PC size, at most 1024 px.
+- **Textures sharp from a distance, at upload**: textures are no longer optimized with Apply and Undo. The upload gets
+  copies of them, each sized to stay sharp from a distance (**Small** 1 m, **Big** 3 m, a slider under **Custom**, 25 cm
+  to 4 m) from how much of the avatar it covers, measured on the meshes, never larger than it is, and compressed for the
+  platform; your textures, materials and import settings stay as they are. Copies are kept in `Library` and reused by
+  the next upload. The **At upload** estimate (texture memory, download) counts them with every other change.
+- **Small** also uploads the same image once when it is imported twice under two names (the same file bytes and import
+  settings: a package bringing its own copy of a texture the avatar already has).
+- **Fewer polygons** (Small within 4 mm, Big within 8 mm, a slider under Custom from half a millimetre): each mesh loses
+  the polygons whose removal keeps its surface within the budget. What expressions, visemes and small toggles move stays
+  exactly as it is; broad shapes (body types, muscle flexes, pose correctives) are carried through and the surface is
+  checked with each of them, as it stands now, and for shading. The estimate measures it in the background. It runs on
+  **AlterMesh**, Orbiters' mesh simplifier in Orbiters Toolkit, derived from Meshia Mesh Simplification (Ram.Type-0,
+  MIT) with its bugs fixed; no package to install.
+- **Big** goes further:
+  - static props (plain meshes always shown) join the skinned mesh, skinned to their own transform;
+  - meshes every animation shows and hides together (an outfit's pieces under one toggle) become one, their
+    blendshape animations moved onto the merged mesh;
+  - its textures upload crunched (colour and masks, quality 75: a much smaller download for the same memory), with
+    metallic, roughness and smoothness maps at half the size the others get;
+  - the menu's icons upload at 64 px at most (copies of the menus, your images stay as they are);
+  - objects and the parameters only animators use upload with one or two letter names (bones of the humanoid model,
+    Body, VRChat's parameters and those of the menu, OSC and saved values keep theirs).
+- **Avatar-wide bounds** (Small): every skinned mesh that moves with the hips gets the same culling box at upload,
+  around the whole avatar with room for its limbs, so no part vanishes at the edge of the view because its own box was
+  small or measured from a far bone. Props held by a constraint (they can leave the avatar) keep theirs.
+- **Checks**: a new section after Optimization builds a hidden copy the way an upload does (VRCFury, Modular Avatar,
+  MCB) and lists what won't work in VRChat: menu pages over 8 controls, controls on missing or unread parameters, synced
+  parameters no animator reads, transitions waiting on parameters their controller doesn't have, states nothing leads to,
+  body shrink shapes left on while clothing can come off ("black holes"), and what Quest loses (desktop shaders,
+  components it removes, its rank). When the same avatar's other-platform version is open (the same blueprint), both are
+  built and their synced parameters compared. See [Checks](#checks).
+- **Export to VRM**: a new section after Checks writes a .vrm file (VRM 0.x for VSeeFace and most apps, or VRM 1.0) of
+  the avatar as it uploads, VRCFury, Modular Avatar and MCB built and the Optimization level applied, for VSeeFace,
+  Warudo, VNyan and other VRM apps: MToon materials, springs and colliders from its PhysBones, visemes, blink, the
+  emotions its face has and perfect sync (an expression per ARKit shape the face has, under its own name or another
+  face tracking standard's). The form says what the file says about the model (name, authors, who may use it and how),
+  starting at the most restrictive, and Export waits for you to confirm the model's license allows VRM. Needs UniVRM
+  (0.131 or later). See [Export to VRM](#export-to-vrm).
+- **Face tracking**: where tracking moves both a shape that shrinks the iris and the wide eyes, the iris keeps its size
+  and the eyes open a quarter as wide: the two stacked show far too much eye white.
+- The texture optimization moved from under the drop zone into the Optimization section, with the pointer to
+  d4rkAvatarOptimizer, which now only covers what My Avatar doesn't do (merging meshes that use different materials).
+- Orbiters Toolkit gains the shared pieces (`Orbiters.Toolkit.Editor.VRChat.Optimization`): what a built avatar
+  animates and points at, the component and PhysBone clean-ups, bone-list pruning, material slot and mesh merging
+  (props and meshes toggled together too), unused and duplicate texture references, menu icons, short names, and
+  taking meshes apart and putting them back together (`MeshParts`). VRChat's own parameter names are shared
+  (`VrcParameters`), and the build's copies of the animations can be read (`AttachmentAnimationBuild.Owned`, `Clips`).
+  Also new there: `AvatarBounds`, the avatar built as an upload builds it in a hidden copy (`HiddenAvatarBuild`), the
+  checks (`Orbiters.Toolkit.Editor.VRChat.Checks`), and `VrcFury.IsComponent` / `ModularAvatar.IsComponent`. Its blendshape pruning now also works on meshes imported without Read/Write (outside Play
+  mode).
+
 ## 0.9.8 — 2026-10-10
 
 - **Likes and reviews in the gallery**: an asset's details show its likes beside its name and its reviews at the end, the
@@ -370,43 +448,209 @@ steps its readme mentions. It receives object and bone names and paths inside th
 accessory and the avatar, component types and up to 12,000 characters of the drop's
 `.txt` and `.md` files (next to a dropped prefab too); no images, no computer paths.
 
-## Quick optimization
+## Optimization
 
-Once a drop has placed an image that can be compressed, a **Quick optimization** card
-appears below the drop field with the estimated texture memory before and after. It
-opens by itself when a drop brings something to optimize; otherwise it stays folded
-under its title.
-**Optimize** caps the textures of every material on the body and face meshes at 2048 px and every other
-texture the avatar's materials show at 512 px (never upscaling), and sets their PC (Standalone) import settings for the best quality per byte of VRAM:
-BC1 for colour whose alpha is unused (measured on the pixels, not taken from the
-importer), BC7 when alpha is used, BC5 for normal maps; mipmaps and mipmap streaming
-on, best compression quality. A crunched texture stays crunched (crunch only shrinks the download, not memory) and
-keeps its crunch quality; it only changes when that takes less memory. Sizes are worked out from the image's own size,
-so a texture capped earlier by this optimization can grow back, while a cap you set yourself is never raised. sRGB, alpha-is-transparency and every other setting stay as they are. Ramps,
-lookup tables, gradients, SDF maps, very thin strips, HDR images, render textures and
-textures that are not plain imported images are left alone. Mobile settings come later.
+The **Optimization** section shows the rank the VRChat SDK gives the avatar now, a ring with how much lighter the upload
+downloads than the avatar as it is (0% with optimization off), and three tiles. Every figure is for the platform the
+project builds for: PC, or Quest when the build target is Android (switch the platform to see the other).
 
-Import settings change in place, all in one import pass. A texture also used by
-something else (another object or avatar in the open scenes, or a prefab or scene in
-`Assets` that depends on it, other than this avatar's own prefab and model), or inside
-a package, is copied under `Assets/Orbiters/MyAvatar/<batch-id>/` instead, and this
-avatar gets copies of the materials that show it, assigned only to renderers under this
-component. It applies entirely or not at all: if a step fails, the import settings
-already written are put back and the copies removed. The row then
-shows the estimated texture memory (VRAM, as VRChat ranks it, not download size) and
-how many textures changed; **Optimize** comes back after a new texture drop or an Undo.
-The estimate reads the PC import settings, so it is right even when the editor keeps
-textures uncompressed ("Compress Textures on Import" off). **Undo** restores the import settings and materials,
-including after a restart: the component stores what it changed, so save your scene.
-Unity's Undo and Redo work too. Import settings or material slots you changed since
-are kept; copies stay on disk. Undo the optimization before undoing its texture set.
 
-Once optimized, the row points to [d4rkAvatarOptimizer](https://github.com/d4rkc0d3r/d4rkAvatarOptimizer)
-for merging meshes and materials and removing unused bones and blendshapes, offers
-**Add to avatar** when it is installed but not on the avatar, or notes that it is
-disabled. It optimizes at upload; with VRCFury or Modular Avatar its author
-recommends that over **Create Optimized Copy**. My Avatar is not associated with
-d4rkAvatarOptimizer.
+- **Small**: the uploaded copy loses what nothing shows or uses, polygons that move the surface 4 mm at most, and its
+  textures are sized to stay sharp from 1 m.
+  - Objects that start hidden and that no animation shows, with everything in them, unless something outside them points
+    in (a visible mesh's bones, the descriptor's eyes) or they hold a humanoid bone. VRChat ranks hidden objects as if
+    they were on.
+  - Components that start disabled and that no animation turns on: PhysBones, PhysBone colliders, contacts, constraints
+    (VRChat's and Unity's), lights and renderers.
+  - PhysBones that move nothing: no vertex weighted to their chain, no renderer or other component on it, no animator
+    reading their parameters.
+  - PhysBone colliders no PhysBone lists; PhysBones set to follow animations whose bones nothing animates stop doing so.
+  - Blendshapes nothing animates (animations, visemes, eyelids, the standard MMD morphs on Body), and those animations
+    only ever set to the weight they already have, baked in at their weight.
+  - Bones a skinned mesh lists without any vertex weighted to them (VRChat counts every listed bone).
+  - Empty submeshes, and submeshes of one mesh sharing an opaque or cutout material (drawn as one slot). Renderers whose
+    materials an animation swaps keep their slots.
+  - Textures a material points at that its shader doesn't declare (left by an earlier shader, or a feature a locked
+    Poiyomi shader compiled out): they upload and count for nothing. This runs after Poiyomi locks its materials.
+  - The same image imported twice under two names (the same file bytes and import settings for the platform): the
+    materials get copies pointing at one of them, the one most of them show already.
+  - Every skinned mesh that moves with the hips gets the same culling box: around all of them as they stand, from the
+    hips, with 30% of the avatar's size of room on every side (raised arms, kicks, sitting). Meshes below a constraint
+    (a prop that can be dropped in the world) keep their own.
+- **Big**: Small, and
+  - skinned meshes that are always shown (never hidden or switched off by an animation, nothing animating or pointing at
+    them) join the one animations use, or the largest; its path, blendshapes and material slots stay first, so its
+    animations keep working. Meshes drawn differently (shadows, probes, quality, layer) stay apart, and so does a mesh
+    whose materials have a property the merged renderer's animations set (it would reach them too). Static props
+    (mesh renderers always shown, nothing animating or pointing at them) join too, skinned to their own transform,
+    which then folds into the bone it hangs from like any bone that never moves.
+  - meshes every animation shows and hides together become one: their toggles (their objects' or their own) have the
+    same keys in every clip and the same state at rest, so the merged mesh, under its own toggles, shows and hides
+    exactly as they did. Their animated blendshapes join it (renamed when the name is taken) and the build's copies of
+    the animations move their curves onto it. Meshes whose materials an animation swaps, or that something points at,
+    stay apart.
+  - polygons within 8 mm instead of 4, and textures sized to stay sharp from 3 m instead of 1 (see below).
+  - textures upload crunched (colour and masks, quality 75; normal maps keep BC5): crunch shrinks the download, not
+    memory. Metallic, roughness and smoothness maps get half the size the others get.
+  - the menu's icons upload at 64 px at most: the menus holding a larger one are copied (the menu assets stay as they
+    are), and point at copies of the icons compressed for the platform (BC7, ASTC 6x6 on Quest).
+  - objects and the parameters only animators use get the shortest names (a, b, ... aa): the build's copies of the
+    animations follow (paths, masks, conditions, blend trees, parameter drivers, audio), and so do PhysBones and
+    contacts. The bones of the humanoid's model (the Animator binds them by name), Body (MMD dance worlds animate it),
+    VRChat's own parameters and those of the expression menu (OSC and saved values use them) keep theirs. It saves a
+    few kilobytes.
+  - the body under clothing worn all the time goes: each body vertex, posed as now, casts rays outward (its normal and
+    eight directions around it); one every ray stops on clothing within reach of (8% of the avatar's height) is hidden,
+    and a triangle whose three vertices are hidden goes. Skin near a collar, a cuff or a hem keeps a way out and stays.
+    Clothing counts when it is always shown, its opaque materials only (cutout and transparent ones show the body), and
+    when its animations change nothing but blendshapes the body has too. A body shape pushed through clothing that
+    doesn't follow it can show a hole there.
+  - bones that never move against their parent (nothing animates, simulates or constrains them, not humanoid, nothing
+    but meshes, colliders and contacts points at them: clothing armatures under the body's bones, attachment bones)
+    are skinned through the bone they hang from instead, with a bind pose that keeps every vertex in place: fewer bones
+    counted. The transforms stay.
+  - bones that only end a PhysBone chain become its endpoint position (only when every end sits at the same offset).
+  - a Quest (Android) upload gets its textures in ASTC (6x6 for colour and normal maps, 8x8 for masks and other linear
+    data) at half the PC size, at most 1024 px.
+- **Custom**: a switch per change, and the **Textures** and **Polygons** sliders.
+
+Click the chosen tile again to turn optimization off. The setting is saved on the component and runs when you build or
+upload (structure at build step -1100: after VRCFury, Modular Avatar and MCB, before d4rkAvatarOptimizer and
+AvatarOptimizer; materials at 9000, after Poiyomi locks). Play mode (Gesture Manager, Av3Emulator) keeps the avatar as
+it is. The console says what each upload removed.
+
+Under the tiles, **At upload** estimates the ranks of the uploaded copy: a hidden copy of the avatar (never in your
+scene) goes through the same changes and is measured with the SDK, then each stat that changes is listed with what sets
+the rank (for example "Very Poor from polygons"). Texture memory is counted as the upload's copies (in their sizes and
+formats) and, for textures the upload keeps, in the formats the build will have (their Android settings on Quest).
+VRCFury and Modular Avatar haven't built on the copy: what their components point at counts as used. With
+optimization off the panel shows the avatar as VRChat sees it now.
+
+**Download** comes first, drawn as VRChat's loading bar over an avatar that starts downloading ("0% / 16.8 MB", its
+darker stripe drifting left as it does while it waits): the size of the file players download, estimated without
+building. Each texture is measured as the bundle stores it: its data in its build format (its Android settings on
+Quest), or the upload's copy when the upload resizes or compresses it (made then, kept in `Library`, and reused by the
+upload), compressed with Deflate and scaled to what LZMA makes of it (ratios by format and size, measured on
+MasculineCanine's textures one bundle each: within 5% each, 0.2% in all). Each mesh counts with its vertices, triangles
+and the vertices each blendshape moves, plus animations and shaders, with ratios from real bundles. VRChat shows an
+avatar's size about 5% under the bundle the SDK uploads (MasculineCanine: 17.7 MB built, 16.8 MB in game), and so does
+the bar. A build of MasculineCanine at Big was 15.3 MB (14.5 MB as VRChat shows it); the estimate said 14.5 MB. Until
+its textures are measured (a moment after the section opens), they are estimated from their source images. Blendshapes
+count as the build keeps them: MCB's custom base meshes lose the shapes nothing animates at every upload, and what
+VRCFury and Modular Avatar will animate counts as used. Over 200 MB (PC) or 10 MB (Quest), VRChat refuses the upload:
+the caption turns orange.
+
+Under the bar, how long the avatar takes to show once downloaded: unpacking (LZMA), loading its assets and setting it
+up (animator layers, PhysBones), measured on MasculineCanine on a desktop PC (bundle opened in 830 ms, assets loaded in
+110 ms). A Quest takes about four times longer.
+
+### Polygons
+
+Each mesh of at least 2,000 triangles is simplified as far as its surface stays within the budget: 4 mm for **Small**,
+8 mm for **Big**; under **Custom**, the **Polygons** slider goes from half a millimetre (**Identical**, half a pixel seen
+from a meter away) through 1, 2 and 4 mm to 8 mm (**Lighter**). The triangles any blendshape moving less than a quarter
+of the mesh moves (expressions, visemes, small toggles) are kept exactly as they are; broader shapes (body types, muscle
+flexes, pose correctives) are carried through. Each try is measured: 99% of the original points within the budget and
+none beyond twice it, at rest, as the avatar stands now and with each broad shape at full weight; and nothing folds (one
+point in 500 at most shades over 60 degrees differently: a fold or a flipped triangle shows even where it stays close).
+Borders, seams, weights and material slots are kept. On MasculineCanine, the blendshapes its expressions and correctives
+use lock most of the body, so the gain is small: at 8 mm its upload loses 506 polygons, invisibly (renders of the
+original and the result differ on 0.06% of their pixels). Meshes without expressions (clothing, props, hair) gain more.
+The estimate counts every blendshape as used (it can't see what build tools will animate) and says about 1,000 for
+MasculineCanine.
+
+The simplifier is **AlterMesh** (`Orbiters.AlterMesh`, in Orbiters Toolkit), derived from
+[Meshia Mesh Simplification](https://github.com/RamType0/Meshia.MeshSimplification) 3.2.0 by Ram.Type-0 (MIT, credited
+in the About window). Changed from Meshia: blendshape normal and tangent offsets are no longer normalized at each
+collapse (it smeared their shading), submeshes left empty no longer crash it, and zero-length bit counts no longer throw.
+
+### Textures
+
+The upload's textures are sized to stay sharp from a distance: 1 m for **Small**, 3 m for **Big**; under **Custom**, a
+slider under **Textures sized to the distance** goes from 25 cm to 4 m. A texture keeps a texel for every screen pixel from there, about 1,000
+pixels across a meter of surface seen from one meter in today's headsets. Each texture's size comes from how much of the
+avatar it covers: its UV area against the surface of the mesh as it stands (tiling counted), on the use that needs it
+most. Textures read by direction (matcaps, reflections, rim) get 512 px at 1 m; textures that can't be measured (no
+mesh, no UVs) get 2048 px (the body and face) or 512 px at 1 m, scaled with the distance. Nothing goes below 128 px, and
+a texture is **only ever made smaller**: one already smaller than the distance needs keeps its size.
+
+Each changed texture uploads as a copy in the format with the best quality per byte of texture memory: BC1 for colour
+whose alpha is unused (measured on the pixels, not taken from the importer), BC7 when alpha is used, BC5 for normal maps
+(DXT5nm ones keep their layout), with mipmaps and mipmap streaming. A crunched texture stays crunched with its quality.
+On Quest a texture keeps its Android format unless **Quest textures** is on. Ramps, lookup tables, gradients, SDF maps,
+very thin strips, HDR images, render textures, sprites and textures that are not plain imported images are left alone,
+and so is anything that would take more memory.
+
+The copies are made from the texture as imported (halved on the GPU step by step, then compressed) and put on copies of
+the materials that show them, the materials animations swap in included; the build's copies of the animations point at
+them. Your textures, materials and import settings never change, so there is nothing to undo. Copies are kept in
+`Library/OrbitersMyAvatar/UploadTextures` by the image's contents and the copy's size and format (the newest 600), so the
+next upload reuses them. **At upload** shows the texture memory (VRAM, as VRChat ranks it, not download size) before and
+after, and the download counts the copies with every other change.
+
+### d4rkAvatarOptimizer
+
+Merging meshes that use different materials needs rewriting their shaders: the section points to
+[d4rkAvatarOptimizer](https://github.com/d4rkc0d3r/d4rkAvatarOptimizer) for that (it runs after My Avatar at upload),
+offers to install it, **Add to avatar** when it is installed but not on the avatar, or notes that it is disabled. My
+Avatar is not associated with d4rkAvatarOptimizer.
+
+## Checks
+
+**Check** builds a hidden copy of the avatar the way an upload does: every build step in its order (VRCFury, Modular
+Avatar, MCB, face tracking, the menu editor...), one per editor frame, in its own preview scene. VRCFury's step freezes
+the editor for a few seconds, as it does at upload. Left out: Poiyomi's material lock and the build cache (they write to
+the project), My Avatar's optimization (it renames objects and parameters) and VRCFury's parameter compressor (it
+reshuffles the synced parameters), so issues name things as you made them. The copy is closed once checked; your avatar
+never changes. Each group shows "Nothing to fix" or its problems (red) and warnings (orange), each with what happens in
+game, how to fix it and where it is.
+
+- **Menu and parameters**: menus with more than 8 controls (the Action Menu shows 8: the others can't be reached),
+  controls on a parameter that isn't an expression parameter (VRChat ignores them) or that no animator has (they move
+  nothing), submenu controls without a menu, and synced parameters no animator reads (bits of the 256 sent for nothing).
+- **Animators**: in every playable layer, transitions and blend trees reading a parameter their controller doesn't
+  have (they never change), and states nothing leads to, from the entry, Any State and the states reached, through
+  sub-state machines.
+- **Holes in the body**: a body shape that hides skin under clothing (Shrink_*, Hide_*) left on at rest while some
+  clothing can be toggled off, and no animation sets it back: with the clothing off, the skin shows a hole.
+- **Quest**: materials whose shader isn't one of VRChat's mobile shaders, components Quest removes (Unity constraints,
+  lights, sounds, cloth, physics, cameras, Final IK: the SDK's PC-only list), and a Poor or Very Poor rank on Quest. When
+  another avatar in the open scenes has the same blueprint (the other platform's version), it is built too and the
+  synced parameters compared: VRChat matches them between versions by their place in the list, so both need the same
+  ones, of the same types, in the same order.
+
+## Export to VRM
+
+**Export…** builds a hidden copy of the avatar the way an upload does (as **Check** does), then writes it as a .vrm file
+with UniVRM; the avatar, its assets and their import settings never change. The **v0.x** and **v1.0** tiles pick the VRM
+version: 0.x is what most apps read, 1.0 the current standard (springs per chain, capsule and plane colliders).
+
+- **The build**: every VRChat build step runs (VRCFury, Modular Avatar, MCB, face tracking), with your Optimization
+  level, without what only VRChat uses (short names, menu icons, crunch and Quest textures: VRM stores PNG and JPEG).
+  Objects and renderers that start off are left out: a VRM shows everything it holds.
+- **Expressions**: VRM's vowels from the descriptor's visemes (aa, ih, ou, E, oh; jaw flap opens the mouth for all),
+  blink from its eyelids or the face's blink shape, one-eye blinks and the emotions (happy, angry, sad, relaxed,
+  surprised) from the face's shape names, and **perfect sync**: an expression named after each of ARKit's 52 shapes the
+  face has, found under ARKit's name or another face tracking standard's (Unified Expressions, SRanipal), which
+  VSeeFace, Warudo and VNyan drive from an iPhone. The build keeps those shapes even when nothing in VRChat animates
+  them; every other shape leaves the meshes (baked in at its weight), and morph targets store only the vertices they
+  move.
+- **Springs**: each PhysBone becomes springs, one per chain (a branch starts a chain of its own, VRM 1.0 adds an end
+  node where the last bone points). There is no exact match between the two: pull and stiffness make VRM's stiffness
+  (VRM's usual 1 for PhysBone's usual 0.2), spring (bounce) lowers the drag, gravity carries over, radius scales with the
+  bone. Colliders follow (spheres; capsules as a row of spheres in 0.x; planes and inside colliders in 1.0 only).
+- **Materials**: each becomes MToon with its main texture and colour, a shade colour a little darker, its normal map,
+  emission when it is on, cutout or transparency from its render queue, and both sides drawn when it culls nothing.
+  Toon shading settings beyond that (rim, matcap, outlines) aren't carried over.
+- **The rest**: the T-pose UniVRM uses, the head's view point from the descriptor, look-at from the eye bones, the
+  thumbnail from the Thumbnail section, and UniVRM's checks and normalization. UniVRM's own exporter switches every
+  texture it copies to uncompressed and leaves it so; My Avatar's reads copies instead.
+
+The form says what the file says about the model: its name (the avatar's by default), version, authors (required),
+contact and reference, who may use it as an avatar (only you, people you allow, everyone) and whether commercial,
+violent or sexual use, redistribution and modification are allowed, all off by default. Many bases forbid converting
+them to other formats: **The model's license allows VRM** must be on before Export. The file's license in VRM 0.x
+follows the switches (redistribution prohibited, else CC BY with NC and ND as they say).
 
 ## Materials that don't render
 

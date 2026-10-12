@@ -48,12 +48,13 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         internal sealed class Tuning
         {
-            public int Grins, Gains, Slowed, Shapes;
+            public int Grins, Gains, Slowed, Shapes, EyeWhite;
             public float Slowdown;
             public bool Expressive;
             public override string ToString() => (Expressive
                 ? $"Tuned like the Ultirex: {Gains} smile/frown ranges end at {FullSmile}, {Grins} grins, {Shapes} weighted shape curves; "
-                : "The template's own mouth (expressive mouth off); ") + $"{Slowed} mouth inputs follow {Slowdown:0.##}x slower.";
+                : "The template's own mouth (expressive mouth off); ") + $"{Slowed} mouth inputs follow {Slowdown:0.##}x slower." +
+                (EyeWhite > 0 ? $" {EyeWhite} eye curves eased: the iris keeps its size, wide eyes open {WideEyes:P0} as far." : "");
         }
 
         /// <summary>
@@ -73,6 +74,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 result.Gains = Gain(trees);
             }
             result.Slowed = SlowDown(fx, trees, slowdown);
+            result.EyeWhite = EyeWhite(fx, trees, facePath);
             if (expressive) result.Shapes = Weigh(fx, trees, facePath, mesh);
             return result;
         }
@@ -290,6 +292,52 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         // The value a smoothing entry drives: its tree's parameter, or the direct weight of a clip.
         private static string Driven(ChildMotion child) => child.motion is BlendTree tree ? tree.blendParameter : child.directBlendParameter;
+
+        // ---- Eye white ----
+
+        // A shape that shrinks the iris and the wide eyes stack into far too much eye white (staring, "sanpaku" eyes): where
+        // tracking moves both, the iris keeps its size and the eyes open a quarter as wide.
+        internal const float WideEyes = .25f;
+
+        private static string Plain(string shape) => shape.ToLowerInvariant().Replace("_", "").Replace(" ", "").Replace(".", "");
+
+        internal static bool IrisShrink(string shape)
+        {
+            string name = Plain(shape);
+            return name.Contains("iris") && (name.Contains("small") || name.Contains("shrink"));
+        }
+
+        internal static bool WideEye(string shape)
+        {
+            string name = Plain(shape);
+            return name.Contains("eyewide") || name.Contains("eyeswide");
+        }
+
+        private static int EyeWhite(AnimatorController fx, List<BlendTree> trees, string facePath)
+        {
+            var clips = trees.SelectMany(t => t.children).Select(c => c.motion).OfType<AnimationClip>().Distinct().Where(c => Owned(c, fx)).ToList();
+            IEnumerable<string> Shapes(AnimationClip clip) => AnimationUtility.GetCurveBindings(clip)
+                .Where(b => b.path == facePath && b.type == typeof(SkinnedMeshRenderer) && b.propertyName.StartsWith("blendShape.", StringComparison.Ordinal))
+                .Select(b => b.propertyName.Substring(11));
+            if (!clips.SelectMany(Shapes).Any(IrisShrink) || !clips.SelectMany(Shapes).Any(WideEye)) return 0;
+            int eased = 0;
+            foreach (var clip in clips)
+            {
+                bool changed = false;
+                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                {
+                    if (binding.path != facePath || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+                    string shape = binding.propertyName.Substring(11);
+                    float factor = IrisShrink(shape) ? 0f : WideEye(shape) ? WideEyes : 1f;
+                    if (factor == 1f) continue;
+                    AnimationUtility.SetEditorCurve(clip, binding, Scaled(AnimationUtility.GetEditorCurve(clip, binding), factor));
+                    changed = true;
+                    eased++;
+                }
+                if (changed) EditorUtility.SetDirty(clip);
+            }
+            return eased;
+        }
 
         // ---- Shape weights ----
 

@@ -1,0 +1,31 @@
+{
+  "name": "Orbiters.MyAvatar.Editor.Vrm1",
+  "rootNamespace": "Orbiters.MyAvatar.Editor.Vrm.V1",
+  "references": [
+    "Orbiters.MyAvatar",
+    "Orbiters.MyAvatar.Editor",
+    "Orbiters.MyAvatar.Editor.Gltf",
+    "UniGLTF",
+    "UniGLTF.Editor",
+    "UniGLTF.Utils",
+    "UniHumanoid",
+    "VRM10",
+    "VRM10.MToon10",
+    "VrmLib",
+    "SpringBoneJobs"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MYAVATAR_VRM10"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrmc.vrm",
+      "expression": "0.131.0",
+      "define": "MYAVATAR_VRM10"
+    }
+  ]
+}

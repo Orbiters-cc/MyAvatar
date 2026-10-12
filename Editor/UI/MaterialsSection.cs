@@ -7,7 +7,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Materials worth changing on this avatar (AvatarMaterials), folded under the texture optimization like it. Materials
+    // Materials worth changing on this avatar (AvatarMaterials), folded under the drop zone. Materials
     // that don't render (BrokenMaterials) come first and open the card once. Open surfaces whose back is hidden (fur
     // cards, feathers) are fixed by themselves unless the user asked to be asked first (Orbiters settings); Unity's Standard
     // shader is offered VRChat's Toon Standard. Hidden when there is nothing to say.

@@ -1,0 +1,19 @@
+/* Checks: the face tracking frame (face-tracking.uss) and the optimization badge and titles (optimization.uss), with one
+   panel per check. Same palette and radii: 14 px panels, 12 px rows, #00DA6D for nothing to fix, #ffb020 warnings,
+   #ff7a6b problems. */
+
+.chk-results { margin-top: 4px; }
+.chk-group { margin-top: 10px; padding: 12px; border-radius: 14px; background-color: #23252b; }
+.chk-group__head { flex-direction: row; align-items: center; justify-content: space-between; }
+.chk-group__value { margin: 0; padding: 0; color: #00DA6D; font-size: 12px; -unity-font-style: bold; }
+.chk-group__value--warning { color: #ffb020; }
+.chk-group__value--problem { color: #ff7a6b; }
+
+.chk-issue { flex-direction: row; align-items: flex-start; margin-top: 6px; padding: 8px 10px 8px 12px; border-radius: 12px; background-color: #2a2a2a; }
+.chk-issue__dot { width: 8px; height: 8px; margin: 4px 10px 0 0; border-radius: 4px; flex-shrink: 0; background-color: #8f8f8f; }
+.chk-issue__dot--problem { background-color: #ff7a6b; }
+.chk-issue__dot--warning { background-color: #ffb020; }
+.chk-issue__texts { flex-grow: 1; flex-shrink: 1; }
+.chk-issue__title { margin: 0; padding: 0; color: #e6e6e6; font-size: 11px; -unity-font-style: bold; white-space: normal; }
+.chk-issue__detail { margin: 2px 0 0 0; padding: 0; color: #9a9a9a; font-size: 11px; white-space: normal; }
+.chk-issue__where { margin: 2px 0 0 0; padding: 0; color: #6f6f6f; font-size: 10px; white-space: normal; }

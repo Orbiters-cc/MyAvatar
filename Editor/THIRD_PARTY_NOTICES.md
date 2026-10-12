@@ -1,6 +1,6 @@
 # Third-party notices
 
-My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. Two exceptions ship with My Avatar: the menu editor's Action Menu view and menu icons, from Gesture Manager (MIT License), and the thumbnail fonts at the end, under the SIL Open Font License.
+My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. Three exceptions ship with My Avatar: the menu editor's Action Menu view and menu icons, from Gesture Manager (MIT License), AlterMesh, the mesh simplifier behind Fewer polygons, derived from Meshia Mesh Simplification (MIT License), and the thumbnail fonts at the end, under the SIL Open Font License.
 
 ## Adjerry91’s Face Tracking Templates
 Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates. My Avatar downloads them through VPM and sets them up when you choose Add in the Face tracking section; it does not ship or modify them. Products utilizing this project must include visible credit on their store or product page: “Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates” with a link to https://github.com/Adjerry91/VRCFaceTracking-Templates. The package also includes its own license agreement (License folder, credit required).
@@ -153,6 +153,75 @@ https://github.com/d4rkc0d3r/d4rkAvatarOptimizer
 MIT License
 
 Copyright (c) 2021 d4rkpl4y3r
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Meshia Mesh Simplification
+Fewer polygons runs on AlterMesh, Orbiters' mesh simplifier in Orbiters Toolkit, derived from Meshia Mesh Simplification 3.2.0 by Ram.Type-0. AlterMesh changes it: blendshape normal and tangent offsets keep their length at each collapse, empty submeshes no longer crash it, and zero-length bit counts no longer throw.
+https://github.com/RamType0/Meshia.MeshSimplification
+```
+MIT License
+
+Copyright (c) 2025 Ram.Type-0
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## UniVRM
+Export to VRM writes .vrm files (VRM 0.x and 1.0) with UniVRM by the VRM Consortium, installed as its own packages (com.vrmc.gltf, com.vrmc.univrm, com.vrmc.vrm). My Avatar is not associated with the VRM Consortium.
+https://github.com/vrm-c/UniVRM
+```
+MIT License
+
+Copyright (c) 2020 VRM Consortium
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next paragraph) shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+## UniGLTF
+The glTF exporter under UniVRM (com.vrmc.gltf), installed with it.
+https://github.com/vrm-c/UniVRM
+```
+MIT License
+
+Copyright (c) 2018 ousttrue
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

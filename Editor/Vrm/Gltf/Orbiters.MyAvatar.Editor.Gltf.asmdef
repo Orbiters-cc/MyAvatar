@@ -1,0 +1,23 @@
+{
+  "name": "Orbiters.MyAvatar.Editor.Gltf",
+  "rootNamespace": "Orbiters.MyAvatar.Editor.Vrm.Gltf",
+  "references": [
+    "UniGLTF",
+    "UniGLTF.Editor",
+    "UniHumanoid"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MYAVATAR_UNIGLTF"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrmc.gltf",
+      "expression": "0.131.0",
+      "define": "MYAVATAR_UNIGLTF"
+    }
+  ]
+}

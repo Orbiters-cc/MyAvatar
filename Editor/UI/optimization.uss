@@ -1,0 +1,60 @@
+/* Optimization: the face tracking frame (face-tracking.uss) with the three levels, the upload estimate and the polygons.
+   Same palette and radii: 16 px frames, 12-14 px rows and panels, #00DA6D accent. */
+
+.opt-badge { width: 78px; height: 78px; border-radius: 39px; border-width: 2px; border-color: rgba(0, 218, 109, 0.5); background-color: rgba(0, 218, 109, 0.07); align-items: center; justify-content: center; }
+.opt-badge__icon { width: 36px; height: 36px; --icon-color: #00DA6D; }
+
+.opt-levels { margin-top: 14px; }
+.mcb-button.ft-tracker.opt-level { flex-basis: 30%; height: 84px; min-height: 84px; }
+.opt-level__icon { width: 24px; height: 24px; margin-bottom: 8px; --icon-color: #8f8f8f; }
+.ft-tracker:hover .opt-level__icon, .ft-tracker--on .opt-level__icon { --icon-color: #ffffff; }
+
+/* At upload: ranks and what changes. */
+.opt-estimate { margin-top: 12px; padding: 12px; border-radius: 14px; background-color: #23252b; }
+.opt-estimate__head { flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.opt-estimate__title { margin: 0; padding: 0; color: #f2f2f2; font-size: 12px; -unity-font-style: bold; }
+.opt-estimate__aside { margin: 0; padding: 0; color: #8f8f8f; font-size: 11px; }
+.opt-estimate__none { margin: 6px 0 0 0; padding: 0; color: #8f8f8f; font-size: 11px; white-space: normal; }
+.opt-download { flex-direction: row; align-items: center; height: 31px; margin-top: 2px; }
+.opt-download__delta { flex-grow: 1; }
+.opt-download__caption { margin: 2px 0 6px 52px; padding: 0; color: #8f8f8f; font-size: 10px; white-space: normal; }
+.opt-download__caption.warning { color: #ffb020; }
+
+/* VRChat's loading bar, measured on a screenshot of it. The progress pill clips its drifting stripe to its round ends. */
+.vrc-loading__pill { position: absolute; border-radius: 9.5px; overflow: hidden; }
+.vrc-loading__face { position: absolute; left: 0; right: 0; top: 1px; bottom: 1.5px; }
+.vrc-loading__stripes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
+.vrc-loading__text { position: absolute; top: 0; bottom: 0; margin: 0; padding: 0; color: #C6D6E9; font-size: 17px; -unity-font-style: bold; -unity-text-align: middle-left; white-space: nowrap; }
+.opt-rank { flex-direction: row; align-items: center; height: 26px; }
+.opt-rank__platform { width: 52px; margin: 0; padding: 0; color: #9a9a9a; font-size: 11px; }
+.opt-rank__arrow { margin: 0 6px; padding: 0; color: #8f8f8f; font-size: 12px; }
+.opt-chip { height: 20px; margin: 0; padding: 0 9px; border-radius: 10px; font-size: 10px; -unity-font-style: bold; -unity-text-align: middle-center; }
+.opt-chip--good { color: #00DA6D; background-color: rgba(0, 218, 109, 0.12); }
+.opt-chip--medium { color: #ffd23f; background-color: rgba(255, 210, 63, 0.12); }
+.opt-chip--poor { color: #ff7a6b; background-color: rgba(255, 122, 107, 0.12); }
+.opt-estimate__why { margin: 6px 0 0 0; padding: 0; color: #8f8f8f; font-size: 10px; white-space: normal; }
+.opt-stats { margin-top: 8px; }
+.opt-stat { flex-direction: row; align-items: center; min-height: 28px; margin-top: 4px; padding: 0 10px 0 12px; border-radius: 12px; background-color: #2a2a2a; }
+.opt-stat__name { flex-grow: 1; flex-shrink: 1; margin: 0; padding: 0; color: #e6e6e6; font-size: 11px; }
+.opt-stat__values { margin: 0 10px 0 0; padding: 0; color: #8f8f8f; font-size: 11px; }
+.opt-stat__delta { min-width: 46px; margin: 0; padding: 0; color: #00DA6D; font-size: 11px; -unity-font-style: bold; -unity-text-align: middle-right; }
+.opt-stat__delta--worse { color: #ffb020; }
+
+/* The polygons panel, and Custom's texture distance under its switch. */
+.opt-panel { margin-top: 10px; padding: 12px; border-radius: 14px; background-color: #23252b; }
+.opt-panel__head { flex-direction: row; align-items: center; justify-content: space-between; }
+.opt-panel__value { margin: 0; padding: 0; color: #00DA6D; font-size: 12px; -unity-font-style: bold; }
+.opt-panel__text { margin: 4px 0 0 0; padding: 0; color: #8f8f8f; font-size: 11px; white-space: normal; }
+.opt-slider-row { flex-direction: row; align-items: center; height: 30px; margin-top: 6px; }
+.opt-slider__end { margin: 0; padding: 0; color: #7f7f7f; font-size: 10px; flex-shrink: 0; }
+.opt .opt-slider { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0 10px; }
+.opt .opt-slider .unity-base-slider__dragger { width: 14px; height: 14px; border-radius: 7px; margin-top: -6px; background-color: #00DA6D; border-width: 0; }
+.opt .opt-slider .unity-base-slider__tracker { height: 4px; border-radius: 2px; margin-top: -1px; background-color: #121317; border-width: 0; }
+.opt .opt-slider .unity-base-slider__dragger-border { display: none; }
+.opt-custom-slider { margin: -2px 0 6px 14px; }
+.opt-custom-slider__value { min-width: 96px; margin-left: 10px; -unity-text-align: middle-right; }
+
+/* What only d4rkAvatarOptimizer does, framed like the textures. */
+.optimize-suggestion.opt-more { margin-top: 0; margin-bottom: 10px; padding: 12px 16px; border-top-width: 1px; border-width: 1px; border-radius: 16px; border-color: rgba(255, 255, 255, 0.05); background-color: #1c1e23; }
+
+.mcb-button.opt-button { height: 30px; min-height: 30px; margin: 10px 0 0 8px; padding: 0 16px; border-radius: 15px; font-size: 11px; }

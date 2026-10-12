@@ -13,7 +13,8 @@
     "orbiters.xraygizmos.Editor",
     "VRC.SDKBase.Editor",
     "VRC.SDK3A.Editor",
-    "Unity.Newtonsoft.Json"
+    "Unity.Newtonsoft.Json",
+    "Orbiters.AlterMesh"
   ],
   "includePlatforms": [
     "Editor"

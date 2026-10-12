@@ -11,6 +11,7 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly Color Track = new Color32(46, 49, 56, 255), Fill = new Color32(0, 218, 109, 255), Partial = new Color32(255, 176, 32, 255);
         private readonly Label value, caption;
         private float target, shown, started = -1f;
+        private bool anyShareIsGood;
 
         public FaceTrackingRing()
         {
@@ -26,9 +27,13 @@ namespace Orbiters.MyAvatar.Editor
             Add(value); Add(caption);
         }
 
-        /// <summary>Fills to <paramref name="fraction"/> over half a second; the label reads <paramref name="text"/>.</summary>
-        public void Set(float fraction, string text, string under = "shapes")
+        /// <summary>
+        /// Fills to <paramref name="fraction"/> over half a second; the label reads <paramref name="text"/>. A partial ring is
+        /// orange (shapes missing) unless <paramref name="anyShareIsGood"/> (a share saved).
+        /// </summary>
+        public void Set(float fraction, string text, string under = "shapes", bool anyShareIsGood = false)
         {
+            this.anyShareIsGood = anyShareIsGood;
             target = Mathf.Clamp01(fraction);
             value.text = text;
             caption.text = under;
@@ -56,7 +61,7 @@ namespace Orbiters.MyAvatar.Editor
             painter.strokeColor = Track;
             painter.BeginPath(); painter.Arc(center, radius, 0f, 360f); painter.Stroke();
             if (shown <= .001f) return;
-            painter.strokeColor = target >= .999f ? Fill : target >= .75f ? Fill : Partial;
+            painter.strokeColor = anyShareIsGood || target >= .75f ? Fill : Partial;
             painter.BeginPath(); painter.Arc(center, radius, -90f, -90f + 360f * shown); painter.Stroke();
         }
     }
