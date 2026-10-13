@@ -59,6 +59,8 @@ namespace Orbiters.MyAvatar.Editor
             public bool adopted;
             /// <summary>The drop's Undo group: what follows the install right away (material repair, textures) joins it.</summary>
             internal int undoGroup;
+            /// <summary>The current Undo group right after the drop's step closed: later work joins the step only from there (<see cref="UndoTail"/>).</summary>
+            internal int undoNext;
             internal string followUp;
         }
 
@@ -374,6 +376,8 @@ namespace Orbiters.MyAvatar.Editor
                 // would otherwise take the accessory away right after it was added.
                 Undo.IncrementCurrentGroup();
             }
+            int next = Undo.GetCurrentGroup();
+            foreach (var outcome in outcomes) outcome.undoNext = next;
             foreach (var outcome in outcomes) EditorGUIUtility.PingObject(outcome.attachment.gameObject);
             return outcomes;
         }

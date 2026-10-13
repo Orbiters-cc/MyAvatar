@@ -68,7 +68,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             tooltip = string.IsNullOrEmpty(asset.shortDescription) ? asset.name : asset.name + "\n" + asset.shortDescription;
             creatorName.text = asset.creator?.username ?? "Unknown creator";
             trusted.style.display = asset.creator?.trusted == true ? DisplayStyle.Flex : DisplayStyle.None;
-            if (!string.IsNullOrEmpty(asset.creator?.avatarUrl)) GalleryImages.Show(creatorAvatar, asset.creator.avatarUrl);
+            if (!string.IsNullOrEmpty(asset.creator?.avatarUrl)) GalleryImages.ShowAvatar(creatorAvatar, asset.creator.avatarUrl);
             SetLikes(asset.likeCount);
             if (newPicture)
             {

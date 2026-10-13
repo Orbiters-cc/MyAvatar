@@ -253,8 +253,11 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
-        /// <summary>Random edits over what the avatar builds: renames, icons, moves (into folders, out of them, around).</summary>
-        public static List<MenuEdit> RandomEdits(GameObject root, System.Random random, int count, Texture2D[] icons)
+        /// <summary>
+        /// Random edits over what the avatar builds: renames, icons, moves (into folders, out of them, around), and with
+        /// <paramref name="settings"/> items left out and the settings the side panel changes (type, default, saved).
+        /// </summary>
+        public static List<MenuEdit> RandomEdits(GameObject root, System.Random random, int count, Texture2D[] icons, bool settings = false)
         {
             var edits = new List<MenuEdit>();
             int names = 0;
@@ -264,7 +267,16 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 var all = MenuTree.Walk(draft.Root);
                 if (all.Count == 0) break;
                 var entry = all[random.Next(all.Count)];
-                int kind = random.Next(12);
+                int kind = random.Next(settings ? 16 : 12);
+                if (kind >= 12)
+                {
+                    var info = MenuSave.Info(root, entry.Node, draft);
+                    if (kind == 12 && entry.Node.Origin?.Kind != MenuOriginKind.NewFolder) edits.Add(new MenuEdit { kind = MenuEditKind.Delete, id = entry.Node.Id });
+                    else if (kind == 13 && info.Types.Count > 1) edits.Add(new MenuEdit { kind = MenuEditKind.Type, id = entry.Node.Id, index = (int)info.Types[random.Next(info.Types.Count)] });
+                    else if (kind == 14 && info.DefaultEditable) edits.Add(new MenuEdit { kind = MenuEditKind.Default, id = entry.Node.Id, number = (float)random.NextDouble() });
+                    else if (kind == 15 && info.SavedEditable) edits.Add(new MenuEdit { kind = MenuEditKind.Saved, id = entry.Node.Id, flag = random.Next(2) == 0 });
+                    continue;
+                }
                 bool Movable(MenuTree.Entry e) => e.Node.Origin?.Kind == MenuOriginKind.AvatarMenu || !MenuTree.OpenedElsewhere(draft.Root, e.Node);
                 if (kind >= 10)
                 {
@@ -302,6 +314,122 @@ namespace Orbiters.MyAvatar.Editor.Tests
             if (IconC != null) Object.DestroyImmediate(IconC);
             if (Root != null) { Undo.ClearUndo(Root); Object.DestroyImmediate(Root); }
             EditorSceneManager.ClosePreviewScene(Scene);
+        }
+    }
+
+    /// <summary>
+    /// What a test makes under Assets/: its own folders, and the avatar's folder of My Avatar's menu copies. They go again
+    /// at the end, and so do My Avatar's folders the test made (Assets/Orbiters/MyAvatar, the menu copies and icons) when
+    /// nothing else is left in them.
+    /// </summary>
+    internal sealed class TempAssets : IDisposable
+    {
+        private static readonly string[] Shared = { "Assets/Orbiters", "Assets/Orbiters/MyAvatar", MenuSave.CopiesFolder, MenuIcons.Folder };
+        private readonly List<string> missing, folders = new List<string>();
+
+        public TempAssets() => missing = Shared.Where(f => !AssetDatabase.IsValidFolder(f)).ToList();
+
+        /// <summary>A new folder "Assets/<paramref name="name"/>".</summary>
+        public string Folder(string name)
+        {
+            AssetDatabase.CreateFolder("Assets", name);
+            folders.Add("Assets/" + name);
+            return "Assets/" + name;
+        }
+
+        /// <summary>The folder of menu copies of an avatar named <paramref name="avatar"/>.</summary>
+        public string Copies(string avatar)
+        {
+            string folder = MenuSave.CopiesFolder + "/" + avatar;
+            folders.Add(folder);
+            return folder;
+        }
+
+        /// <summary>An asset path the test made (an imported icon).</summary>
+        public void Add(string path) { if (!string.IsNullOrEmpty(path)) folders.Add(path); }
+
+        public void Dispose()
+        {
+            foreach (var path in folders) if (AssetDatabase.LoadMainAssetAtPath(path) != null || AssetDatabase.IsValidFolder(path)) AssetDatabase.DeleteAsset(path);
+            foreach (var folder in missing.OrderByDescending(f => f.Length))
+                if (AssetDatabase.IsValidFolder(folder) && !System.IO.Directory.EnumerateFileSystemEntries(folder).Any(e => !e.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)))
+                    AssetDatabase.DeleteAsset(folder);
+        }
+    }
+
+    /// <summary>Modular Avatar's menu components as plain data (Modular Avatar is not installed in this project).</summary>
+    internal sealed class MaSetup
+    {
+        public readonly MaMenu Menu = new MaMenu();
+        private readonly Dictionary<GameObject, MaSource> sources = new Dictionary<GameObject, MaSource>();
+        private readonly GameObject root;
+
+        public MaSetup(GameObject root)
+        {
+            this.root = root;
+            Menu.SourceOf = go => go != null && sources.TryGetValue(go, out var source) ? source : null;
+        }
+
+        public GameObject Object(string name, GameObject parent = null)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent((parent != null ? parent : root).transform, false);
+            return go;
+        }
+
+        public MaItem Item(GameObject go, ControlType type, string label = "", VRCExpressionsMenu subMenu = null, bool children = false, GameObject childrenOf = null, string parameter = "")
+        {
+            var item = new MaItem { Component = go.transform, Label = label, FromChildren = children, ChildrenOf = childrenOf, Control = MenuFixture.Control("unused", type, parameter, menu: subMenu) };
+            sources[go] = item;
+            return item;
+        }
+
+        public void Group(GameObject go, GameObject target = null) => sources[go] = new MaGroup { Component = go.transform, Target = target };
+
+        public MaInstaller Installer(GameObject go, VRCExpressionsMenu menu = null, VRCExpressionsMenu target = null, bool enabled = true)
+        {
+            var installer = new MaInstaller { Component = go.transform, Menu = menu, Target = target, Enabled = enabled };
+            Menu.Installers.Add(installer);
+            return installer;
+        }
+
+        public void InstallTarget(GameObject go, MaInstaller installer)
+        {
+            var target = new MaInstallTarget { Component = go.transform, Installer = installer };
+            Menu.InstallTargets.Add(target);
+            sources[go] = target;
+        }
+
+        /// <summary>What <paramref name="root"/> reads with these components as its Modular Avatar.</summary>
+        public MenuInputs Inputs()
+        {
+            var inputs = MenuInputs.Read(root);
+            inputs.ModularAvatar = Menu;
+            return inputs;
+        }
+
+        /// <summary>
+        /// The menu Modular Avatar's build would put on the descriptor (its "More" pages included), as menu assets: what the
+        /// upload finds after NDMF ran.
+        /// </summary>
+        public VRCExpressionsMenu Built(MenuFixture fixture) => Built(MenuBuild.Run(Inputs()).Root, fixture.Owned);
+
+        public static VRCExpressionsMenu Built(MenuPage page, List<UnityEngine.Object> owned, Dictionary<MenuPage, VRCExpressionsMenu> done = null)
+        {
+            done ??= new Dictionary<MenuPage, VRCExpressionsMenu>();
+            if (done.TryGetValue(page, out var menu)) return menu;
+            menu = ScriptableObject.CreateInstance<VRCExpressionsMenu>();
+            menu.name = page.Name;
+            menu.controls = new List<VRCExpressionsMenu.Control>();
+            owned.Add(menu);
+            done[page] = menu;
+            foreach (var node in page.Items)
+            {
+                var control = MenuFixture.Control(node.Name, node.Type, node.Parameter, node.Icon);
+                if (node.IsFolder && node.Page != null) control.subMenu = Built(node.Page, owned, done);
+                menu.controls.Add(control);
+            }
+            return menu;
         }
     }
 }

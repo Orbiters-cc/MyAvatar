@@ -83,16 +83,35 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 if (passes == OptimizationPasses.None) return true;
                 var plan = new Plan { Passes = passes, Level = settings.uploadOptimization.level, Report = new Report() };
                 Plans.Add(avatar, plan);
-                // Measured on the meshes as they come (before merges and simplification), as the estimate does.
-                try { plan.Textures = TextureOptimization.Build(settings); }
+                // Measured on the meshes as they come (before merges and simplification), as the estimate does. Without a
+                // texture pass, every texture uploads as it is.
+                try { if ((passes & TextureOptimization.TexturePasses) != 0) plan.Textures = TextureOptimization.Build(settings); }
                 catch (Exception ex)
                 {
                     Debug.LogException(ex);
                     Debug.LogWarning("[My Avatar] Optimization: the upload keeps its textures as they are (" + ex.Message + ").");
                 }
-                RunStructure(avatar, passes, plan.Report, polygonQuality: settings.uploadOptimization.PolygonQuality);
+                try { RunStructure(avatar, passes, plan.Report, polygonQuality: settings.uploadOptimization.PolygonQuality); }
+                catch (PassFailed ex)
+                {
+                    // A half-changed avatar never uploads: the build stops, saying which change failed.
+                    Plans.Remove(avatar);
+                    Debug.LogException(ex.InnerException ?? ex);
+                    Debug.LogError("[My Avatar] Optimization: " + ex.Message + " The upload stopped instead. Turn that change off under Custom, " +
+                                   "or optimization off, to upload.");
+                    return false;
+                }
                 return true;
             }
+        }
+
+        /// <summary>A change that failed part-way: the copy may be half changed, so nothing after it runs and it doesn't upload.</summary>
+        internal sealed class PassFailed : Exception
+        {
+            public readonly OptimizationPasses Pass;
+
+            public PassFailed(OptimizationPasses pass, Exception cause)
+                : base(pass + " failed (" + cause.GetBaseException().Message + "): the avatar would upload half changed.", cause) => Pass = pass;
         }
 
         internal sealed class Materials : IVRCSDKPreprocessAvatarCallback
@@ -111,31 +130,30 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         }
 
         /// <summary>
-        /// The changes to objects, components and meshes. Each step leaves the avatar whole: one that fails is reported and
-        /// the others still run.
+        /// The changes to objects, components and meshes. They build on one another, and some rewire several objects and their
+        /// animations at once (merges, folded bones): one that fails part-way can leave the copy half changed, so the steps
+        /// after it don't run and <see cref="PassFailed"/> is thrown (the upload stops; the estimate shows why).
         /// </summary>
         /// <param name="unbuilt">The avatar as it is in the scene (the estimate): its VRCFury and Modular Avatar components
         /// have not made their animations yet, so what they point at counts as used. Nothing is written to the project: the
         /// animations stay as they are, and what the steps make besides meshes (menus, icons) goes in
         /// <paramref name="temporary"/> for the caller to destroy.</param>
         /// <param name="shapes">On an estimate, the blendshapes each mesh will upload with (the others are counted as removed).</param>
+        /// <param name="owner">On an estimate, the avatar it is for (its instance ID): the meshes it needs stay simplified.</param>
         internal static void RunStructure(GameObject root, OptimizationPasses passes, Report report, bool unbuilt = false, float polygonQuality = 1f,
-            List<Object> temporary = null, Func<SkinnedMeshRenderer, ICollection<string>> shapes = null)
+            List<Object> temporary = null, Func<SkinnedMeshRenderer, ICollection<string>> shapes = null, int owner = 0)
         {
             var made = new HashSet<Mesh>();
             AvatarUsage usage = null;
             // The build's own copies of the animations, made the first time a step changes them.
             AttachmentAnimationBuild build = null;
             AttachmentAnimationBuild Animations() => unbuilt ? null : build ?? (build = AttachmentAnimationBuild.Prepare(root));
+            PassFailed failed = null;
             void Step(OptimizationPasses pass, Action action)
             {
-                if ((passes & pass) == 0) return;
+                if ((passes & pass) == 0 || failed != null) return;
                 try { action(); }
-                catch (Exception ex)
-                {
-                    Debug.LogException(ex);
-                    Debug.LogWarning("[My Avatar] Optimization: the upload goes on without " + pass + " (" + ex.Message + ").");
-                }
+                catch (Exception ex) { failed = new PassFailed(pass, ex); }
             }
             try { usage = new AvatarUsage(root, unbuilt ? (Func<Component, bool>)(c => !(c is MyAvatar) && !(c is MyAvatarFaceTracking)) : null); }
             catch (Exception ex) { Debug.LogException(ex); Debug.LogWarning("[My Avatar] Optimization: the upload keeps the avatar as it is (" + ex.Message + ")."); return; }
@@ -158,13 +176,19 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             });
             Step(OptimizationPasses.BodyUnderClothing, () =>
             {
-                var hidden = BodyCover.HideCovered(usage, Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(root.transform));
+                var body = Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(root.transform);
+                var source = body != null ? MeshOptimization.MeshOf(body) : null;
+                var hidden = BodyCover.HideCovered(usage, body);
                 if (hidden == null) return;
                 made.Add(hidden.Mesh);
                 report.HiddenTriangles += hidden.Triangles;
+                // The body with fewer triangles: the simplifier knows it by the body's mesh and the triangles left, without
+                // reading every blendshape of a new body at each estimate.
+                if (source != null) PolygonReduction.FewerTriangles(hidden.Mesh, source);
             });
-            // An estimate doesn't wait for the simplifier: it measures again once the meshes are ready.
-            Step(OptimizationPasses.FewerPolygons, () => report.Polygons += PolygonReduction.Reduce(usage, polygonQuality, made, shapes, background: unbuilt));
+            // An estimate doesn't wait for the simplifier: it measures again once the meshes are ready. A mesh the simplifier
+            // fails on keeps its polygons (said in the console), whole.
+            Step(OptimizationPasses.FewerPolygons, () => report.Polygons += PolygonReduction.Reduce(usage, polygonQuality, made, shapes, background: unbuilt, owner: owner));
             Step(OptimizationPasses.MergeMeshes, () =>
             {
                 var merged = MeshMerge.MergeStill(usage);
@@ -227,11 +251,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             // Copies a later step copied again are no one's any more.
             var used = new HashSet<Mesh>(root.GetComponentsInChildren<Renderer>(true).Select(MeshOptimization.MeshOf).Where(m => m != null));
             foreach (var mesh in made) if (mesh != null && !used.Contains(mesh)) Object.DestroyImmediate(mesh);
+            if (failed != null) throw failed;
         }
 
         /// <summary>
-        /// The material step: copies of materials pointing at one of each duplicate texture, and without the textures their
-        /// shader no longer has.
+        /// The material step: copies of materials pointing at one of each duplicate texture, at the upload's texture copies,
+        /// and without the textures their shader no longer has. Each swaps whole materials on a renderer (the texture copies
+        /// all or none), so one that fails leaves materials that render as before: it is reported and the upload goes on.
         /// </summary>
         internal static void RunMaterials(GameObject root, OptimizationPasses passes, Report report, TextureOptimization.Plan textures = null)
         {

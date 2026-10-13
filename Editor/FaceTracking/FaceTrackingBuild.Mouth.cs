@@ -64,19 +64,33 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         }
 
         // Every hand-gesture layer not resting while tracked: states moving the mouth get it only while lip tracking is off.
+        // The quiet version is blended in, and a blend tree writes what one child moves and the other doesn't at its rest
+        // value: a tracked shape is only left out where a face tracking layer after it writes it anyway. In a layer after
+        // them, the jaw, tongue and their PhysBones still rest while tracked, and the gesture keeps its tracked shapes.
         private static int Quiet(AnimatorController fx, Plan plan, HashSet<string> tracked, HashSet<AnimatorStateMachine> resting)
         {
             var parameter = fx.parameters.FirstOrDefault(p => p.name == LipTracking);
             // The template's parameter is a float (a blend tree needs one); an avatar declaring it otherwise keeps its gestures.
             if (parameter == null || parameter.type != AnimatorControllerParameterType.Float) return 0;
             var parts = MouthParts.Of(plan.Root);
-            bool Mouth(EditorCurveBinding b) => parts.Moves(b, plan.FacePath, tracked);
-            var quiet = new Dictionary<Motion, Motion>();
+            var layers = fx.layers;
+            // Each tracked shape and the last face tracking layer writing it.
+            var lastWriter = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = 0; i < layers.Length; i++)
+                if (layers[i].stateMachine != null && IsTracking(layers[i].stateMachine))
+                    foreach (string shape in States(layers[i].stateMachine).SelectMany(s => Shapes(s.motion, plan.FacePath))) lastWriter[shape] = i;
             int count = 0;
-            foreach (var layer in fx.layers)
+            var after = new List<string>();
+            for (int i = 0; i < layers.Length; i++)
             {
-                var machine = layer.stateMachine;
+                var machine = layers[i].stateMachine;
                 if (machine == null || resting.Contains(machine) || IsTracking(machine) || !Gestures(machine)) continue;
+                int index = i;
+                var covered = new HashSet<string>(tracked.Where(s => lastWriter.TryGetValue(s, out int writer) && writer > index), StringComparer.Ordinal);
+                if (covered.Count < tracked.Count && States(machine).SelectMany(s => Shapes(s.motion, plan.FacePath)).Any(s => tracked.Contains(s) && !covered.Contains(s)))
+                    after.Add(layers[i].name);
+                bool Mouth(EditorCurveBinding b) => parts.Moves(b, plan.FacePath, covered);
+                var quiet = new Dictionary<Motion, Motion>();
                 foreach (var state in States(machine))
                 {
                     if (state.motion == null || state.motion.name.EndsWith(QuietMouth, StringComparison.Ordinal)) continue;
@@ -92,6 +106,10 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     count++;
                 }
             }
+            if (after.Count > 0)
+                Debug.Log("[My Avatar] Face tracking: " + string.Join(", ", after.Select(n => "“" + n + "”")) + (after.Count == 1 ? " comes" : " come") +
+                          " after the face tracking layers in the FX controller, so " + (after.Count == 1 ? "its" : "their") +
+                          " hand gestures still move the tracked mouth shapes while lip tracking is on (the jaw and tongue rest).");
             return count;
         }
 

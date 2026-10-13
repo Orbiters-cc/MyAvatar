@@ -12,7 +12,8 @@ namespace Orbiters.MyAvatar.Editor
 {
     // Tools that go with an avatar, one click each: Gesture Manager and AudioLink (added to the scene, or the one there
     // selected), d4rkAvatarOptimizer and MCB (put on this avatar, or the one there selected) and Unit Git (its window).
-    // A tool that is missing is installed first through VPM; it opens once Unity has reloaded its scripts.
+    // A tool that is missing is installed first through VPM, once the plan of what that downloads (each package, and the
+    // repositories added to the Creator Companion) was accepted; it opens once Unity has reloaded its scripts.
     internal sealed class ToolsSection : AvatarSection
     {
         internal const string GestureManagerId = "vrchat.blackstartx.gesture-manager", UnitGitId = "orbiters.unitgit",
@@ -21,6 +22,7 @@ namespace Orbiters.MyAvatar.Editor
         private const string GestureManagerType = "BlackStartX.GestureManager.GestureManager", McbType = "MyCustomBase";
         private readonly MyAvatar avatar;
         private readonly Label note;
+        private readonly VisualElement plan;
 
         internal ToolsSection(MyAvatar avatar) : base("Tools")
         {
@@ -38,6 +40,7 @@ namespace Orbiters.MyAvatar.Editor
                 "My Avatar is not associated with AudioLink."));
             row.Add(Tile(IconGlyph.Branch, "Unit Git", UnitGitId,
                 "Checkpoints and history for this project, with nothing pushed unless you ask. Installed first when missing."));
+            plan = new VisualElement(); Body.Add(plan);
             note = new Label(); note.AddToClassList("avatar-section__note"); note.style.display = DisplayStyle.None; Body.Add(note);
         }
 
@@ -54,17 +57,21 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (Installed(id)) { SetNote(Open(id, avatar), true); return; }
 #if MYAVATAR_VPM
-            SetNote("Installing " + label + "… Unity reloads its scripts, then it opens.", false);
-            SessionState.SetString(PendingKey, id);
-            SessionState.SetInt(PendingAvatarKey, avatar != null ? avatar.GetInstanceID() : 0);
-            VpmDependencyInstallResult result;
-            try { result = VpmDependencies.For("orbiters.myavatar").InstallOptional(id); }
-            catch (Exception ex) { result = new VpmDependencyInstallResult { Errors = { ex.Message } }; }
-            if (!result.Success)
+            var status = VpmDependencies.For("orbiters.myavatar").OptionalStatus(id, true);
+            if (status == null) { SetNote("My Avatar does not know where to download " + label + ".", true); return; }
+            SetNote(null, false);
+            plan.Clear();
+            plan.Add(new PackageSetupPrompt(() => VpmDependencies.PlanAsync(new[] { status }, "My Avatar"), label, accepted =>
             {
+                SessionState.SetString(PendingKey, id);
+                SessionState.SetInt(PendingAvatarKey, avatar != null ? avatar.GetInstanceID() : 0);
+                VpmDependencyInstallResult result;
+                try { result = VpmPlanInstaller.Apply(accepted); }
+                catch (Exception ex) { result = new VpmDependencyInstallResult { Errors = { ex.Message } }; }
+                if (result.Success) return ("Installing " + label + "… Unity reloads its scripts, then it opens.", false);
                 SessionState.EraseString(PendingKey);
-                SetNote(label + " could not be installed: " + result.ErrorMessage, true);
-            }
+                return (label + " could not be installed: " + result.ErrorMessage, true);
+            }, (text, warning) => { plan.Clear(); SetNote(text, warning); }));
 #else
             SetNote("Add " + label + " to this project in the VRChat Creator Companion.", true);
 #endif

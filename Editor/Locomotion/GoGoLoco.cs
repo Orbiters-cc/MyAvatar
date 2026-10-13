@@ -27,9 +27,10 @@ namespace Orbiters.MyAvatar.Editor.Locomotion
     }
 
     /// <summary>
-    /// GoGoLoco, Franada's locomotion system, in one click: it is downloaded through VPM when missing (with VRCFury when the
-    /// project has neither VRCFury nor Modular Avatar), then its prefab goes on the avatar, as GoGoLoco's own Tools &gt;
-    /// GoGoLoco &gt; Add Prefabs window does. Its files stay as they are.
+    /// GoGoLoco, Franada's locomotion system, in one click: when it is missing (with VRCFury when the project has neither
+    /// VRCFury nor Modular Avatar), what would be downloaded is shown first and comes through VPM once accepted
+    /// (<see cref="Downloads"/>), then its prefab goes on the avatar, as GoGoLoco's own Tools &gt; GoGoLoco &gt; Add Prefabs
+    /// window does. Its files stay as they are.
     /// </summary>
     internal static class GoGoLoco
     {
@@ -43,7 +44,8 @@ namespace Orbiters.MyAvatar.Editor.Locomotion
         internal const string ModularAvatarPrefab = Prefabs + "Modular Avatar/GogoLoco All (Modular Avatar).prefab";
         private const string VrcFuryId = "com.vrcfury.vrcfury", ModularAvatarFolder = "Packages/nadena.dev.modular-avatar";
 
-        private static readonly PackageSetup Downloads = new PackageSetup("GoGoLoco", "GoGoLoco", "VRCFury or GoGoLoco",
+        /// <summary>The downloads GoGoLoco needs, and the avatars waiting for them.</summary>
+        internal static readonly PackageSetup Downloads = new PackageSetup("GoGoLoco", "GoGoLoco", "VRCFury or GoGoLoco",
             () => Installed && (VrcFury.Installed || ModularAvatarInstalled), Finish);
 
         internal static bool Installed => AssetDatabase.IsValidFolder(PackageFolder);
@@ -81,16 +83,27 @@ namespace Orbiters.MyAvatar.Editor.Locomotion
         internal static bool IsGoGoLocoAsset(string path) => !string.IsNullOrEmpty(path) &&
             (path.StartsWith(PackageFolder + "/", StringComparison.Ordinal) || path.StartsWith("Assets/GoGo/", StringComparison.Ordinal));
 
-        /// <summary>Adds GoGoLoco to <paramref name="root"/>, downloading what is missing first. Returns a note for the user, or null.</summary>
+        /// <summary>The packages to download before GoGoLoco can go on an avatar (package ids), empty when none.</summary>
+        internal static List<string> Missing()
+        {
+            var missing = new List<string>();
+            if (!VrcFury.Installed && !ModularAvatarInstalled) missing.Add(VrcFuryId);
+            if (!Installed) missing.Add(PackageId);
+            return missing;
+        }
+
+        /// <summary>
+        /// Adds GoGoLoco to <paramref name="root"/> once nothing is missing (<see cref="Missing"/>; the section downloads it
+        /// first). Returns a note for the user, or null.
+        /// </summary>
         internal static string Start(MyAvatar avatar, Transform root)
         {
             if (!Fits(root)) return "GoGoLoco goes on a humanoid avatar with an avatar descriptor.";
             if (Inspect(root).SetUp) return "GoGoLoco is already on this avatar.";
-            var missing = new List<string>();
-            if (!VrcFury.Installed && !ModularAvatarInstalled) missing.Add(VrcFuryId);
-            if (!Installed) missing.Add(PackageId);
-            if (missing.Count == 0) { Downloads.StopWaiting(); return Apply(root); }
-            return Downloads.Download(avatar, missing);
+            var missing = Missing();
+            if (missing.Count > 0) return "Download " + string.Join(" and ", missing) + " first.";
+            Downloads.Forget(avatar);
+            return Apply(root);
         }
 
         /// <summary>Puts GoGoLoco's prefab on the avatar (one Undo step). Null when done, else why not.</summary>

@@ -102,8 +102,13 @@ namespace Orbiters.MyAvatar.Editor.Tests
             return a;
         }
 
-        private static void Remove(MyAvatar settings, params string[] path) =>
-            settings.menuRemovals.Add(new MenuRemoval { path = path.ToList(), nth = path.Select(_ => 0).ToList() });
+        // Leaves the item at a path out, as the menu editor saves it (what it is, to tell it from a new item of that name).
+        private static void Remove(MyAvatar settings, params string[] path)
+        {
+            var nth = path.Select(_ => 0).ToList();
+            var node = MenuPaths.Find(MenuBuild.Run(MenuInputs.Read(settings.gameObject)).Root, path, nth) ?? throw new AssertionException("No item at " + string.Join("/", path));
+            settings.menuRemovals.Add(new MenuRemoval { path = path.ToList(), nth = nth, type = (int)node.Type, parameter = MenuSave.ItemParameter(node), source = node.Origin?.Component, fromComponent = node.Origin?.Component != null });
+        }
 
         [Test]
         public void DeletedItemsTakeWhatOnlyTheyDriveWithThem()
@@ -206,20 +211,124 @@ namespace Orbiters.MyAvatar.Editor.Tests
         }
 
         [Test]
-        public void ItemsAreFoundOverVrcFurysPages()
+        public void PathsFollowVrcFurysPagesAndNothingElse()
         {
             var second = Menu("Next", MenuFixture.Control("Nine", ControlType.Toggle, "A"), MenuFixture.Control("Ten", ControlType.Toggle, "A"));
             var controls = Enumerable.Range(1, 7).Select(i => MenuFixture.Control("Item " + i, ControlType.Toggle, "A")).ToList();
             controls.Add(MenuFixture.Control("Next", ControlType.SubMenu, null, menu: second));
             var root = Menu("Root", controls.ToArray());
-            var names = new HashSet<string> { "Next" };
 
-            var found = MenuPaths.Find(root, new[] { "Ten" }, new[] { 0 }, names);
+            var paged = MenuPaths.Find(root, new[] { new MenuPaths.Step("Next", 0, true), new MenuPaths.Step("Ten", 0, false) });
+            Assert.NotNull(paged, "VRCFury's Next item: the last of a full page");
+            Assert.AreSame(second, paged.Value.Menu);
+            Assert.Null(MenuPaths.Find(root, new[] { new MenuPaths.Step("Ten", 0, false) }), "an item of the next page is not on this one");
+            // The same menu made by a creator: their folder called "Next" is a folder like any other.
+            var folder = MenuPaths.Find(root, new[] { new MenuPaths.Step("Next", 0, false), new MenuPaths.Step("Nine", 0, false) });
+            Assert.NotNull(folder);
+            Assert.AreSame(second, folder.Value.Menu);
+            Assert.Null(MenuPaths.Find(Menu("Short", MenuFixture.Control("Next", ControlType.SubMenu, null, menu: second)), new[] { new MenuPaths.Step("Next", 0, true) }),
+                "a page that isn't full has no Next item");
+        }
 
-            Assert.NotNull(found);
-            Assert.AreSame(second, found.Value.Menu);
-            Assert.AreEqual(9, MenuPaths.Items(root, names).Count(), "the Next item stands for its page");
-            Assert.True(MenuPaths.IsNext(root, controls[7], names));
+        // A creator's own folder named "Next" in the eighth place (or the one the editor makes to put an item back) keeps its
+        // items: only the pages VRCFury makes are pages.
+        [Test]
+        public void ACreatorsFolderCalledNextIsNotAPage()
+        {
+            var a = Make();
+            var inside = Menu("Next", MenuFixture.Control("Inner", ControlType.Toggle, "Hat"), MenuFixture.Control("Kept", ControlType.Toggle, "NoPat"));
+            for (int i = 0; i < 4; i++) a.Menu.controls.Add(MenuFixture.Control("Extra " + i, ControlType.Button, "MaterialInt"));
+            a.Menu.controls.Add(MenuFixture.Control("Next", ControlType.SubMenu, null, menu: inside));
+            Assert.AreEqual(MenuBuild.MaxControls, a.Menu.controls.Count);
+            Remove(a.Settings, "Next", "Inner");
+
+            string log = MenuUploadBuild.Upload(a.Root);
+
+            CollectionAssert.AreEqual(new[] { "Kept" }, inside.controls.Select(c => c.name), log);
+            Assert.True(a.Menu.controls.Any(c => c.name == "Next"), "the folder stays, with what is left in it");
+            Assert.True(a.Menu.controls.Any(c => c.name == "Hat"), "the main menu is not taken for a page and closed up");
+        }
+
+        // Modular Avatar's items in the descriptor's menu (merged before VRCFury) are not the avatar's own: "Remove default menu"
+        // leaves them, and items on Modular Avatar's "More" pages are found. The plan is made before Modular Avatar builds, the
+        // menu it built is changed after.
+        [Test]
+        public void TheDefaultMenuGoesAndModularAvatarsItemsStay()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            {
+                var ma = MenuEditorTests.ModularAvatarSetup(fixture);
+                var settings = fixture.Root.AddComponent<MyAvatar>();
+                settings.removeDefaultMenu = true;
+                var built = MenuBuild.Run(ma.Inputs());
+                var outfit = MenuTree.Walk(built.Root).First(e => e.Node.Name == "Outfit").Node;
+                var sock = MenuTree.Walk(built.Root).First(e => e.Node.Name == "Sock1").Node;
+                var names = new List<string>(); var nth = new List<int>();
+                Assert.True(MenuPaths.Of(built.Root, sock, names, nth));
+                CollectionAssert.AreEqual(new[] { "More", "Outfit", "Sock1" }, names, "Sock1 is on Modular Avatar's More page");
+                settings.menuRemovals.Add(new MenuRemoval { path = names, nth = nth, type = (int)sock.Type, parameter = MenuSave.ItemParameter(sock), source = sock.Origin.Component, fromComponent = true });
+                CollectionAssert.DoesNotContain(MenuUploadBuild.DefaultItems(built.Root).Select(n => n.Name), "Outfit");
+
+                var plan = MenuUploadBuild.PlanFor(fixture.Root, ma.Inputs());
+                var descriptor = fixture.Root.GetComponent<VRCAvatarDescriptor>();
+                // What NDMF leaves on the descriptor: Modular Avatar's menu, as plain menus.
+                descriptor.expressionsMenu = ma.Built(fixture);
+                string log = MenuUploadBuild.Run(fixture.Root, plan);
+
+                var left = MenuPaths.Menus(descriptor.expressionsMenu).SelectMany(m => m.controls).Select(c => c.name).ToList();
+                CollectionAssert.IsSubsetOf(new[] { "A", "More", "B", "Outfit", "Vee", "C", "Zed", "<b>Hat</b> 2", "Sock2", "Wing" }, left, log);
+                CollectionAssert.DoesNotContain(left, "Sock1", "an item on Modular Avatar's More page is found and left out");
+                foreach (var own in new[] { "Clothes", "Effects", "Dance", "Loop", "Hat", "Glasses" }) CollectionAssert.DoesNotContain(left, own, "the avatar's own menu goes");
+            }
+        }
+
+        // An item of the same name put where a left-out item was is not left out in its place.
+        [Test]
+        public void ANewItemOfTheSameNameIsNotLeftOut()
+        {
+            var a = Make();
+            var built = MenuBuild.Run(MenuInputs.Read(a.Root));
+            var hat = MenuTree.Walk(built.Root).First(e => e.Node.Name == "Hat").Node;
+            var draft = MenuDraft.Apply(built, new List<MenuEdit> { new MenuEdit { kind = MenuEditKind.Delete, id = hat.Id } });
+            a.Settings.menuRemovals.AddRange(MenuSave.Removals.Of(draft).Items);
+            // The hat toggle replaced by a hat button switching the material.
+            a.Menu.controls[0] = MenuFixture.Control("Hat", ControlType.Button, "MaterialInt");
+
+            MenuUploadBuild.Upload(a.Root);
+
+            Assert.True(a.Menu.controls.Any(c => c.name == "Hat"), "the new Hat stays");
+            Assert.True(a.Parameters.parameters.Any(p => p.name == "MaterialInt"));
+        }
+
+        // A folder left out whose menu another folder still opens: what is inside stays in the upload, so the budget doesn't
+        // count its bits as freed.
+        [Test]
+        public void ASharedSubmenuKeepsWhatItSetsInTheBudget()
+        {
+            var a = Make();
+            var swaps = a.Menu.controls.First(c => c.name == "Materials").subMenu;
+            a.Menu.controls.Add(MenuFixture.Control("Materials again", ControlType.SubMenu, null, menu: swaps));
+            Remove(a.Settings, "Materials");
+
+            CollectionAssert.DoesNotContain(MenuUploadEstimate.Of(a.Root).Descriptor, "MaterialInt", "the other folder still opens the buttons");
+            MenuUploadBuild.Upload(a.Root);
+            Assert.True(a.Parameters.parameters.Any(p => p.name == "MaterialInt"), "the upload keeps it too");
+        }
+
+        // A parameter apps set over OSC (a heart rate display) stays when the menu item that also set it goes.
+        [Test]
+        public void ParametersAppsSetOverOscStay()
+        {
+            var a = Make();
+            a.Parameters.parameters = a.Parameters.parameters.Append(new VRCExpressionParameters.Parameter { name = "HR", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true }).ToArray();
+            a.Fx.AddParameter("HR", AnimatorControllerParameterType.Int);
+            a.Menu.controls.Add(MenuFixture.Control("Heart rate test", ControlType.RadialPuppet, null, sub: "HR"));
+            Remove(a.Settings, "Heart rate test");
+
+            CollectionAssert.DoesNotContain(MenuUploadEstimate.Of(a.Root).Descriptor, "HR");
+            string log = MenuUploadBuild.Upload(a.Root);
+            Assert.True(a.Parameters.parameters.Any(p => p.name == "HR"), log);
+            Assert.False(a.Menu.controls.Any(c => c.name == "Heart rate test"), "its menu item goes");
         }
 
         [Test]
@@ -233,7 +342,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 var names = new List<string>(); var nth = new List<int>();
                 var target = MenuTree.Walk(built.Root).First(e => e.Node.Name == "Toggle 4").Node;
                 Assert.True(MenuPaths.Of(built.Root, target, names, nth));
-                settings.menuRemovals.Add(new MenuRemoval { path = names, nth = nth });
+                settings.menuRemovals.Add(new MenuRemoval { path = names, nth = nth, type = (int)target.Type, parameter = MenuSave.ItemParameter(target), source = target.Origin.Component, fromComponent = target.Origin.Component != null });
 
                 var clone = Object.Instantiate(fixture.Root);
                 UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(clone, fixture.Scene);
@@ -250,8 +359,11 @@ namespace Orbiters.MyAvatar.Editor.Tests
                     var all = MenuPaths.Menus(menu).SelectMany(m => m.controls).ToList();
                     Assert.False(all.Any(c => c.name == "Toggle 4"), MenuFixture.Dump(menu));
                     Assert.True(all.Any(c => c.name == "Toggle 5"), "the others stay");
-                    var next = MenuPaths.Menus(menu).Select(m => m.controls.LastOrDefault(c => MenuPaths.IsNext(m, c, new[] { "Next" }))).FirstOrDefault(c => c != null);
-                    if (next != null) Assert.AreSame(OrbitersMenuIcons.Next, next.icon, "VRCFury's Next page gets the arrow");
+                    // The fixture's main menu holds more than 8 items: VRCFury splits it, and its Next item gets the arrow.
+                    var pages = MenuPaths.Menus(menu).Where(m => m.controls.Count == MenuBuild.MaxControls && m.controls[MenuBuild.MaxControls - 1].type == ControlType.SubMenu &&
+                                                                 m.controls[MenuBuild.MaxControls - 1].name == "Next").ToList();
+                    Assert.IsNotEmpty(pages, MenuFixture.Dump(menu));
+                    foreach (var page in pages) Assert.AreSame(OrbitersMenuIcons.Next, page.controls[MenuBuild.MaxControls - 1].icon, "VRCFury's Next page gets the arrow");
                 }
                 finally
                 {

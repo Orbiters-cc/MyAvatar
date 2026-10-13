@@ -17,7 +17,8 @@ namespace Orbiters.MyAvatar.Editor
     /// "Hide…" toggle (chest fluff, collar, goggles, mane), its breasts (a slider playing their clip, 0 for none) and its
     /// tail size (a slider weighing its clip). Each sets what the avatar starts with in VRChat (the parameter's default) and
     /// shows it in the scene (<see cref="LookPreviews"/>); a part hidden here stays hidden: its menu toggle is left out of
-    /// the upload. Each change is one Undo step.
+    /// the upload. Each change is one Undo step, and changes this avatar alone: parameters it shares with its other variants
+    /// are copied for it first (<see cref="AvatarParameters"/>).
     /// </summary>
     internal static class NovabeastOptions
     {
@@ -59,7 +60,7 @@ namespace Orbiters.MyAvatar.Editor
             var weighed = new Dictionary<string, AnimationClip>(StringComparer.Ordinal);
             var timed = new Dictionary<string, AnimationClip>(StringComparer.Ordinal);
             foreach (var layer in fx.layers)
-                foreach (var state in layer.stateMachine.states.Select(s => s.state))
+                foreach (var state in States(layer.stateMachine))
                 {
                     if (state.timeParameterActive && state.motion is AnimationClip played && !string.IsNullOrEmpty(state.timeParameter)) timed[state.timeParameter] = played;
                     foreach (var child in Children(state.motion))
@@ -90,6 +91,15 @@ namespace Orbiters.MyAvatar.Editor
 
         private static string Capitalized(string label) => label.Length == 0 ? label : char.ToUpperInvariant(label[0]) + label.Substring(1).ToLowerInvariant();
 
+        // Every state of a layer, those of its sub-state machines too.
+        private static IEnumerable<AnimatorState> States(AnimatorStateMachine machine)
+        {
+            if (machine == null) yield break;
+            foreach (var child in machine.states) if (child.state != null) yield return child.state;
+            foreach (var sub in machine.stateMachines)
+                foreach (var state in States(sub.stateMachine)) yield return state;
+        }
+
         private static IEnumerable<ChildMotion> Children(Motion motion)
         {
             if (!(motion is BlendTree tree)) yield break;
@@ -100,16 +110,17 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
+        // Null once the parameter is gone (the parameters changed since the options were read).
         private static VRCExpressionParameters.Parameter Parameter(Options options, string name) =>
-            options.Descriptor.expressionParameters.parameters.First(p => p.name == name);
+            options.Descriptor != null ? options.Descriptor.expressionParameters?.parameters?.FirstOrDefault(p => p != null && p.name == name) : null;
 
-        internal static bool Shown(Options options, Part part) => Parameter(options, part.Parameter).defaultValue < .5f;
+        internal static bool Shown(Options options, Part part) => !(Parameter(options, part.Parameter)?.defaultValue >= .5f);
 
         /// <summary>Shows or hides a part: its toggle's default, and the scene to match.</summary>
         internal static void SetShown(Options options, Part part, bool shown) =>
             Change(options, (shown ? "Show " : "Hide ") + part.Label.ToLowerInvariant(), part.Parameter, shown ? 0f : 1f, part.Clip, shown ? 0f : 1f, false);
 
-        internal static float Value(Options options, Amount amount) => Parameter(options, amount.Parameter).defaultValue;
+        internal static float Value(Options options, Amount amount) => Parameter(options, amount.Parameter)?.defaultValue ?? 0f;
 
         /// <summary>Where a slider starts in VRChat (0 to 1), and the scene to match.</summary>
         internal static void SetValue(Options options, Amount amount, float value) =>
@@ -118,12 +129,16 @@ namespace Orbiters.MyAvatar.Editor
         private static void Change(Options options, string undo, string name, float value, AnimationClip clip, float weight, bool timed)
         {
             var root = options.Descriptor.gameObject;
-            var parameters = options.Descriptor.expressionParameters;
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();
-            Undo.RecordObject(parameters, undo);
-            Parameter(options, name).defaultValue = value;
-            EditorUtility.SetDirty(parameters);
+            var parameters = AvatarParameters.Own(options.Descriptor, undo);
+            var parameter = Parameter(options, name);
+            if (parameter != null)
+            {
+                Undo.RecordObject(parameters, undo);
+                parameter.defaultValue = value;
+                EditorUtility.SetDirty(parameters);
+            }
             LookPreviews.Show(root, clip, weight, timed, undo);
             EditorSceneManager.MarkSceneDirty(root.scene);
             Undo.SetCurrentGroupName(undo);

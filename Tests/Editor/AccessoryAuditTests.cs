@@ -411,7 +411,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             bool ai = true; string token = "fixture";
             var section = new AccessoriesSection(avatar, new AccessoriesSection.Host
             {
-                Run = work => work(), AiOn = () => ai, SetAi = _ => { }, ApplyTextures = (_, __) => Task.CompletedTask, Background = _ => { },
+                Run = work => work(), AiOn = () => ai, SetAi = _ => { }, ApplyTextures = (_, __, ___) => Task.CompletedTask, Background = _ => { },
             });
             var reply = new TaskCompletionSource<AccessoryAi.Result>();
             section.RequestAi = (_, __, ___) => reply.Task;

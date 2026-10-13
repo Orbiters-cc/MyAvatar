@@ -1,6 +1,6 @@
 # Third-party notices
 
-My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. Three exceptions ship with My Avatar: the menu editor's Action Menu view and menu icons, from Gesture Manager (MIT License), AlterMesh, the mesh simplifier behind Fewer polygons, derived from Meshia Mesh Simplification (MIT License), and the thumbnail fonts at the end, under the SIL Open Font License.
+My Avatar works with the projects below. It does not ship them: each is installed through the VRChat Creator Companion (VPM) or Unity's package manager, under its own license. What ships with My Avatar: the menu editor's Action Menu view and menu icons, from Gesture Manager (MIT License), the thumbnail fonts at the end, under the SIL Open Font License, and GoGoLoco's logo, which names GoGoLoco in the Locomotion section (see GoGoLoco). AlterMesh, the mesh simplifier behind Fewer polygons, derived from Meshia Mesh Simplification (MIT License), ships with Orbiters Toolkit, which My Avatar needs.
 
 ## Adjerry91’s Face Tracking Templates
 Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates. My Avatar downloads them through VPM and sets them up when you choose Add in the Face tracking section; it does not ship or modify them. Products utilizing this project must include visible credit on their store or product page: “Face tracking blendshapes are animated by Adjerry91’s Face Tracking Templates” with a link to https://github.com/Adjerry91/VRCFaceTracking-Templates. The package also includes its own license agreement (License folder, credit required).
@@ -41,7 +41,7 @@ language governing permissions and limitations under the License.
 ```
 
 ## GoGoLoco
-Locomotion by Franada’s GoGoLoco. My Avatar downloads GoGoLoco from its author’s VPM listing (https://spokeek.github.io/goloco/) and adds its prefab to the avatar when you choose Add in the Locomotion section; it does not ship or modify it. GoGoLoco publishes no license file: its use is under its author’s terms.
+Locomotion by Franada’s GoGoLoco. When you choose Add in the Locomotion section, My Avatar shows what it would download (GoGoLoco from its author’s VPM listing, https://spokeek.github.io/goloco/, and VRCFury when the project has neither VRCFury nor Modular Avatar, with the repositories added to your Creator Companion), downloads it once you accept, and adds GoGoLoco's prefab to the avatar; it does not ship or modify GoGoLoco. The Locomotion section shows GoGoLoco's logo to name it: `Editor/UI/GoGoLocoLogo.png` is GoGoLoco's own `icon_Go_Loco.png` without its dark outline. GoGoLoco publishes no license file: GoGoLoco and its logo are its author’s, used under its author’s terms.
 https://linktr.ee/franada
 
 ## VRCFury

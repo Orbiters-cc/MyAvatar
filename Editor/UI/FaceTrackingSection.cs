@@ -24,7 +24,7 @@ namespace Orbiters.MyAvatar.Editor
         };
 
         private readonly MyAvatar avatar;
-        private readonly VisualElement hero, live;
+        private readonly VisualElement hero, live, plan;
         private readonly Label note;
         private VisualElement heroTop;
         private IVisualElementScheduledItem pending;
@@ -39,6 +39,7 @@ namespace Orbiters.MyAvatar.Editor
             // The live test shows above the frame; the frame keeps the quick settings while it runs.
             live = new VisualElement(); Body.Add(live);
             hero = new VisualElement(); Body.Add(hero);
+            plan = new VisualElement(); Body.Add(plan);
             note = new Label(); note.AddToClassList("ft-note"); note.style.display = DisplayStyle.None; Body.Add(note);
             ToolHero.Credit(Body, "Face tracking blendshapes are animated by", "Adjerry91’s Face Tracking Templates", FaceTrackingDetection.Repository,
                 FaceTrackingDetection.Repository + "\nCredit this on your store or product page when you sell an avatar that uses it.");
@@ -59,15 +60,17 @@ namespace Orbiters.MyAvatar.Editor
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule;
+            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule; PackageSetup.Finished += SetupFinished;
             FaceTrackingTest.Changed += TestChanged; FaceTrackingTest.Rendered += Repaint;
         }
 
         private void Unsubscribe()
         {
-            EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
+            EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; PackageSetup.Finished -= SetupFinished;
             FaceTrackingTest.Changed -= TestChanged; FaceTrackingTest.Rendered -= Repaint;
         }
+
+        private void SetupFinished(int id) { if (avatar && id == avatar.GetInstanceID()) Schedule(); }
 
         private MyAvatarFaceTracking Marker => report?.Ours;
         private FaceTrackingTest Test => FaceTrackingTest.Current != null && root != null && FaceTrackingTest.Current.Root == root ? FaceTrackingTest.Current : null;
@@ -80,13 +83,16 @@ namespace Orbiters.MyAvatar.Editor
 
         private void Refresh()
         {
+            // What a download finished meanwhile did (or why it didn't), said once.
+            string finished = FaceTrackingSetup.Downloads.TakeNote(avatar);
+            if (finished != null) SetNote(finished, !finished.StartsWith("Face tracking is on", System.StringComparison.Ordinal));
             root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
             report = FaceTrackingDetection.Inspect(root != null ? root.transform : null);
             CheckFace();
             string parts = ":" + report.Eyes.Found + "/" + report.Mouth.Found;
             string state = report.Ours != null ? "ours:" + report.Ours.GetInstanceID() + ":" + report.Found + parts + ":" + report.Standard?.Id + ":" + faceIssue
                 : report.Existing != null ? "other:" + report.Existing
-                : report.Ready ? "ready:" + report.Standard.Id + ":" + report.Found + parts + ":" + FaceTrackingDetection.TemplatesInstalled : "";
+                : report.Ready ? "ready:" + report.Standard.Id + ":" + report.Found + parts + ":" + FaceTrackingDetection.TemplatesInstalled + ":" + FaceTrackingSetup.Downloads.Waiting(avatar) : "";
             style.display = state.Length == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             if (state != shown)
             {
@@ -143,27 +149,46 @@ namespace Orbiters.MyAvatar.Editor
                     : " and " + Shapes(other, standard) + ": those move too.");
             string bits = both || other.Found > 0 ? "About " + standard.Bits + " parameter bits, fewer once you pick your tracker."
                 : "Fewer than the template's " + standard.Bits + " parameter bits: the " + Word(other) + " parameters are left out.";
+            bool waiting = FaceTrackingSetup.Downloads.Waiting(avatar);
             var (_, actions) = Hero(both ? "READY FOR FACE TRACKING" : "READY FOR " + Tracking(ready).ToUpperInvariant(), null,
                 both ? "Face tracking available" : char.ToUpperInvariant(Tracking(ready)[0]) + Tracking(ready).Substring(1) + " available",
                 coverage + " Adjerry91’s template goes on with VRCFury; VRCFaceTracking drives it in VRChat. " + bits +
-                (FaceTrackingDetection.TemplatesInstalled ? "" : " The templates are downloaded first (Creator Companion)."));
+                (waiting ? " It goes on as soon as Unity has imported what was downloaded."
+                    : FaceTrackingDetection.TemplatesInstalled ? "" : " What it downloads first (Creator Companion) is shown before anything changes."));
             ShowParts(actions);
-            var setUp = MyAvatarEditor.Button("Add", null);
-            setUp.AddToClassList("ft-primary");
-            setUp.tooltip = "Add face tracking to this avatar (one Undo step)." + (report.Missing.Count > 0 ? "\nNot on this face: " + string.Join(", ", report.Missing) + "." : "");
-            setUp.clicked += () =>
+            Button setUp = null;
+            setUp = MyAvatarEditor.PressButton(waiting ? "Downloading…" : "Add", () =>
             {
                 setUp.SetEnabled(false);
-                SetNote(FaceTrackingDetection.TemplatesInstalled ? "Setting up face tracking…" : "Downloading Adjerry91’s Face Tracking Templates…", false);
-                // Paint the immediate response before the download or the prefab and Undo work.
+                var missing = FaceTrackingSetup.Missing();
+                if (missing.Count > 0)
+                {
+                    // The plan of what would be downloaded comes first; nothing changes until it is accepted.
+                    SetNote(null, false);
+                    plan.Clear();
+                    plan.Add(new PackageSetupPrompt(FaceTrackingSetup.Downloads, avatar, missing, "face tracking", (result, warning) =>
+                    {
+                        plan.Clear();
+                        SetNote(result, warning);
+                        setUp.SetEnabled(!FaceTrackingSetup.Downloads.Waiting(avatar));
+                        shown = null;
+                        Refresh();
+                    }));
+                    return;
+                }
+                SetNote("Setting up face tracking…", false);
+                // Paint the immediate response before the prefab and Undo work.
                 schedule.Execute(() =>
                 {
-                    string result = FaceTrackingSetup.Start(avatar, root.transform);
-                    SetNote(result, result != null && !result.StartsWith("Downloaded"));
+                    string result = root != null ? FaceTrackingSetup.Start(avatar, root.transform) : "The avatar is no longer open.";
+                    SetNote(result, result != null);
                     setUp.SetEnabled(true);
                     Refresh();
                 });
-            };
+            });
+            setUp.AddToClassList("ft-primary");
+            setUp.tooltip = "Add face tracking to this avatar (one Undo step)." + (report.Missing.Count > 0 ? "\nNot on this face: " + string.Join(", ", report.Missing) + "." : "");
+            setUp.SetEnabled(!waiting);
             actions.Add(setUp);
             actions.Add(VrcftLink());
         }

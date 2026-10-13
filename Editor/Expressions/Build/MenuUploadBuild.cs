@@ -21,30 +21,35 @@ namespace Orbiters.MyAvatar.Editor.Expressions
     /// <item>items deleted in the menu editor, the avatar's own menu when "Remove default menu" is on, and the toggles of
     /// looks hidden in My Avatar (Rexouium's feathers, Novabeast's parts) leave the menu, with what only they drive
     /// (<see cref="ParameterFreeze"/>);</item>
-    /// <item>Orbiters' items without an icon get Orbiters' default ones, and "Next" (or "More") pages the arrow.</item>
+    /// <item>Orbiters' items without an icon get Orbiters' default ones, and VRCFury's "Next" pages the arrow.</item>
     /// </list>
-    /// What to change is worked out before VRCFury builds (where each item is, with the menu the editor shows); it is done
-    /// after, in VRCFury's copies of the menu, parameters and controllers.
+    /// What to change is worked out before Modular Avatar and VRCFury build, on the menu the editor shows (Modular Avatar's
+    /// items told from the avatar's own, VRCFury's pages where it will make them); it is done after, in VRCFury's copies of
+    /// the menu, parameters and controllers.
     /// </summary>
     internal static class MenuUploadBuild
     {
-        private sealed class Plan
+        internal sealed class Plan
         {
-            public readonly List<(List<string> Names, List<int> Nth)> Remove = new List<(List<string>, List<int>)>();
+            /// <summary>The items that go, by their path in the menu VRChat receives.</summary>
+            public readonly List<List<MenuPaths.Step>> Remove = new List<List<MenuPaths.Step>>();
+            /// <summary>Saved removals no item answers to any more (deleted, or replaced by another of the same name).</summary>
+            public int Unresolved;
             /// <summary>Parameters whose every menu control goes (looks hidden for good).</summary>
             public readonly HashSet<string> Parameters = new HashSet<string>(StringComparer.Ordinal);
-            public readonly List<(List<string> Names, List<int> Nth, Texture2D Icon)> Icons = new List<(List<string>, List<int>, Texture2D)>();
-            public readonly HashSet<string> NextNames = new HashSet<string>(StringComparer.Ordinal) { "Next", "More" };
+            public readonly List<(List<MenuPaths.Step> Path, Texture2D Icon)> Icons = new List<(List<MenuPaths.Step>, Texture2D)>();
+            /// <summary>VRCFury's "Next" items: the pages it splits menus of more than 8 items into.</summary>
+            public readonly List<List<MenuPaths.Step>> Pages = new List<List<MenuPaths.Step>>();
             public Texture2D NextIcon;
             public bool Empty => Remove.Count == 0 && Parameters.Count == 0 && Icons.Count == 0 && NextIcon == null;
         }
 
         private static readonly ConditionalWeakTable<GameObject, Plan> Plans = new ConditionalWeakTable<GameObject, Plan>();
 
-        // After Modular Avatar (-11000) and My Avatar's face tracking capture, before VRCFury (-10000).
+        // Before NDMF (-11000) builds Modular Avatar's menu into the descriptor's: its items are still its own then.
         internal sealed class Capture : IVRCSDKPreprocessAvatarCallback
         {
-            public int callbackOrder => -10045;
+            public int callbackOrder => -11010;
 
             public bool OnPreprocessAvatar(GameObject avatar)
             {
@@ -75,48 +80,60 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             }
         }
 
-        // ---- Before VRCFury ----
+        // ---- Before Modular Avatar and VRCFury ----
 
-        private static Plan PlanFor(GameObject avatar)
+        /// <param name="inputs">What builds the menu (tests give Modular Avatar's); read from the avatar when null.</param>
+        internal static Plan PlanFor(GameObject avatar, MenuInputs inputs = null)
         {
             var descriptor = avatar.GetComponent<VRCAvatarDescriptor>();
             if (descriptor == null) return null;
-            var settings = avatar.GetComponentInChildren<MyAvatar>(true);
-            var inputs = MenuInputs.Read(avatar);
-            var built = MenuBuild.Run(inputs);
+            var settings = MenuSave.SettingsOf(avatar);
+            var built = MenuBuild.Run(inputs ?? MenuInputs.Read(avatar));
+            // The menu VRChat receives: VRCFury's pages where it will split the menu.
+            var paged = built.VrcFury ? MenuBuild.Paginate(built.Root, built.NextText, built.NextIcon) : built.Root;
             var plan = new Plan();
-            plan.NextNames.Add(built.NextText);
-            foreach (var (names, nth) in Removals(settings, built))
-                plan.Remove.Add((names, nth));
+            foreach (var node in Removals(settings, built, out plan.Unresolved))
+            {
+                var path = MenuPaths.PagedPath(paged, node.Id);
+                if (path != null) plan.Remove.Add(path);
+            }
             plan.Parameters.UnionWith(HiddenLooks(avatar));
             // Icons: Orbiters' items without one, and the "Next" pages unless the avatar gives them one.
             foreach (var entry in MenuTree.Walk(built.Root))
             {
                 var icon = MenuDefaults.Icon(entry.Node, built.Root);
-                if (icon == null) continue;
-                var names = new List<string>(); var nth = new List<int>();
-                if (MenuPaths.Of(built.Root, entry.Node, names, nth)) plan.Icons.Add((names, nth, icon));
+                var path = icon != null ? MenuPaths.PagedPath(paged, entry.Node.Id) : null;
+                if (path != null) plan.Icons.Add((path, icon));
             }
-            if (built.NextIcon == null) plan.NextIcon = OrbitersMenuIcons.Next;
+            if (built.VrcFury)
+                foreach (var entry in MenuTree.Walk(paged))
+                {
+                    var path = entry.Node.Origin?.Kind == MenuOriginKind.Next ? MenuPaths.PagedPath(paged, entry.Node.Id) : null;
+                    if (path != null) plan.Pages.Add(path);
+                }
+            if (built.NextIcon == null && plan.Pages.Count > 0) plan.NextIcon = OrbitersMenuIcons.Next;
             return plan;
         }
 
         /// <summary>
-        /// The items an upload leaves out of <paramref name="built"/>: those deleted in the menu editor, and with "Remove
-        /// default menu" the avatar's own items (its folders too, unless they hold others).
+        /// The items an upload leaves out of <paramref name="built"/>: those deleted in the menu editor (when they are still
+        /// the items deleted), and with "Remove default menu" the avatar's own items (its folders too, unless they hold others).
         /// </summary>
-        internal static List<(List<string> Names, List<int> Nth)> Removals(MyAvatar settings, MenuBuildResult built)
+        internal static List<MenuNode> Removals(MyAvatar settings, MenuBuildResult built, out int unresolved)
         {
-            var list = new List<(List<string>, List<int>)>();
+            unresolved = 0;
+            var list = new List<MenuNode>();
             if (settings == null) return list;
             foreach (var removal in settings.menuRemovals)
-                if (removal != null && MenuPaths.Find(built.Root, removal.path, removal.nth) != null) list.Add((removal.path.ToList(), removal.nth.ToList()));
+            {
+                if (removal == null) continue;
+                var node = MenuPaths.Resolve(built.Root, removal);
+                if (node == null) unresolved++;
+                else if (!list.Contains(node)) list.Add(node);
+            }
             if (settings.removeDefaultMenu)
                 foreach (var node in DefaultItems(built.Root))
-                {
-                    var names = new List<string>(); var nth = new List<int>();
-                    if (MenuPaths.Of(built.Root, node, names, nth)) list.Add((names, nth));
-                }
+                    if (!list.Contains(node)) list.Add(node);
             return list;
         }
 
@@ -132,7 +149,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             foreach (var part in nova.Parts.Where(p => !NovabeastOptions.Shown(nova, p))) yield return part.Parameter;
         }
 
-        /// <summary>The avatar's own items (its descriptor's menu): whole folders when they hold nothing else.</summary>
+        /// <summary>
+        /// The avatar's own items (its descriptor's menu): whole folders when they hold nothing else. Items Modular Avatar or
+        /// VRCFury add, even into the avatar's folders, are not its own.
+        /// </summary>
         internal static List<MenuNode> DefaultItems(MenuPage root)
         {
             var list = new List<MenuNode>();
@@ -166,31 +186,33 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         // ---- After VRCFury ----
 
-        private static string Run(GameObject avatar, Plan plan)
+        internal static string Run(GameObject avatar, Plan plan)
         {
             var descriptor = avatar.GetComponent<VRCAvatarDescriptor>();
             if (descriptor == null) return "the avatar has no descriptor.";
             var menu = descriptor.expressionsMenu != null ? Editable(avatar, descriptor) : null;
             // Everything is found first: taking controls out shifts the pages after them.
+            var pages = new HashSet<VRCExpressionsMenu.Control>();
+            foreach (var path in plan.Pages)
+                if (MenuPaths.Find(menu, path) is MenuPaths.Found page) pages.Add(page.Control);
             var gone = new List<MenuPaths.Found>();
-            int missing = 0;
-            foreach (var (names, nth) in plan.Remove)
+            int missing = plan.Unresolved;
+            foreach (var path in plan.Remove)
             {
-                var found = MenuPaths.Find(menu, names, nth, plan.NextNames);
-                if (found == null) missing++; else gone.Add(found.Value);
+                var found = MenuPaths.Find(menu, path);
+                if (found == null || pages.Contains(found.Value.Control)) missing++; else gone.Add(found.Value);
             }
             foreach (var found in MenuPaths.Menus(menu).SelectMany(m => (m.controls ?? new List<VRCExpressionsMenu.Control>()).Select(c => new MenuPaths.Found(m, c))))
                 if (found.Control != null && found.Control.type != ControlType.SubMenu && found.Control.parameter != null && plan.Parameters.Contains(found.Control.parameter.name))
                     gone.Add(found);
             var icons = new List<(VRCExpressionsMenu.Control Control, Texture2D Icon)>();
-            foreach (var (names, nth, icon) in plan.Icons)
+            foreach (var (path, icon) in plan.Icons)
             {
-                var found = MenuPaths.Find(menu, names, nth, plan.NextNames);
+                var found = MenuPaths.Find(menu, path);
                 if (found != null && found.Value.Control.icon == null) icons.Add((found.Value.Control, icon));
             }
-            var nexts = plan.NextIcon == null ? new List<VRCExpressionsMenu.Control>()
-                : MenuPaths.Menus(menu).Select(m => m.controls?.LastOrDefault(c => MenuPaths.IsNext(m, c, plan.NextNames))).Where(c => c != null && c.icon == null).ToList();
-            var chains = Chains(menu, plan.NextNames);
+            var nexts = plan.NextIcon == null ? new List<VRCExpressionsMenu.Control>() : pages.Where(c => c.icon == null).ToList();
+            var chains = Chains(menu, pages);
 
             // The parameters of what goes, folders' contents included.
             var parameters = new List<string>(plan.Parameters);
@@ -235,19 +257,21 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         // The pages of each menu VRCFury split, each with its "Next" item (null on the last page): found while the pages are
         // still full, before anything is taken out of them.
-        private static List<List<(VRCExpressionsMenu Menu, VRCExpressionsMenu.Control Next)>> Chains(VRCExpressionsMenu root, ICollection<string> nextNames)
+        private static List<List<(VRCExpressionsMenu Menu, VRCExpressionsMenu.Control Next)>> Chains(VRCExpressionsMenu root, HashSet<VRCExpressionsMenu.Control> pages)
         {
             var chains = new List<List<(VRCExpressionsMenu, VRCExpressionsMenu.Control)>>();
-            if (root == null) return chains;
+            if (root == null || pages.Count == 0) return chains;
+            VRCExpressionsMenu.Control NextOf(VRCExpressionsMenu menu) =>
+                menu.controls != null && menu.controls.Count > 0 && pages.Contains(menu.controls[menu.controls.Count - 1]) ? menu.controls[menu.controls.Count - 1] : null;
             var menus = MenuPaths.Menus(root);
-            var continued = new HashSet<VRCExpressionsMenu>(menus.Select(m => m.controls?.LastOrDefault(c => MenuPaths.IsNext(m, c, nextNames))?.subMenu).Where(m => m != null));
+            var continued = new HashSet<VRCExpressionsMenu>(menus.Select(m => NextOf(m)?.subMenu).Where(m => m != null));
             foreach (var head in menus.Where(m => !continued.Contains(m)))
             {
                 var chain = new List<(VRCExpressionsMenu, VRCExpressionsMenu.Control)>();
                 var seen = new HashSet<VRCExpressionsMenu>();
                 for (var page = head; page != null && seen.Add(page);)
                 {
-                    var next = page.controls?.LastOrDefault(c => MenuPaths.IsNext(page, c, nextNames));
+                    var next = NextOf(page);
                     chain.Add((page, next));
                     page = next?.subMenu;
                 }

@@ -44,7 +44,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 (Kept.Count > 0 ? "; kept: " + string.Join(", ", Kept) : "") + ".";
         }
 
-        // VRChat's own parameters, and those VRCFaceTracking drives over OSC: never fixed.
+        // VRChat's own parameters, those VRCFaceTracking drives, and those apps commonly set over OSC (heart rate, chatbox and
+        // text displays, OSCmooth, VRCOSC…): never fixed, a menu item that also set one going or not.
         internal static bool Protected(string name) => Toolkit.Editor.VRChat.Parameters.VrcParameters.Protected(name);
 
         private readonly GameObject root;
@@ -81,8 +82,12 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             var menu = MenuPaths.Menus(descriptor.expressionsMenu).SelectMany(m => m.controls ?? new List<VRCExpressionsMenu.Control>()).Where(c => c != null).ToList();
             foreach (string name in candidates.Distinct())
             {
-                if (Protected(name)) continue;
                 var parameter = parameters != null ? parameters.parameters?.FirstOrDefault(p => p != null && p.name == name) : null;
+                if (Protected(name))
+                {
+                    if (parameter != null && Toolkit.Editor.VRChat.Parameters.VrcParameters.OscDriven(name)) report.Kept.Add(name + " (apps set it over OSC)");
+                    continue;
+                }
                 if (parameter == null) continue;
                 if (writers.Unknown.Contains(name)) { report.Kept.Add(name + " (also set by an animation, a driver or a contact)"); continue; }
                 if (menu.Any(c => c.subParameters != null && c.subParameters.Any(s => s?.name == name))) { report.Kept.Add(name + " (a puppet still sets it)"); continue; }

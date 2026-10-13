@@ -34,17 +34,25 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         private static readonly Freed Nothing = new Freed();
 
-        // Worked out once per change of the scene or the project (a budget asks once per component), and again as soon as
-        // My Avatar's choices change: Unity reports changes a frame later, after a budget shown beside them was counted.
-        private static readonly Dictionary<GameObject, (int Version, string Choices, Freed Freed)> Cache = new Dictionary<GameObject, (int, string, Freed)>();
-        private static int version;
+        // Worked out once per change of the avatar or of the assets its menu is made of (a budget asks once per component),
+        // and again as soon as My Avatar's choices change: Unity reports changes a frame later, after a budget shown beside
+        // them was counted. Changes elsewhere (another avatar, a material) keep what was worked out.
+        private static readonly Dictionary<GameObject, (string Choices, Freed Freed)> Cache = new Dictionary<GameObject, (string, Freed)>();
+        // Hidden looks are read from the avatar's parameters (a few milliseconds): once per change of the avatar.
+        private static readonly Dictionary<GameObject, string> Looks = new Dictionary<GameObject, string>();
 
         [InitializeOnLoadMethod]
         private static void CountAsUploaded()
         {
-            ObjectChangeEvents.changesPublished += (ref ObjectChangeEventStream _) => version++;
-            Undo.undoRedoPerformed += () => version++;
-            EditorApplication.projectChanged += () => version++;
+            ObjectChangeEvents.changesPublished += (ref ObjectChangeEventStream stream) =>
+            {
+                if (Cache.Count == 0 && Looks.Count == 0) return;
+                var changes = MenuChanges.Read(ref stream);
+                foreach (var avatar in Cache.Keys.Concat(Looks.Keys).Distinct().ToList())
+                    if (avatar == null || changes.Touches(avatar)) Forget(avatar);
+            };
+            Undo.undoRedoPerformed += ForgetAll;
+            EditorApplication.projectChanged += ForgetAll;
             AvatarParameterBudget.BuildRemovedParameters.Add(component =>
             {
                 var freed = For(component);
@@ -54,59 +62,70 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             AvatarParameterBudget.BuildRemovedToggles.Add(component => For(component).Toggles.Contains(component));
         }
 
+        private static void Forget(GameObject avatar) { Cache.Remove(avatar); Looks.Remove(avatar); }
+
+        private static void ForgetAll() { Cache.Clear(); Looks.Clear(); }
+
         private static Freed For(Component component)
         {
             var descriptor = component != null ? component.GetComponentInParent<VRCAvatarDescriptor>(true) : null;
             if (descriptor == null) return Nothing;
             var avatar = descriptor.gameObject;
             string choices = Choices(avatar);
-            if (Cache.TryGetValue(avatar, out var cached) && cached.Version == version && cached.Choices == choices) return cached.Freed;
-            foreach (var gone in Cache.Keys.Where(k => k == null).ToList()) { Cache.Remove(gone); Looks.Remove(gone); }
+            if (Cache.TryGetValue(avatar, out var cached) && cached.Choices == choices) return cached.Freed;
+            foreach (var gone in Cache.Keys.Where(k => k == null).ToList()) Forget(gone);
             Freed freed;
             try { freed = Of(avatar); }
             catch (Exception ex) { Debug.LogWarning("[My Avatar] Could not count what the upload leaves out of the menu: " + ex.Message); freed = Nothing; }
-            Cache[avatar] = (version, choices, freed);
+            Cache[avatar] = (choices, freed);
             return freed;
         }
-
-        // Hidden looks are read from the avatar's parameters (a few milliseconds): once per change Unity reports.
-        private static readonly Dictionary<GameObject, (int Version, string Looks)> Looks = new Dictionary<GameObject, (int, string)>();
 
         // What My Avatar leaves out: items, the default menu, hidden looks.
         private static string Choices(GameObject avatar)
         {
-            var settings = avatar.GetComponentInChildren<MyAvatar>(true);
+            var settings = MenuSave.SettingsOf(avatar);
             if (settings == null) return "";
             var text = new System.Text.StringBuilder(settings.removeDefaultMenu ? "default" : "");
             foreach (var removal in settings.menuRemovals)
-                if (removal != null) text.Append('|').Append(string.Join("/", removal.path)).Append('#').Append(string.Join(",", removal.nth));
-            if (!Looks.TryGetValue(avatar, out var looks) || looks.Version != version)
-                Looks[avatar] = looks = (version, string.Join("|", MenuUploadBuild.HiddenLooks(avatar)));
-            return text.Append("|looks:").Append(looks.Looks).ToString();
+                if (removal != null)
+                    text.Append('|').Append(string.Join("/", removal.path)).Append('#').Append(string.Join(",", removal.nth)).Append('#').Append(removal.type)
+                        .Append('#').Append(removal.parameter).Append('#').Append(removal.source != null ? removal.source.GetInstanceID() : 0);
+            if (!Looks.TryGetValue(avatar, out var looks)) Looks[avatar] = looks = string.Join("|", MenuUploadBuild.HiddenLooks(avatar));
+            return text.Append("|looks:").Append(looks).ToString();
         }
 
         internal static Freed Of(GameObject avatar)
         {
             var descriptor = avatar.GetComponent<VRCAvatarDescriptor>();
-            var settings = avatar.GetComponentInChildren<MyAvatar>(true);
+            var settings = MenuSave.SettingsOf(avatar);
             var hidden = new HashSet<string>(MenuUploadBuild.HiddenLooks(avatar), StringComparer.Ordinal);
             if (descriptor == null || settings == null || settings.menuRemovals.Count == 0 && !settings.removeDefaultMenu && hidden.Count == 0) return Nothing;
 
             var built = MenuBuild.Run(MenuInputs.Read(avatar));
-            // The items that go, folders' contents included, and the hidden looks' toggles of the avatar's own menu.
-            var gone = new HashSet<MenuNode>();
-            void Leave(MenuNode node)
-            {
-                if (node == null || !gone.Add(node) || !node.IsFolder || node.Page == null) return;
-                foreach (var entry in MenuTree.Walk(node.Page)) gone.Add(entry.Node);
-            }
-            foreach (var (names, nth) in MenuUploadBuild.Removals(settings, built)) Leave(MenuPaths.Find(built.Root, names, nth));
             var all = MenuTree.Walk(built.Root).Select(e => e.Node).ToList();
-            foreach (var node in all.Where(n => !n.IsFolder && hidden.Contains(n.Parameter ?? "") && Scope(n, n.Parameter, descriptor) == descriptor)) Leave(node);
+            // The items that go, and the hidden looks' toggles of the avatar's own menu…
+            var removed = new HashSet<MenuNode>(MenuUploadBuild.Removals(settings, built, out _));
+            removed.UnionWith(all.Where(n => !n.IsFolder && hidden.Contains(n.Parameter ?? "") && Scope(n, n.Parameter, descriptor) == descriptor));
+            // …with what the menu no longer reaches without them: a submenu another folder still opens stays, as at upload.
+            var reached = new HashSet<MenuNode>();
+            var seen = new HashSet<MenuPage>();
+            void Visit(MenuPage page)
+            {
+                if (page == null || !seen.Add(page)) return;
+                foreach (var node in page.Items)
+                {
+                    if (removed.Contains(node)) continue;
+                    reached.Add(node);
+                    if (node.IsFolder) Visit(node.Page);
+                }
+            }
+            Visit(built.Root);
+            var gone = all.Where(n => !reached.Contains(n)).ToList();
 
             // What the items that stay still set, by scope (the avatar's own parameters, or a Full Controller's).
             var staying = new HashSet<(Component, string)>();
-            foreach (var node in all.Where(n => !gone.Contains(n)))
+            foreach (var node in reached)
                 foreach (var name in Parameters(node)) staying.Add((Scope(node, name, descriptor), name));
 
             var freed = new Freed();
@@ -135,14 +154,16 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return freed.Empty ? Nothing : freed;
         }
 
-        // A Toggle's parameter is its own, unless it shares a global one something that stays uses.
+        // A Toggle's parameter is its own, unless it shares a global one something that stays uses, or another toggle of its
+        // exclusive tag switches it off (a parameter driver the upload keeps it for).
         private static void Toggle(Freed freed, Component toggle, HashSet<(Component, string)> staying, VRCAvatarDescriptor descriptor)
         {
             var model = VrcFury.Content(toggle);
+            if (VrcFury.Field(model, "enableExclusiveTag") as bool? == true && !string.IsNullOrWhiteSpace(VrcFury.Field(model, "exclusiveTag") as string)) return;
             if (VrcFury.Field(model, "useGlobalParam") as bool? == true)
             {
                 string global = VrcFury.Field(model, "globalParam") as string ?? "";
-                if (staying.Contains((descriptor, global)) || ParameterFreeze.Writers(Controllers(descriptor), descriptor.gameObject).Unknown.Contains(global)) return;
+                if (staying.Contains((descriptor, global)) || ParameterFreeze.Protected(global) || ParameterFreeze.Writers(Controllers(descriptor), descriptor.gameObject).Unknown.Contains(global)) return;
             }
             freed.Toggles.Add(toggle);
         }

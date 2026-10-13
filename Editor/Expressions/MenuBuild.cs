@@ -406,13 +406,15 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         }
 
         /// <summary>
-        /// The item of a menu asset's control (without its submenu). Its id comes from the asset and the control's place in
-        /// it, through <paramref name="via"/>; the avatar's own controls keep the ids saving pinned when it moved or copied them.
+        /// The item of a menu asset's control (without its submenu). Its id comes from the asset and the control in it (its
+        /// name, type and which of those it is: a control added before it elsewhere in the asset doesn't give a pending edit
+        /// another target), through <paramref name="via"/>; the avatar's own controls keep the ids saving pinned when it moved
+        /// or copied them.
         /// </summary>
         public MenuNode Item(VRCExpressionsMenu menu, int index, VRCExpressionsMenu.Control control, string via, MenuOriginKind kind, Component component = null)
         {
             bool avatarMenu = kind == MenuOriginKind.AvatarMenu;
-            string id = avatarMenu && pins != null && pins.TryGetValue(control, out var pinned) ? pinned : via + ":" + MenuInputs.Key(menu) + "/" + index;
+            string id = avatarMenu && pins != null && pins.TryGetValue(control, out var pinned) ? pinned : via + ":" + MenuInputs.Key(menu) + "/" + Place(menu, index, control);
             if (avatarMenu && !result.ControlIds.ContainsKey(control)) result.ControlIds[control] = id;
             return new MenuNode
             {
@@ -422,6 +424,16 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 Labels = control.labels,
                 Origin = new MenuOrigin { Kind = kind, Asset = menu, Index = index, Control = control, Component = component },
             };
+        }
+
+        // "Name#Type#n": the control's name and type, and how many controls of both come before it in the asset.
+        private static string Place(VRCExpressionsMenu menu, int index, VRCExpressionsMenu.Control control)
+        {
+            string name = control.name ?? "";
+            int nth = 0;
+            for (int i = 0; i < index && i < menu.controls.Count; i++)
+                if (menu.controls[i] != null && (menu.controls[i].name ?? "") == name && menu.controls[i].type == control.type) nth++;
+            return name + "#" + (int)control.type + "#" + nth;
         }
 
         public void MergeAsset(IList<string> prefix, VRCExpressionsMenu menu, string via, bool avatarMenu, Component component = null)

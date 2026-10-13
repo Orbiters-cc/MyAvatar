@@ -15,7 +15,7 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly Color Glow = new Color(.36f, .55f, 1f, .2f);
 
         private readonly MyAvatar avatar;
-        private readonly VisualElement hero;
+        private readonly VisualElement hero, plan;
         private readonly Label note;
         private IVisualElementScheduledItem pending;
         private string shown;
@@ -27,6 +27,7 @@ namespace Orbiters.MyAvatar.Editor
             this.avatar = avatar;
             ToolHero.Style(this);
             hero = new VisualElement(); Body.Add(hero);
+            plan = new VisualElement(); Body.Add(plan);
             note = new Label(); note.AddToClassList("ft-note"); note.style.display = DisplayStyle.None; Body.Add(note);
             ToolHero.Credit(Body, "Locomotion by", "Franada’s GoGoLoco", GoGoLoco.Author,
                 GoGoLoco.Author + "\nGoGoLoco is Franada’s: credit it on your store or product page when you sell an avatar that uses it.");
@@ -38,13 +39,15 @@ namespace Orbiters.MyAvatar.Editor
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule;
+            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule; PackageSetup.Finished += SetupFinished;
         }
 
         private void Unsubscribe()
         {
-            EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
+            EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; PackageSetup.Finished -= SetupFinished;
         }
+
+        private void SetupFinished(int id) { if (avatar && id == avatar.GetInstanceID()) Schedule(); }
 
         private void Schedule()
         {
@@ -54,11 +57,14 @@ namespace Orbiters.MyAvatar.Editor
 
         private void Refresh()
         {
+            // What a download finished meanwhile did (or why it didn't), said once.
+            string finished = GoGoLoco.Downloads.TakeNote(avatar);
+            if (finished != null) SetNote(finished, !finished.StartsWith("GoGoLoco is on", System.StringComparison.Ordinal));
             root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
             bool fits = root != null && GoGoLoco.Fits(root.transform);
             report = GoGoLoco.Inspect(fits ? root.transform : null);
             string state = !fits ? "" : report.Prefab != null ? "ours:" + report.Prefab.GetInstanceID() + ":" + GoGoLoco.Version
-                : report.Existing != null ? "other:" + report.Existing : "ready:" + GoGoLoco.Installed + ":" + GoGoLoco.UsesModularAvatar;
+                : report.Existing != null ? "other:" + report.Existing : "ready:" + GoGoLoco.Installed + ":" + GoGoLoco.UsesModularAvatar + ":" + GoGoLoco.Downloads.Waiting(avatar);
             style.display = state.Length == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             if (state == shown) return;
             shown = state;
@@ -84,27 +90,48 @@ namespace Orbiters.MyAvatar.Editor
         private void ShowSuggestion()
         {
             string with = GoGoLoco.UsesModularAvatar ? "Modular Avatar" : "VRCFury";
+            bool waiting = GoGoLoco.Downloads.Waiting(avatar);
             var frame = Hero("READY FOR GOGOLOCO", null, "GoGoLoco",
                 "Franada’s locomotion system: sit, lie down and pose anywhere, stay in place, and more from the Action Menu in VRChat. It goes on with " + with +
                 ", as GoGoLoco All; once it is on, you can switch to another version." +
-                (GoGoLoco.Installed ? "" : " GoGoLoco is downloaded first (Creator Companion)."));
-            var add = MyAvatarEditor.Button("Add", null);
+                (waiting ? " It goes on as soon as Unity has imported what was downloaded."
+                    : GoGoLoco.Installed ? "" : " What it downloads first (Creator Companion) is shown before anything changes."));
+            Button add = null;
+            add = MyAvatarEditor.PressButton(waiting ? "Downloading…" : "Add", Press);
             add.AddToClassList("ft-primary");
             add.tooltip = "Add GoGoLoco to this avatar (one Undo step).";
-            add.clicked += () =>
+            add.SetEnabled(!waiting);
+            frame.Actions.Add(add);
+
+            void Press()
             {
                 add.SetEnabled(false);
-                SetNote(GoGoLoco.Installed ? "Adding GoGoLoco…" : "Downloading GoGoLoco…", false);
-                // Paint the immediate response before the download or the prefab and Undo work.
+                var missing = GoGoLoco.Missing();
+                if (missing.Count > 0)
+                {
+                    // The plan of what would be downloaded comes first; nothing changes until it is accepted.
+                    SetNote(null, false);
+                    plan.Clear();
+                    plan.Add(new PackageSetupPrompt(GoGoLoco.Downloads, avatar, missing, "GoGoLoco", (result, warning) =>
+                    {
+                        plan.Clear();
+                        SetNote(result, warning);
+                        add.SetEnabled(!GoGoLoco.Downloads.Waiting(avatar));
+                        shown = null;
+                        Refresh();
+                    }));
+                    return;
+                }
+                SetNote("Adding GoGoLoco…", false);
+                // Paint the immediate response before the prefab and Undo work.
                 schedule.Execute(() =>
                 {
                     string result = root != null ? GoGoLoco.Start(avatar, root.transform) : "The avatar is no longer open.";
-                    SetNote(result, result != null && !result.StartsWith("Downloaded"));
+                    SetNote(result, result != null);
                     add.SetEnabled(true);
                     Refresh();
                 });
-            };
-            frame.Actions.Add(add);
+            }
         }
 
         private void ShowOurs()
@@ -119,14 +146,13 @@ namespace Orbiters.MyAvatar.Editor
             select.tooltip = "Select GoGoLoco on the avatar.";
             Actions.Add(select);
             if (!GoGoLoco.Removable(prefab)) return;
-            var remove = MyAvatarEditor.Button("Remove", null);
-            remove.AddToClassList("avatar-link");
-            remove.tooltip = "Take GoGoLoco off this avatar. Undo puts it back; the downloaded package stays installed.";
-            remove.clicked += () =>
+            var remove = MyAvatarEditor.PressButton("Remove", () =>
             {
                 SetEnabled(false);
                 schedule.Execute(() => { GoGoLoco.Remove(prefab); SetEnabled(true); SetNote(null, false); Refresh(); });
-            };
+            });
+            remove.AddToClassList("avatar-link");
+            remove.tooltip = "Take GoGoLoco off this avatar. Undo puts it back; the downloaded package stays installed.";
             Actions.Add(remove);
         }
 
@@ -145,7 +171,7 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var variant in variants)
             {
                 int bits = variant.BitsOn(root != null ? root.transform : null);
-                var tile = MyAvatarEditor.Button("", null);
+                var tile = MyAvatarEditor.PressButton("", () => Switch(prefab, variant, buttons, tiles, caption));
                 tile.AddToClassList("ft-tracker"); tile.AddToClassList("gogo-variant");
                 tile.EnableInClassList("ft-tracker--on", current != null && variant.Path == current.Path);
                 var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(variant.IconPath);
@@ -161,7 +187,6 @@ namespace Orbiters.MyAvatar.Editor
                 tile.tooltip = variant.Description + " " + Cost(variant, bits) +
                                (removable ? "" : "\nGoGoLoco is part of this avatar's own prefab: change its version in that prefab.");
                 tile.SetEnabled(removable);
-                tile.clicked += () => Switch(prefab, variant, buttons, tiles, caption);
                 tiles.Add(tile);
                 buttons.Add((variant, tile));
             }

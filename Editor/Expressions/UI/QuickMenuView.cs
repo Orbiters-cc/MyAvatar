@@ -61,6 +61,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             {
                 if (evt.button != 0 || !editor.CanBack) return;
                 evt.StopPropagation();
+                if (evt.clickCount < 2) Navigated(back: true);
+                else Navigated();
                 editor.Back();
             });
             title = new Label { pickingMode = PickingMode.Ignore }; title.AddToClassList("qm-title"); header.Add(title);
@@ -75,6 +77,33 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         }
 
         public bool Dragging => dragged != null;
+
+        // What the last click did when it changed the page: the folder it opened (and where its tile was), or going back.
+        private string opened;
+        private Rect openedAt;
+        private bool wentBack;
+
+        private void Navigated(string folder = null, Rect at = default, bool back = false) { opened = folder; openedAt = at; wentBack = back; }
+
+        // A press after a click that changed the page. Its second press of a double click on the folder it opened (where the
+        // folder's tile was) renames that folder: true. Any other press counts as a first click (<paramref name="first"/>),
+        // even one Unity counts as the second of a double click: it lands on another item of the page now shown.
+        private bool AfterNavigation(PointerDownEvent evt, out bool first)
+        {
+            bool navigated = opened != null || wentBack;
+            first = evt.clickCount < 2 || navigated;
+            string folder = opened;
+            bool rename = evt.clickCount >= 2 && folder != null && openedAt.Contains(evt.position);
+            Navigated();
+            if (!rename) return false;
+            if (editor.CanBack)
+            {
+                editor.Back();
+                if (Find(folder) is MenuNode node && editor.CanRename(node)) BeginRename(node);
+            }
+            evt.StopPropagation();
+            return true;
+        }
 
         private MenuNode Find(string id) => id == null ? null : data?.Page?.Items.FirstOrDefault(n => n.Id == id);
 
@@ -198,9 +227,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             {
                 var current = Find(id);
                 if (evt.button != 0 || dragged != null || current == null) return;
+                if (AfterNavigation(evt, out bool first)) return;
                 // Feedback at once; what the press does waits for the release (or a drag).
                 tile.AddToClassList("qm-tile--pressed");
-                if (evt.clickCount >= 2 && editor.CanRename(current)) { tile.RemoveFromClassList("qm-tile--pressed"); BeginRename(current); evt.StopPropagation(); return; }
+                if (!first && editor.CanRename(current)) { tile.RemoveFromClassList("qm-tile--pressed"); BeginRename(current); evt.StopPropagation(); return; }
                 pressed = id; pressedAt = evt.position;
                 grab = tile.WorldToLocal(evt.position);
                 pointer = evt.pointerId;
@@ -212,7 +242,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             // A picture dropped on an item becomes its icon.
             tile.RegisterCallback<DragUpdatedEvent>(evt =>
             {
-                if (!MenuArt.Dragged(out _, out _)) return;
+                if (!MenuArt.CanDrop()) return;
                 DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
                 tile.AddToClassList("qm-tile--file");
                 evt.StopPropagation();
@@ -275,7 +305,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 var node = Find(id);
                 bool open = node != null && node.IsFolder && node.Page != null && tiles.TryGetValue(id, out var current) && current.worldBound.Contains(evt.position);
                 Release();
-                if (open) editor.Open(node);
+                if (open) { Navigated(node.Id, tiles[id].worldBound); editor.Open(node); }
             }
             evt.StopPropagation();
         }

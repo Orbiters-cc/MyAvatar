@@ -73,18 +73,30 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var advice = AvatarMaterials.Inspect(root);
             Assert.AreEqual(1, AvatarMaterials.Apply(avatar, advice));
             var copy = renderer.sharedMaterial;
-            Assert.AreNotSame(batch, copy);
+            // Removed even when an assertion below fails: a copy left in My Avatar's folder is the user's clutter.
+            folders.Add(AssetDatabase.GetAssetPath(copy));
+            // Unity objects are compared as objects (their instance), not as C# references: a material reloaded by an import
+            // gets a new wrapper for the same object.
+            Assert.AreNotEqual(batch, copy);
             Assert.True(MaterialSides.ShowsBackFaces(copy) == true);
             Assert.True(MaterialSides.ShowsBackFaces(batch) == false, "the shared material is left as it was");
-            Assert.AreSame(batch, shared.sharedMaterial);
-            Assert.AreSame(copy, avatar.undoMaterials[0].after[0]);
-            Assert.AreSame(copy, avatar.textures[0].material);
+            Assert.AreEqual(batch, shared.sharedMaterial);
+            Assert.AreEqual(copy, avatar.undoMaterials[0].after[0], State(avatar, copy, batch));
+            Assert.AreEqual(copy, avatar.textures[0].material, State(avatar, copy, batch));
             TextureChanges.UndoLast(avatar);
-            Assert.AreSame(original, renderer.sharedMaterial);
+            Assert.AreEqual(original, renderer.sharedMaterial);
             TextureChanges.UndoLast(avatar);
-            Assert.AreSame(copy, renderer.sharedMaterial);
-            folders.Add(AssetDatabase.GetAssetPath(copy));
+            Assert.AreEqual(copy, renderer.sharedMaterial);
             Undo.ClearUndo(renderer); Undo.ClearUndo(avatar);
+        }
+
+        // What the texture set's Undo holds, to tell a snapshot left behind from a copy known under another wrapper.
+        private static string State(MyAvatar avatar, Material copy, Material batch)
+        {
+            string Name(Material m) => m ? m.name + " #" + m.GetInstanceID() + " " + AssetDatabase.GetAssetPath(m) : "none";
+            var snapshot = avatar.undoMaterials.FirstOrDefault();
+            return "copy " + Name(copy) + ", batch " + Name(batch) + ", canRedo " + avatar.canRedo + ", snapshot renderer " + (snapshot?.renderer ? snapshot.renderer.name : "none") +
+                   ", after " + string.Join(", ", (snapshot?.after ?? new Material[0]).Select(Name)) + ", before " + string.Join(", ", (snapshot?.before ?? new Material[0]).Select(Name));
         }
 
         private Material Material(string shader, string name)

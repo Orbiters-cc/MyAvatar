@@ -59,7 +59,7 @@
 .texture-actions { flex-direction: row; flex-wrap: wrap; margin-top: 6px; }
 .mcb-button.texture-choose { flex-shrink: 1; max-width: 220px; margin: 0 6px 0 0; }
 
-/* Quick optimization: the offer or the result, then the d4rkAvatarOptimizer suggestion. */
+/* The Materials card: a header that opens it and its rows; then a package to install suggested under it (also Optimization's d4rkAvatarOptimizer). */
 .optimize-card { background-color: #212121; border-radius: 16px; margin-bottom: 10px; }
 .optimize-card__header { flex-direction: row; align-items: center; padding: 12px 14px; border-radius: 16px; cursor: link; }
 .optimize-card__header:hover { background-color: #262626; }

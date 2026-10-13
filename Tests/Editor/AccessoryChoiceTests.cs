@@ -140,7 +140,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             UnityEngine.Object.DestroyImmediate(hat);
             var section = new AccessoriesSection(avatar, new AccessoriesSection.Host
             {
-                Run = work => work(), AiOn = () => false, SetAi = _ => { }, ApplyTextures = (_, __) => Task.CompletedTask, Background = _ => { },
+                Run = work => work(), AiOn = () => false, SetAi = _ => { }, ApplyTextures = (_, __, ___) => Task.CompletedTask, Background = _ => { },
             });
             try
             {
@@ -178,7 +178,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             avatar.accessoryNotes.Add(new MyAvatar.AccessoryNote { text = "A refused file" });
             var section = new AccessoriesSection(avatar, new AccessoriesSection.Host
             {
-                Run = work => work(), AiOn = () => false, SetAi = _ => { }, ApplyTextures = (_, __) => Task.CompletedTask, Background = _ => { },
+                Run = work => work(), AiOn = () => false, SetAi = _ => { }, ApplyTextures = (_, __, ___) => Task.CompletedTask, Background = _ => { },
             });
             try
             {

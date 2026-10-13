@@ -31,7 +31,8 @@ namespace Orbiters.MyAvatar.Editor
             public Func<Func<Task>, Task> Run;
             public Func<bool> AiOn;
             public Action<bool> SetAi;
-            public Func<string[], Transform[], Task> ApplyTextures;
+            /// <summary>Applies the images to the scope (null: the avatar); their Undo joins the tail's step when nothing came in between.</summary>
+            public Func<string[], Transform[], UndoTail, Task> ApplyTextures;
             public Action<string> Background;
             /// <summary>The Inspector's shared drop field.</summary>
             public DropZone Zone;
@@ -63,6 +64,18 @@ namespace Orbiters.MyAvatar.Editor
             notes = new VisualElement(); notes.AddToClassList("accessory-notes"); Body.Add(notes);
             list = new VisualElement(); list.AddToClassList("accessory-list"); Body.Add(list);
 
+            Subscribe();
+            RegisterCallback<DetachFromPanelEvent>(_ => { Detach(); detached = true; });
+            // Docked again or the Inspector rebuilt: it listens again and catches up on what changed meanwhile.
+            RegisterCallback<AttachToPanelEvent>(_ => { if (!detached) return; detached = false; Subscribe(); Schedule(); });
+            FeatureChanged(Feature);
+        }
+
+        private bool detached;
+
+        private void Subscribe()
+        {
+            Unsubscribe();
             AccessoryService.Changed += Changed;
             EditorApplication.hierarchyChanged += Schedule;
             Undo.undoRedoPerformed += Schedule;
@@ -70,15 +83,19 @@ namespace Orbiters.MyAvatar.Editor
             CustomBaseDetection.Changed += BaseChanged;
             RefitRecords.Changed += RecordChanged;
             RefitEngine.Changed += Schedule;
-            RegisterCallback<DetachFromPanelEvent>(_ => Detach());
-            FeatureChanged(Feature);
+        }
+
+        private void Unsubscribe()
+        {
+            AccessoryService.Changed -= Changed; EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
+            OrbitersFeatures.Changed -= FeatureChanged;
+            CustomBaseDetection.Changed -= BaseChanged; RefitRecords.Changed -= RecordChanged; RefitEngine.Changed -= Schedule;
         }
 
         internal void Detach()
         {
-            AccessoryService.Changed -= Changed; EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
-            OrbitersFeatures.Changed -= FeatureChanged; CancelAi();
-            CustomBaseDetection.Changed -= BaseChanged; RefitRecords.Changed -= RecordChanged; RefitEngine.Changed -= Schedule;
+            Unsubscribe();
+            CancelAi();
             DetachFit();
         }
 
@@ -129,16 +146,20 @@ namespace Orbiters.MyAvatar.Editor
             Refresh();
             // Images of the drop go to the accessories just added (or to the avatar when nothing was added).
             var images = outcomes.SelectMany(o => o.images ?? new List<string>()).Distinct().Where(File.Exists).ToArray();
-            // The material repair and the textures join the drop's Undo step: one Undo takes the whole drop back. A drop
-            // finished after a reload has none: what follows it later is its own step.
-            int group = outcomes.Select(o => o.undoGroup).FirstOrDefault(g => g > 0);
+            // The material repair and the textures join the drop's Undo step (one Undo takes the whole drop back) while
+            // nothing else was done meanwhile; otherwise each is its own step, so an edit made while the textures were
+            // read never joins the drop. A drop finished after a reload has none: what follows it later is its own step.
+            var first = outcomes.FirstOrDefault(o => o.undoGroup > 0);
+            var tail = first != null ? new UndoTail(first.undoGroup, first.undoNext) : null;
             try
             {
                 foreach (var outcome in outcomes.Where(o => o.attachment))
                 {
                     try
                     {
-                        int repaired = AccessoryMaterials.Repair(avatar, outcome.attachment);
+                        int repaired = 0;
+                        void Repair() => repaired = AccessoryMaterials.Repair(avatar, outcome.attachment);
+                        if (tail != null) tail.Join(Repair); else Repair();
                         if (repaired > 0) AddNotes(new MyAvatar.AccessoryNote { accessory = outcome.attachment,
                             text = $"Prepared {repaired} material(s): repaired broken imports and defaulted missing surface maps to matte. Undo restores the original materials." });
                     }
@@ -151,13 +172,12 @@ namespace Orbiters.MyAvatar.Editor
                     if (scope.Length > 0 && TextureChanges.Scoped(TextureMatching.Slots(avatar), scope.ToList()).Count == 0)
                         AccessoryService.Status(avatar, ((avatar.accessoryStatus ?? "") + " Its textures were not applied: its materials have no texture slot My Avatar can edit (is their shader installed?).").Trim(),
                             avatar.accessoryWarning, avatar.accessoryNotes);
-                    else await host.ApplyTextures(images, scope.Length > 0 ? scope : null);
+                    else await host.ApplyTextures(images, scope.Length > 0 ? scope : null, tail);
                 }
             }
             finally
             {
                 foreach (var staging in outcomes.Select(o => o.staging).Distinct()) AccessoryService.Release(avatar, staging);
-                if (group > 0) { Undo.CollapseUndoOperations(group); Undo.IncrementCurrentGroup(); }
             }
             if (host.AiOn()) _ = AskAiAsync(outcomes.Where(o => o.attachment != null && o.plan != null).ToList(), revision);
             // Every drop asks again: on a custom base, does it fit?

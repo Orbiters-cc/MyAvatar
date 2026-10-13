@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor;
+using UnityEditor;
 using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor
@@ -23,24 +25,28 @@ namespace Orbiters.MyAvatar.Editor
         /// <summary>The slider's stops, in meters.</summary>
         internal static readonly float[] Distances = { .25f, .35f, .5f, .7f, 1f, 1.4f, 2f, 3f, 4f };
 
-        // Textures read by direction, not position: matcaps, reflections, rim and sphere maps.
-        private static readonly string[] ViewWords = { "matcap", "cube", "reflection", "refl", "sphere", "rim", "envmap", "environment" };
+        // Textures read by direction, not position: matcaps, reflections, rim and sphere maps. Whole words of the slot's
+        // name ("_MatCapTex", "_RimTex", "_ReflCube"), so "Primary", "Trim" or "Atmosphere" don't count.
+        private static readonly HashSet<string> ViewWords = new HashSet<string> { "matcap", "cube", "cubemap", "reflection", "refl", "sphere", "rim", "envmap", "environment" };
 
         internal static float Clamp(float distance) => distance <= 0f ? DefaultDistance : Mathf.Clamp(distance, Nearest, Farthest);
 
         // Metallic, roughness and smoothness: shading detail that reads the same at half the size of the colour on top.
         private static readonly string[] SurfaceWords = { "metal", "rough", "smooth", "gloss" };
 
-        internal static bool SurfaceMap(string slot)
-        {
-            string lower = (slot ?? "").ToLowerInvariant();
-            return SurfaceWords.Any(lower.Contains);
-        }
+        internal static bool SurfaceMap(string slot) => Words(slot).Any(w => SurfaceWords.Any(s => w.StartsWith(s, StringComparison.Ordinal)));
 
-        internal static bool ViewMapped(string slot)
+        internal static bool ViewMapped(string slot) => Words(slot).Any(ViewWords.Contains);
+
+        // The name's words, and each with the next one ("Mat Cap" is "matcap", "Env Map" "envmap").
+        private static IEnumerable<string> Words(string name)
         {
-            string lower = (slot ?? "").ToLowerInvariant();
-            return ViewWords.Any(lower.Contains);
+            var tokens = TextureMatching.Tokens(name ?? "", stem: false);
+            for (int i = 0; i < tokens.Count; i++)
+            {
+                yield return tokens[i];
+                if (i + 1 < tokens.Count) yield return tokens[i] + tokens[i + 1];
+            }
         }
 
         /// <summary>
@@ -69,8 +75,8 @@ namespace Orbiters.MyAvatar.Editor
 
         /// <summary>
         /// For each texture the avatar's materials show through their main UVs, the meters of surface its full width covers
-        /// on its most demanding use (where it is stretched the least). Kept until the avatar's renderers, materials or
-        /// imported assets change.
+        /// on its most demanding use (where it is stretched the least). Kept until the avatar's renderers, meshes, scale,
+        /// blendshape weights, materials or imported assets change.
         /// </summary>
         internal static Dictionary<Texture, float> MetersPerTexture(MyAvatar avatar, List<TextureSlot> slots)
         {
@@ -102,6 +108,8 @@ namespace Orbiters.MyAvatar.Editor
             {
                 foreach (var shape in geometry.Values) if (shape.Mesh != null && shape.World != null && shape.Mesh.name == Baked) UnityEngine.Object.DestroyImmediate(shape.Mesh);
             }
+            // Avatars gone since (an upload's build copy) leave the cache.
+            foreach (int gone in Cache.Keys.Where(k => k != id && EditorUtility.InstanceIDToObject(k) == null).ToList()) Cache.Remove(gone);
             Cache[id] = (key, result);
             return result;
         }
@@ -117,11 +125,13 @@ namespace Orbiters.MyAvatar.Editor
             {
                 if (skinned.sharedMesh == null) return (null, null, null);
                 mesh = new Mesh { name = Baked };
-                skinned.BakeMesh(mesh, false);
+                skinned.BakeMesh(mesh);
                 mesh.GetVertices(world);
-                var uvSource = skinned.sharedMesh;
-                var uv = new List<Vector2>(); uvSource.GetUVs(0, uv);
-                for (int i = 0; i < world.Count; i++) world[i] = renderer.transform.TransformPoint(world[i]);
+                var uv = new List<Vector2>(); skinned.sharedMesh.GetUVs(0, uv);
+                // The bake leaves the renderer's own scale out: only its position and rotation apply (a mesh imported at
+                // scale 100 would measure ten thousand times its surface with the full matrix).
+                var toWorld = SkinnedMeshBounds.BakedToWorld(skinned);
+                for (int i = 0; i < world.Count; i++) world[i] = toWorld.MultiplyPoint3x4(world[i]);
                 // The baked copy has the source's submeshes.
                 return (world, uv, mesh);
             }

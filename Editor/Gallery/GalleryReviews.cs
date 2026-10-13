@@ -1,42 +1,43 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using UnityEditor;
-using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor.Gallery
 {
     /// <summary>
     /// An asset's reviews at the end of its details, and its like pill for the title row: the same likes and reviews as
-    /// on its Orbiters page. Every action shows at once; likes sync in the background, sending only the latest wish, and a
-    /// failure puts back what Orbiters holds.
+    /// on its Orbiters page. Every action shows at once; <see cref="GalleryReviewState"/> sends it and puts back what a
+    /// failure changed. What is being written (a new review, an edit) stays in its field while the list shows again.
     /// </summary>
     internal sealed class GalleryReviews : VisualElement, GalleryReviewRow.IHost
     {
         internal const int MaxLength = 2000;
         private const string StyleSheetPath = "Packages/orbiters.myavatar/Editor/Gallery/gallery-reviews.uss";
-        private readonly GalleryAsset asset;
+        private readonly GalleryReviewState state;
         private readonly Action<int> likesChanged;
         private readonly Label count, messageText;
         private readonly Label likeCount;
         private readonly VisualElement composer, list, more, message;
-        private AssetInteractions data;
-        private GalleryReview editing;
         private string draft = "";
-        private readonly Dictionary<int, LikeSync> likes = new Dictionary<int, LikeSync>();
+        private bool composing;
+        // The review being edited (by id: a reload replaces the objects) and what its field holds.
+        private int? editing;
+        private string editText;
 
         /// <summary>The asset's likes, for the details' title row.</summary>
         internal Button Like { get; }
 
-        public bool SignedIn => !string.IsNullOrEmpty(GalleryApi.Token) && data?.viewer?.signedIn != false;
+        private AssetInteractions Data => state.Data;
+        internal GalleryReviewState State => state;
+
+        public bool SignedIn => !string.IsNullOrEmpty(GalleryApi.Token) && Data?.viewer?.signedIn != false;
 
         internal GalleryReviews(GalleryAsset asset, Action<int> likesChanged)
         {
-            this.asset = asset; this.likesChanged = likesChanged;
+            this.likesChanged = likesChanged;
+            state = new GalleryReviewState(asset.id);
             var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
             if (sheet) styleSheets.Add(sheet);
             AddToClassList("reviews");
@@ -52,38 +53,39 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Like = GalleryReviewRow.LikePill(false, asset.likeCount, small: false, out likeCount);
             if (sheet) Like.styleSheets.Add(sheet);
             Like.SetEnabled(false);
-            OnPress(Like, ToggleAssetLike);
+            Orbiters.Toolkit.Editor.ButtonInteraction.RegisterImmediateClick(Like, () => { if (SignedIn) state.ToggleAssetLike(); });
             GalleryUI.Box("reviews__skeleton", list);
-            RegisterCallback<AttachToPanelEvent>(evt => { if (data == null) _ = LoadAsync(0); });
+            state.Changed += Render;
+            state.LikeChanged += ShowLike;
+            state.ReviewLikeChanged += review => Row(review)?.ShowLike(review.likedByCurrentUser, review.likeCount);
+            RegisterCallback<AttachToPanelEvent>(evt => { if (Data == null) _ = state.LoadAsync(0); });
         }
 
-        private static void OnPress(Button button, Action action) => Orbiters.Toolkit.Editor.ButtonInteraction.RegisterImmediateClick(button, action);
-
-        private async Task LoadAsync(int offset)
-        {
-            try
-            {
-                var answer = await GalleryApi.InteractionsAsync(asset.id, offset, CancellationToken.None);
-                if (offset > 0 && data != null) { data.reviews.AddRange(answer.reviews.Where(r => data.reviews.All(shown => shown.id != r.id))); data.hasMore = answer.hasMore; }
-                else data = answer;
-                ShowMessage(null);
-            }
-            catch (Exception ex) { ShowMessage("Reviews could not be loaded: " + ex.Message, retry: true); }
-            Render();
-        }
-
+        // What is being written stays as it is while the list shows again: the composer and the row being edited are kept
+        // (their fields keep the cursor, the selection and what an input method is composing); the rest is made again.
         private void Render()
         {
-            list.Clear(); composer.Clear(); more.Clear();
-            if (data == null) return;
-            count.text = data.reviewCount > 0 ? data.reviewCount.ToString(CultureInfo.InvariantCulture) : "";
+            ShowMessage();
+            more.Clear();
+            if (Data == null) { list.Clear(); composer.Clear(); composing = false; return; }
+            count.text = Data.reviewCount > 0 ? Data.reviewCount.ToString(CultureInfo.InvariantCulture) : "";
             ShowLike();
+            bool compose = SignedIn && Data.viewer.canReview && Data.ownReview == null;
+            if (!compose || !composing) { composer.Clear(); composing = false; }
             if (!SignedIn) GalleryUI.Text("Sign in to Orbiters at the top of My Avatar to like and review.", "reviews__hint", composer);
-            else if (data.viewer.canReview && data.ownReview == null) Composer();
-            foreach (var review in new[] { data.ownReview }.Concat(data.reviews).Where(r => r != null))
-                list.Add(new GalleryReviewRow(review, this, editing != null && editing.id == review.id && !review.pending));
+            else if (compose && !composing) { Composer(); composing = true; }
+            var kept = editing != null ? list.Children().OfType<GalleryReviewRow>().FirstOrDefault(r => r.Editing && r.Review.id == editing) : null;
+            foreach (var child in list.Children().ToList()) if (child != kept) child.RemoveFromHierarchy();
+            bool beforeKept = kept != null, keptShown = false;
+            foreach (var review in new[] { Data.ownReview }.Concat(Data.reviews).Where(r => r != null))
+            {
+                if (kept != null && review.id == kept.Review.id && !review.pending) { beforeKept = false; keptShown = true; continue; }
+                var row = new GalleryReviewRow(review, this, editing == review.id && !review.pending ? editText ?? review.content ?? "" : null);
+                if (beforeKept) list.Insert(list.IndexOf(kept), row); else list.Add(row);
+            }
+            if (kept != null && !keptShown) kept.RemoveFromHierarchy();
             if (list.childCount == 0) GalleryUI.Text("No reviews yet.", "reviews__hint", list);
-            if (data.hasMore) more.Add(GalleryUI.Button("Show more reviews", () => { more.Clear(); _ = LoadAsync(data.reviews.Count); }, "gallery-link"));
+            if (Data.hasMore) more.Add(GalleryUI.Button("Show more reviews", () => { more.Clear(); _ = state.LoadAsync(Data.reviews.Count); }, "gallery-link"));
         }
 
         // "Write a review" opens into a text field with Post; the review shows at once, dimmed until Orbiters saved it.
@@ -111,124 +113,67 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private async void Post(string text)
         {
-            string content = (text ?? "").Trim();
-            if (content.Length == 0 || data == null) return;
+            if (Data == null || string.IsNullOrWhiteSpace(text)) return;
             var auth = AuthenticationService.GetAuth();
-            var pending = new GalleryReview { pending = true, mine = true, content = content, createdAt = DateTime.UtcNow,
-                author = new ReviewAuthor { username = auth?.username, avatarUrl = auth?.avatarUrl } };
-            data.ownReview = pending; data.reviewCount++; draft = "";
-            Render();
-            try { data.ownReview = await GalleryApi.PostReviewAsync(asset.id, content); ShowMessage(null); }
-            catch (Exception ex)
+            draft = "";
+            // Not posted: what was written comes back in the field.
+            if (!await state.PostAsync(text, new ReviewAuthor { username = auth?.username, avatarUrl = auth?.avatarUrl }))
             {
-                if (data.ownReview == pending) data.ownReview = null;
-                data.reviewCount = Math.Max(0, data.reviewCount - 1); draft = content;
-                ShowMessage("Your review was not posted: " + ex.Message);
+                draft = text; composing = false;
+                Render();
             }
+        }
+
+        public void Edit(GalleryReview review)
+        {
+            editing = review?.id; editText = review?.content;
+            // Opened or closed: that row is made again.
+            foreach (var row in list.Children().OfType<GalleryReviewRow>().Where(r => r.Editing).ToList()) row.RemoveFromHierarchy();
             Render();
         }
 
-        public void Edit(GalleryReview review) { editing = review; Render(); }
+        public void Typed(string content) => editText = content;
 
         public async void Save(GalleryReview review, string text)
         {
-            string content = (text ?? "").Trim(), before = review.content;
-            bool wasEdited = review.edited;
-            editing = null;
-            if (content.Length == 0 || content == before) { Render(); return; }
-            review.content = content; review.edited = true;
-            Render();
-            try
+            // The review as shown now: a reload while editing replaced it.
+            review = state.Find(review.id) ?? review;
+            editing = null; editText = null;
+            // Not saved: the editor opens again with what was typed.
+            if (!await state.SaveAsync(review, text))
             {
-                var saved = await GalleryApi.EditReviewAsync(asset.id, review.id, content);
-                review.content = saved?.content ?? content; ShowMessage(null);
+                editing = review.id; editText = text;
+                Render();
             }
-            catch (Exception ex) { review.content = before; review.edited = wasEdited; ShowMessage("Your changes were not saved: " + ex.Message); }
-            Render();
+            else Render();
         }
 
-        public async void Delete(GalleryReview review)
-        {
-            var before = data;
-            data = new AssetInteractions { assetId = data.assetId, likeCount = data.likeCount, likedByCurrentUser = data.likedByCurrentUser, hasMore = data.hasMore,
-                reviewCount = Math.Max(0, data.reviewCount - 1), viewer = data.viewer, ownReview = data.ownReview == review ? null : data.ownReview,
-                reviews = data.reviews.Where(r => r != review).ToList() };
-            Render();
-            try { var answer = await GalleryApi.DeleteReviewAsync(asset.id, review.id); data.reviewCount = answer?.reviewCount ?? data.reviewCount; ShowMessage(null); }
-            catch (Exception ex) { data = before; ShowMessage("Your review was not deleted: " + ex.Message); }
-            Render();
-        }
-
-        // ---- Likes ----
-
-        private sealed class LikeSync { public bool server, wanted, running; }
-
-        private void ToggleAssetLike()
-        {
-            if (data == null || !SignedIn) return;
-            bool liked = !data.likedByCurrentUser;
-            data.likeCount = Math.Max(0, data.likeCount + (liked ? 1 : -1)); data.likedByCurrentUser = liked;
-            ShowLike();
-            Sync(0, !liked, liked, wanted => GalleryApi.SetLikeAsync(asset.id, wanted),
-                state => { data.likedByCurrentUser = state.liked; data.likeCount = state.likeCount; ShowLike(); },
-                server => { if (data.likedByCurrentUser != server) { data.likeCount = Math.Max(0, data.likeCount + (server ? 1 : -1)); data.likedByCurrentUser = server; } ShowLike(); });
-        }
+        public void Delete(GalleryReview review) => _ = state.DeleteAsync(review);
 
         public void ToggleLike(GalleryReview review)
         {
-            if (!SignedIn || review.mine || review.pending) return;
-            bool liked = !review.likedByCurrentUser;
-            ShowReviewLike(review, liked, Math.Max(0, review.likeCount + (liked ? 1 : -1)));
-            Sync(review.id, !liked, liked, wanted => GalleryApi.SetReviewLikeAsync(asset.id, review.id, wanted),
-                state => ShowReviewLike(review, state.liked, state.likeCount),
-                server => { if (review.likedByCurrentUser != server) ShowReviewLike(review, server, Math.Max(0, review.likeCount + (server ? 1 : -1))); });
+            if (SignedIn && !review.pending) state.ToggleReviewLike(review.id);
         }
 
-        private void ShowReviewLike(GalleryReview review, bool liked, int likeCount)
-        {
-            review.likedByCurrentUser = liked; review.likeCount = likeCount;
-            Row(review)?.ShowLike(liked, likeCount);
-        }
-
-        private GalleryReviewRow Row(GalleryReview review) => list.Children().OfType<GalleryReviewRow>().FirstOrDefault(row => row.Review == review);
-
-        // Keeps sending until Orbiters holds the latest wish; quick double presses cost at most one request each way.
-        private async void Sync(int key, bool before, bool wanted, Func<bool, Task<LikeState>> send, Action<LikeState> apply, Action<bool> restore)
-        {
-            if (!likes.TryGetValue(key, out var sync)) likes[key] = sync = new LikeSync { server = before };
-            sync.wanted = wanted;
-            if (sync.running) return;
-            sync.running = true;
-            try
-            {
-                while (sync.wanted != sync.server)
-                {
-                    var state = await send(sync.wanted);
-                    sync.server = state.liked;
-                    if (sync.wanted == sync.server) apply(state);
-                }
-                ShowMessage(null);
-            }
-            catch (Exception ex) { sync.wanted = sync.server; restore(sync.server); ShowMessage("Your like was not saved: " + ex.Message); }
-            finally { sync.running = false; }
-        }
+        private GalleryReviewRow Row(GalleryReview review) => list.Children().OfType<GalleryReviewRow>().FirstOrDefault(row => row.Review == review || row.Review.id == review.id && !row.Review.pending);
 
         private void ShowLike()
         {
-            if (data == null) return;
+            if (Data == null) return;
             Like.SetEnabled(SignedIn);
-            Like.EnableInClassList("review-like--liked", data.likedByCurrentUser);
-            Like.tooltip = !SignedIn ? "Sign in to Orbiters at the top of My Avatar to like assets." : data.likedByCurrentUser ? "Unlike" : "Like";
-            likeCount.text = data.likeCount.ToString(CultureInfo.InvariantCulture);
-            likesChanged?.Invoke(data.likeCount);
+            Like.EnableInClassList("review-like--liked", Data.likedByCurrentUser);
+            Like.tooltip = !SignedIn ? "Sign in to Orbiters at the top of My Avatar to like assets." : Data.likedByCurrentUser ? "Unlike" : "Like";
+            likeCount.text = Data.likeCount.ToString(CultureInfo.InvariantCulture);
+            likesChanged?.Invoke(Data.likeCount);
         }
 
-        private void ShowMessage(string text, bool retry = false)
+        private void ShowMessage()
         {
+            string text = state.Message;
             messageText.text = text ?? "";
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
             foreach (var button in message.Query<Button>().ToList()) button.RemoveFromHierarchy();
-            if (retry) message.Add(GalleryUI.Button("Retry", () => { ShowMessage(null); _ = LoadAsync(0); }, "gallery-link"));
+            if (state.CanRetry) message.Add(GalleryUI.Button("Retry", () => { message.style.display = DisplayStyle.None; _ = state.LoadAsync(0); }, "gallery-link"));
         }
     }
 }

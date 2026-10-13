@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Animations;
 using Orbiters.Toolkit.Editor.VRChat;
+using Orbiters.Toolkit.Editor.VRChat.Checks;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
@@ -217,7 +218,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         {
             var standard = FaceTrackingStandard.Find(marker.standard);
             if (standard == null) throw new InvalidOperationException("unknown blendshape standard “" + marker.standard + "”");
-            FaceTrackingBuild.Finish(Fx, standard, facePath, face.sharedMesh);
+            // The copy has the jaw and tongue the hands leave alone while the mouth is tracked, as at upload.
+            FaceTrackingBuild.Finish(Fx, standard, facePath, face.sharedMesh, Copy.transform);
             FaceTrackingBuild.Tune(Fx, facePath, face.sharedMesh, Expressive, FaceTrackingBuild.MouthSlowdown(marker.smoothing));
             FaceTrackingBuild.Pace(Fx, marker.smoothing);
         }
@@ -259,47 +261,15 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         // ---- What makes a build stale ----
 
-        // Objects' serialized contents by instance, measured again only when their dirty count moved: inspectors often mark
-        // a component changed without changing it (MCB's own does, on every Inspector).
-        private static readonly Dictionary<int, (int dirty, int hash)> Contents = new Dictionary<int, (int, int)>();
-
-        private static int Content(Object value)
-        {
-            int id = value.GetInstanceID(), dirty = EditorUtility.GetDirtyCount(value);
-            if (Contents.TryGetValue(id, out var known) && known.dirty == dirty) return known.hash;
-            int hash;
-            try { hash = EditorJsonUtility.ToJson(value).GetHashCode(); }
-            catch (Exception) { hash = dirty; }
-            Contents[id] = (dirty, hash);
-            return hash;
-        }
-
         /// <summary>
-        /// Changes to the avatar the test would show: its objects and components (not where its bones are). The settings the
-        /// test applies live (smoothing, features) are left out.
+        /// Changes to the avatar the test would show: its objects, components and the assets they use, as Toolkit measures
+        /// them for the checks (cached by what changed, shared with them). The quick settings the test applies live are
+        /// taken in with <see cref="Rebase"/>.
         /// </summary>
-        internal static string SignatureOf(GameObject root)
-        {
-            if (root == null) return "";
-            unchecked
-            {
-                long hash = 17;
-                void Add(long value) => hash = hash * 31 + value;
-                foreach (var transform in root.GetComponentsInChildren<Transform>(true))
-                {
-                    Add(transform.GetInstanceID());
-                    Add(transform.parent != null ? transform.parent.GetInstanceID() : 0);
-                    Add(Content(transform.gameObject));
-                    foreach (var component in transform.GetComponents<Component>())
-                    {
-                        if (component == null || component is Transform || component is MyAvatarFaceTracking || component is MyAvatar) continue;
-                        Add(component.GetInstanceID());
-                        Add(Content(component));
-                    }
-                }
-                return hash.ToString("x");
-            }
-        }
+        internal static string SignatureOf(GameObject root) => AvatarSignature.Of(root);
+
+        /// <summary>What the build counts as the avatar it shows: after a change the test applied live (the quick settings).</summary>
+        internal void Rebase(string signature) => Signature = signature;
 
         // ---- Releasing ----
 
@@ -312,7 +282,6 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             var build = cached;
             cached = null;
             idleSince = -1;
-            Contents.Clear();
             if (build == null) return;
             // The build steps' own objects (My Avatar's tuning, MCB's corrective links) are found in the controllers.
             var reached = new HashSet<Object>();

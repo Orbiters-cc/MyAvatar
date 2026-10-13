@@ -70,9 +70,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return job;
         }
 
-        /// <summary>Installs the newest version of <paramref name="asset"/> in place of <paramref name="installed"/>, with its setup.</summary>
+        /// <summary>
+        /// Installs the newest version of <paramref name="asset"/> in place of <paramref name="installed"/>, with its setup.
+        /// Null when the gallery offers no package of it for this avatar any more.
+        /// </summary>
         internal static GalleryJob Update(MyAvatar avatar, GalleryAsset asset, Toolkit.VRChat.OrbitersAttachment.GalleryReceipt installed)
         {
+            if (asset?.fit == null || !asset.fit.Compatible) return null;
             var variant = asset.fit.variants.FirstOrDefault(v => v.manifest?.setups?.Any(s => s.key == installed.setup) == true) ?? asset.fit.variants[0];
             return Start(avatar, asset, asset.fit.release, variant, installed.setup, installed.installId);
         }

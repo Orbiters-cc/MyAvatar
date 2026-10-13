@@ -49,6 +49,14 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         [NonSerialized] private IVisualElementScheduledItem pending;
         [NonSerialized] private string status;
         [NonSerialized] private bool statusWarning, saving;
+        // What the menu was built from (files), whether menu changes now run after the saved ones, the Changed count raised.
+        [NonSerialized] private string builtAssets;
+        [NonSerialized] private bool outrun;
+        [NonSerialized] private int raised = -1;
+        // The ids a save kept for the controls it renamed or copied, until the menu is built again.
+        [NonSerialized] private IReadOnlyDictionary<VRCExpressionsMenu.Control, string> savedPins;
+        // Left-out items no item of the menu answers to now.
+        [NonSerialized] private List<MenuRemoval> stale = new List<MenuRemoval>();
 
         private VisualElement stage, quickHolder, radialHolder, crumbs, side, history, deleted, defaultMenu;
         private QuickMenuView quick;
@@ -56,7 +64,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         private Label subtitle, hint, statusText;
         private VisualElement statusDot, undoButton, redoButton, notice;
         private Label noticeText;
-        private Button save, cancel;
+        private Button save, cancel, noticeAction;
+        private Action noticeCallback;
         private readonly List<(VisualElement Element, int Level)> crumbElements = new List<(VisualElement, int)>();
 
         /// <summary>
@@ -102,32 +111,40 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         private void OnEnable()
         {
-            if (state == null) state = MenuEditState.Create();
             saveChangesMessage = "The avatar's menu has changes that are not saved. Save them?";
-            Undo.undoRedoPerformed += OnUndo;
-            EditorApplication.hierarchyChanged += MarkDirty;
-            EditorApplication.projectChanged += MarkDirty;
+            Undo.undoRedoEvent += OnUndoRedo;
+            EditorApplication.projectChanged += OnProjectChanged;
             ObjectChangeEvents.changesPublished += OnObjectChanges;
         }
 
         private void OnDisable()
         {
-            Undo.undoRedoPerformed -= OnUndo;
-            EditorApplication.hierarchyChanged -= MarkDirty;
-            EditorApplication.projectChanged -= MarkDirty;
+            Undo.undoRedoEvent -= OnUndoRedo;
+            EditorApplication.projectChanged -= OnProjectChanged;
             ObjectChangeEvents.changesPublished -= OnObjectChanges;
         }
 
+        // Another window holding the same changes: a copy made from this one to capture it off-screen (its serialized state
+        // is this one's). The copy works on a clone of them, and leaves them be when it closes.
+        private bool StateShared => state != null && Resources.FindObjectsOfTypeAll<MenuEditorWindow>().Any(w => w != this && w.state == state);
+
         private void OnDestroy()
         {
-            if (state != null) Undo.ClearUndo(state);
+            // The changes not saved go with the window: nothing else shows or saves them, so nothing can undo them back.
+            if (state != null && !StateShared)
+            {
+                Undo.ClearUndo(state);
+                DestroyImmediate(state);
+            }
+            state = null;
+            if (!Resources.FindObjectsOfTypeAll<MenuEditorWindow>().Any(w => w != this)) MenuIcons.ReleasePreviews();
             Changed?.Invoke();
         }
 
+        // Closing with changes, Save: the window closes only once they are saved (a refused save stays open, saying why).
         public override void SaveChanges()
         {
-            Save();
-            base.SaveChanges();
+            if (Save()) base.SaveChanges();
         }
 
         public override void DiscardChanges()
@@ -136,9 +153,27 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             base.DiscardChanges();
         }
 
-        private void OnObjectChanges(ref ObjectChangeEventStream stream) => MarkDirty();
+        // Only changes of this avatar or of what its menu is made of rebuild it (not a material dragged elsewhere).
+        private void OnObjectChanges(ref ObjectChangeEventStream stream)
+        {
+            if (root == null || MenuChanges.Read(ref stream).Touches(root)) MarkDirty();
+        }
 
-        private void OnUndo() { dirty = true; Schedule(); }
+        // An Undo or Redo of a change made here only shows the edits again; anything else (a Save, the avatar) builds the menu again.
+        private void OnUndoRedo(in UndoRedoInfo info)
+        {
+            if (state != null && state.Made(info.undoName)) Schedule();
+            else MarkDirty();
+        }
+
+        // Files imported, moved or deleted: only those the menu is made of build it again.
+        private void OnProjectChanged()
+        {
+            string now = root != null ? MenuChanges.Assets(root) : null;
+            if (now == builtAssets) return;
+            builtAssets = now;
+            MarkDirty();
+        }
 
         private void MarkDirty() { dirty = true; Schedule(); }
 
@@ -152,6 +187,18 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         private void CreateGUI()
         {
+            // (Made here, not when enabled: a copy gets the window's serialized state after it is enabled.) A copy of the open
+            // window, made to capture it off-screen, shows the same changes on a clone of them: from the window's own state when
+            // its reference came along, else from the open window of the same avatar (only one is ever opened per avatar).
+            var source = state != null ? (StateShared ? state : null)
+                : opened ? Resources.FindObjectsOfTypeAll<MenuEditorWindow>().FirstOrDefault(w => w != this && w.opened && w.root == root && w.state != null)?.state : null;
+            if (source != null)
+            {
+                state = Instantiate(source);
+                state.hideFlags = HideFlags.DontSave;
+                opened = false;
+            }
+            else if (state == null) state = MenuEditState.Create();
             var ui = rootVisualElement;
             foreach (var sheetPath in new[] { "Packages/orbiters.toolkit/Runtime/EditorServices/theme.uss", "Packages/orbiters.myavatar/Editor/UI/myavatar.uss", StyleSheet })
             {
@@ -197,6 +244,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             hint = new Label { pickingMode = PickingMode.Ignore }; hint.AddToClassList("me-stage__hint"); stage.Add(hint);
             notice = new VisualElement(); notice.AddToClassList("me-stage__notice"); stage.Add(notice);
             noticeText = new Label(); noticeText.AddToClassList("me-stage__notice-text"); notice.Add(noticeText);
+            noticeAction = MyAvatarEditor.Button("", null); noticeAction.AddToClassList("me-stage__notice-action"); notice.Add(noticeAction);
+            ButtonInteraction.RegisterImmediateClick(noticeAction, () => noticeCallback?.Invoke());
             notice.style.display = DisplayStyle.None;
             stage.RegisterCallback<GeometryChangedEvent>(_ => Fit());
             stage.RegisterCallback<PointerDownEvent>(evt => { if (evt.target == stage || evt.target is StageBackdrop) Select(null); });
@@ -209,7 +258,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             statusText = new Label(); statusText.AddToClassList("me-status__text"); statusRow.Add(statusText);
             var actions = new VisualElement(); actions.AddToClassList("me-actions"); footer.Add(actions);
             cancel = MyAvatarEditor.Button("Cancel", null); cancel.AddToClassList("me-cancel");
-            cancel.tooltip = "Forget the changes and close. Edit > Undo brings them back.";
+            cancel.tooltip = "Forget the changes and close.";
             ButtonInteraction.RegisterImmediateClick(cancel, CancelEdits);
             actions.Add(cancel);
             save = MyAvatarEditor.Button("Save", null); save.AddToClassList("me-save");
@@ -219,7 +268,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             {
                 // The press shows at once; the save runs on the next frame.
                 save.text = "Saving…"; save.SetEnabled(false); saving = true;
-                rootVisualElement.schedule.Execute(Save);
+                rootVisualElement.schedule.Execute(() => Save());
             });
             actions.Add(save);
 
@@ -261,13 +310,22 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         private void OnKey(KeyDownEvent evt)
         {
-            if (evt.target is TextField || (evt.target as VisualElement)?.GetFirstAncestorOfType<TextField>() != null) return;
+            // Typing in a field (a name, a number) keeps its keys: Backspace deletes, Ctrl+Z takes the typing back.
+            if (InTextField(evt.target as VisualElement)) return;
             bool ctrl = evt.actionKey || evt.ctrlKey;
             if (ctrl && evt.keyCode == KeyCode.Z && evt.shiftKey) { Undo.PerformRedo(); evt.StopPropagation(); evt.PreventDefault(); }
             else if (ctrl && evt.keyCode == KeyCode.Z) { Undo.PerformUndo(); evt.StopPropagation(); evt.PreventDefault(); }
             else if (ctrl && evt.keyCode == KeyCode.Y) { Undo.PerformRedo(); evt.StopPropagation(); evt.PreventDefault(); }
             else if (evt.keyCode == KeyCode.F2 && Node(selected) is MenuNode node && CanRename(node)) { BeginRename(node); evt.StopPropagation(); }
             else if (evt.keyCode == KeyCode.Backspace && CanBack && !Dragging) { Back(); evt.StopPropagation(); }
+        }
+
+        // Text, decimal and whole number fields alike.
+        private static bool InTextField(VisualElement element)
+        {
+            for (var e = element; e != null; e = e.parent)
+                if (e.ClassListContains(TextInputBaseField<string>.ussClassName)) return true;
+            return false;
         }
 
         private bool Dragging => (quick != null && quick.Dragging) || (radial != null && radial.Dragging);
@@ -335,12 +393,17 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 return;
             }
             subtitle.text = root.name;
-            if (dirty || built == null)
+            bool rebuilt = dirty || built == null;
+            if (rebuilt)
             {
                 built = MenuBuild.Run(MenuInputs.Read(root));
+                builtAssets ??= MenuChanges.Assets(root);
                 savedRemovals = MenuSave.SavedRemovals(root, built, out savedDefault);
+                stale = MenuSave.Unresolved(root, built);
                 dirty = false;
                 shownRevision = -1;
+                Rename(savedPins);
+                savedPins = null;
             }
             if (shownRevision != state.revision || draft == null)
             {
@@ -386,10 +449,44 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             ShowDefaultMenu();
             ShowStatus();
             var descriptor = root.GetComponent<VRCAvatarDescriptor>();
-            SetNotice(descriptor == null ? "This object has no VRChat avatar descriptor."
-                : built.Root.Items.Count == 0 && state.edits.Count == 0 ? "This avatar has no expressions menu yet: add one to its avatar descriptor, VRCFury toggles or Modular Avatar menu items."
-                : !built.VrcFury && Overfull(visible) ? "A menu has more than 8 items: VRChat refuses it unless VRCFury splits it into pages." : null);
-            Changed?.Invoke();
+            if (descriptor != null && built.VrcFury && rebuilt) outrun = MenuSave.EditsOutrun(root);
+            if (descriptor != null && built.VrcFury && outrun)
+                // The saved edits were written to run after every other menu change.
+                SetNotice("Menu changes on an object after “" + MenuSave.EditsName + "” now run after the ones saved there: they may move, reorder or change icons of what you saved.",
+                    "Put it last", PutEditsLast);
+            else
+                SetNotice(descriptor == null ? "This object has no VRChat avatar descriptor."
+                    : built.Root.Items.Count == 0 && state.edits.Count == 0 ? "This avatar has no expressions menu yet: add one to its avatar descriptor, VRCFury toggles or Modular Avatar menu items."
+                    : !built.VrcFury && Overfull(visible) ? "A menu has more than 8 items: VRChat refuses it unless VRCFury splits it into pages." : null);
+            // The Menu card follows the changes waiting here and the menu built.
+            if (rebuilt || state.edits.Count != raised)
+            {
+                raised = state.edits.Count;
+                Changed?.Invoke();
+            }
+        }
+
+        // After a save, the items it renamed or copied are known by new ids (an item of the avatar's menu is known by its
+        // name): the editor stays on the folder and the items it showed.
+        private void Rename(IReadOnlyDictionary<VRCExpressionsMenu.Control, string> pins)
+        {
+            if (pins == null) return;
+            var now = new Dictionary<string, string>();
+            foreach (var pair in built.ControlIds)
+                if (pins.TryGetValue(pair.Key, out var was) && was != pair.Value) now[was] = pair.Value;
+            if (now.Count == 0) return;
+            string Now(string id) => id != null && now.TryGetValue(id, out var to) ? to : id;
+            for (int i = 0; i < path.Count; i++) path[i] = Now(path[i]);
+            for (int i = 0; i < ticked.Count; i++) ticked[i] = Now(ticked[i]);
+            selected = Now(selected);
+        }
+
+        private void PutEditsLast()
+        {
+            var edits = MenuSave.EditsObject(root);
+            if (edits == null) return;
+            Undo.SetSiblingIndex(edits.transform, root.transform.childCount - 1, "Put “" + MenuSave.EditsName + "” last");
+            MarkDirty();
         }
 
         // Orbiters' items without an icon show the one they get at upload.
@@ -765,7 +862,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             foreach (var folder in left.Select(e => e.Node).Concat(defaults).Where(n => n.IsFolder && n.Page != null))
                 foreach (var w in MenuTree.Walk(folder.Page)) inside.Add(w.Node.Id);
             left = left.Where(e => !inside.Contains(e.Node.Id)).ToList();
-            bool any = left.Count > 0 || defaults.Count > 0;
+            bool any = left.Count > 0 || defaults.Count > 0 || stale.Count > 0;
             bool was = deleted.style.display.value == DisplayStyle.Flex;
             deleted.style.display = any ? DisplayStyle.Flex : DisplayStyle.None;
             // The menus make room for it, or take it back.
@@ -783,6 +880,14 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 var chip = Chip(node.Icon != null ? node.Icon : MenuArt.Person, Plain(node.Name), "Left out of the upload" +
                     (entry.Folder != null ? " (was in “" + Plain(entry.Folder.Name) + "”)" : "") + ". Click to put it back.", () => Restore(node), false);
                 chip.EnableInClassList("me-chip--open", restoring == node.Id);
+                row.Add(chip);
+            }
+            foreach (var removal in stale)
+            {
+                var chip = Chip(removal.icon != null ? removal.icon : MenuArt.Person, Plain(removal.Name) + " · not in the menu now",
+                    "Left out of the upload, but no item of the menu is it now (it was deleted, replaced, or is left out of the build for now): " +
+                    "it is left out again if it comes back. Click to forget it.", () => Forget(removal), false);
+                chip.AddToClassList("me-chip--stale");
                 row.Add(chip);
             }
             var pending = restoring != null ? left.FirstOrDefault(e => e.Node.Id == restoring) : default;
@@ -805,6 +910,18 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             {
                 var none = new Label("Every folder is full: make room in one first."); none.AddToClassList("me-restore__text"); options.Add(none);
             }
+        }
+
+        // A left-out item no item answers to any more is forgotten at once (one Undo step).
+        private void Forget(MenuRemoval removal)
+        {
+            var settings = MenuSave.SettingsOf(root);
+            if (settings == null || !settings.menuRemovals.Contains(removal)) return;
+            Undo.RecordObject(settings, "Forget “" + Plain(removal.Name) + "”");
+            settings.menuRemovals.Remove(removal);
+            EditorUtility.SetDirty(settings);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(settings);
+            MarkDirty();
         }
 
         // A small tile under the Action Menu: an item left out, a suggested folder.
@@ -926,7 +1043,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             image.AddToClassList("me-icon-well__image"); well.Add(image);
             well.RegisterCallback<DragUpdatedEvent>(evt =>
             {
-                if (!MenuArt.Dragged(out _, out _)) return;
+                if (!MenuArt.CanDrop()) return;
                 DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
                 well.AddToClassList("me-icon-well--drop");
             });
@@ -938,7 +1055,23 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 DragAndDrop.AcceptDrag();
                 SetIcon(node, texture, file);
             });
-            well.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) { well.AddToClassList("me-icon-well--pressed"); Browse(node); } });
+            // The press shows at once; the file dialog opens once it is painted and the well stays pressed until it returns. A
+            // click (no pointer down seen) opens it too.
+            bool browsing = false;
+            DateTime closed = default;
+            void Choose()
+            {
+                if (browsing) return;
+                browsing = true;
+                well.AddToClassList("me-icon-well--pressed");
+                well.schedule.Execute(() =>
+                {
+                    try { Browse(node); }
+                    finally { browsing = false; closed = DateTime.UtcNow; well.RemoveFromClassList("me-icon-well--pressed"); }
+                }).StartingIn(30);
+            }
+            well.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) { Choose(); evt.StopPropagation(); } });
+            well.RegisterCallback<ClickEvent>(_ => { if (!browsing && (DateTime.UtcNow - closed).TotalSeconds > .5) Choose(); });
             well.RegisterCallback<PointerUpEvent>(_ => well.RemoveFromClassList("me-icon-well--pressed"));
             well.RegisterCallback<PointerLeaveEvent>(_ => well.RemoveFromClassList("me-icon-well--pressed"));
             card.Add(well);
@@ -991,9 +1124,13 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             {
                 var names = info.Types.Select(t => t == ControlType.RadialPuppet ? "Slider" : t == ControlType.Button ? (info.Toggle ? "Hold" : "Button") : "Toggle").ToList();
                 var tips = info.Types.Select(t => t == ControlType.RadialPuppet ? "A radial slider." : t == ControlType.Button ? "On while held." : "On until pressed again.").ToList();
-                var types = new SegmentedControl(names.Select((n, i) => new SegmentedControl.Option(n, null, tips[i])), i =>
+                SegmentedControl types = null;
+                types = new SegmentedControl(names.Select((n, i) => new SegmentedControl.Option(n, null, tips[i])), i =>
                 {
                     if (info.Types[i] == node.Type) return;
+                    // A VRCFury toggle made a slider syncs a decimal instead of on/off: 7 bits more.
+                    string why = info.Toggle && info.Types[i] == ControlType.RadialPuppet ? MenuSave.SyncedBitsProblem(root, draft, 7) : null;
+                    if (why != null) { types.SetIndex(Mathf.Max(0, info.Types.IndexOf(node.Type))); SetStatus(why, true); return; }
                     state.Add(new MenuEdit { kind = MenuEditKind.Type, id = node.Id, index = (int)info.Types[i] }, "Type of “" + Plain(node.Name) + "”");
                     shownSignature = null; Refresh();
                 });
@@ -1019,9 +1156,31 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             else if (info.Parameter.Length > 0) Setting(box, "Parameter", Value(info.Parameter + (info.ParameterType != null ? " · " + TypeName(info.ParameterType.Value) : "")));
             if (info.ValueEditable)
             {
-                var field = new FloatField { value = info.Value, isDelayed = true, tooltip = "The value it sets its parameter to." };
+                // What VRChat keeps for the parameter's type: a whole number from 0 to 255, a decimal from -1 to 1.
+                VisualElement field;
+                if (info.ParameterType == VRCExpressionParameters.ValueType.Int)
+                {
+                    var whole = new IntegerField { value = Mathf.RoundToInt(info.Value), isDelayed = true, tooltip = "The value it sets its parameter to (0 to 255)." };
+                    whole.RegisterValueChangedCallback(evt =>
+                    {
+                        int value = Mathf.Clamp(evt.newValue, 0, 255);
+                        if (value != evt.newValue) whole.SetValueWithoutNotify(value);
+                        state.Add(new MenuEdit { kind = MenuEditKind.Value, id = node.Id, number = value }, "Value of “" + Plain(node.Name) + "”"); Refresh();
+                    });
+                    field = whole;
+                }
+                else
+                {
+                    var number = new FloatField { value = info.Value, isDelayed = true, tooltip = "The value it sets its parameter to (-1 to 1)." };
+                    number.RegisterValueChangedCallback(evt =>
+                    {
+                        float value = MenuSave.Clamped(evt.newValue, info.ParameterType);
+                        if (!Mathf.Approximately(value, evt.newValue)) number.SetValueWithoutNotify(value);
+                        state.Add(new MenuEdit { kind = MenuEditKind.Value, id = node.Id, number = value }, "Value of “" + Plain(node.Name) + "”"); Refresh();
+                    });
+                    field = number;
+                }
                 field.AddToClassList("me-settings__number");
-                field.RegisterValueChangedCallback(evt => { state.Add(new MenuEdit { kind = MenuEditKind.Value, id = node.Id, number = evt.newValue }, "Value of “" + Plain(node.Name) + "”"); Refresh(); });
                 Setting(box, "Value", field);
             }
             if (info.DefaultEditable || info.Parameter.Length > 0 || info.Toggle)
@@ -1031,14 +1190,21 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 VisualElement field;
                 if (slider)
                 {
-                    var s = new Slider(0f, 1f) { value = info.Default, tooltip = "Where it starts when the avatar loads." };
-                    s.RegisterValueChangedCallback(evt => state.Add(new MenuEdit { kind = MenuEditKind.Default, id = node.Id, number = evt.newValue }, "Default of “" + Plain(node.Name) + "”"));
+                    // A toggle's slider starts between 0 and 1; a decimal parameter between -1 and 1.
+                    var s = new Slider(info.Toggle ? 0f : -1f, 1f) { value = info.Default, tooltip = "Where it starts when the avatar loads." };
+                    s.RegisterValueChangedCallback(evt => { state.Add(new MenuEdit { kind = MenuEditKind.Default, id = node.Id, number = evt.newValue }, "Default of “" + Plain(node.Name) + "”"); Edited(); });
                     field = s;
                 }
                 else if (integer)
                 {
-                    var n = new IntegerField { value = Mathf.RoundToInt(info.Default), isDelayed = true, tooltip = "What it starts at when the avatar loads." };
-                    n.RegisterValueChangedCallback(evt => state.Add(new MenuEdit { kind = MenuEditKind.Default, id = node.Id, number = Mathf.Clamp(evt.newValue, 0, 255) }, "Default of “" + Plain(node.Name) + "”"));
+                    var n = new IntegerField { value = Mathf.RoundToInt(info.Default), isDelayed = true, tooltip = "What it starts at when the avatar loads (0 to 255)." };
+                    n.RegisterValueChangedCallback(evt =>
+                    {
+                        int value = Mathf.Clamp(evt.newValue, 0, 255);
+                        if (value != evt.newValue) n.SetValueWithoutNotify(value);
+                        state.Add(new MenuEdit { kind = MenuEditKind.Default, id = node.Id, number = value }, "Default of “" + Plain(node.Name) + "”");
+                        Edited();
+                    });
                     field = n;
                 }
                 else
@@ -1060,12 +1226,41 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     int bits = info.ParameterType == VRCExpressionParameters.ValueType.Bool ? 1 : 8;
                     var synced = new Toggle("Synced") { value = info.Synced, tooltip = "Others see it (" + bits + (bits == 1 ? " bit" : " bits") + " of the avatar's 256). Off: only you see its effect." };
                     synced.SetEnabled(info.SyncedEditable);
-                    synced.RegisterValueChangedCallback(evt => { state.Add(new MenuEdit { kind = MenuEditKind.Synced, id = node.Id, flag = evt.newValue }, (evt.newValue ? "Sync “" : "Don't sync “") + Plain(node.Name) + "”"); Refresh(); });
+                    synced.RegisterValueChangedCallback(evt =>
+                    {
+                        if (evt.newValue && !SyncFits(info, out string why))
+                        {
+                            synced.SetValueWithoutNotify(false);
+                            SetStatus(why, true);
+                            return;
+                        }
+                        state.Add(new MenuEdit { kind = MenuEditKind.Synced, id = node.Id, flag = evt.newValue }, (evt.newValue ? "Sync “" : "Don't sync “") + Plain(node.Name) + "”");
+                        Refresh();
+                    });
                     flags.Add(synced);
                 }
                 Setting(box, "", flags);
             }
             if (info.Why != null) { var why = new Label(info.Why); why.AddToClassList("me-card__text"); why.AddToClassList("me-settings__why"); box.Add(why); }
+        }
+
+        // Whether syncing the item's parameter keeps the avatar within VRChat's synced bits (with the changes not saved yet).
+        // Over them, VRCFury compresses parameters at upload when it builds the avatar; without it the upload would fail.
+        private bool SyncFits(MenuItemInfo info, out string why)
+        {
+            var asset = root.GetComponent<VRCAvatarDescriptor>()?.expressionParameters;
+            bool counted = asset != null && asset.parameters != null && asset.parameters.Any(p => p != null && p.name == info.Parameter && p.networkSynced);
+            int cost = counted ? 0 : VRCExpressionParameters.TypeCost(info.ParameterType ?? VRCExpressionParameters.ValueType.Bool);
+            why = MenuSave.SyncedBitsProblem(root, draft, cost, info.Parameter);
+            return why == null;
+        }
+
+        // A change the panel keeps showing as it is (a slider being dragged): the window knows it has changes at once (closing
+        // asks to save them), the rest catches up at the next build.
+        private void Edited()
+        {
+            hasUnsavedChanges = state.edits.Count > 0;
+            ShowStatus();
         }
 
         private static void Setting(VisualElement parent, string key, VisualElement field)
@@ -1216,9 +1411,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             if (string.IsNullOrEmpty(file)) return;
             if (!MenuIcons.IsImage(file)) { SetStatus("That file is not a picture.", true); return; }
             // A picture already in the project is used as it is.
-            string project = System.IO.Path.GetFullPath(System.IO.Directory.GetCurrentDirectory()).Replace('\\', '/') + "/";
-            string normalized = System.IO.Path.GetFullPath(file).Replace('\\', '/');
-            var asset = normalized.StartsWith(project, StringComparison.OrdinalIgnoreCase) ? AssetDatabase.LoadAssetAtPath<Texture2D>(normalized.Substring(project.Length)) : null;
+            var asset = MenuIcons.ProjectTexture(file);
             SetIcon(node, asset, asset == null ? file : null);
         }
 
@@ -1230,11 +1423,14 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             ShowStatus();
         }
 
-        private void SetNotice(string text)
+        private void SetNotice(string text, string action = null, Action callback = null)
         {
             if (notice == null) return;
             noticeText.text = text ?? "";
             notice.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
+            noticeAction.text = action ?? "";
+            noticeAction.style.display = action != null && callback != null ? DisplayStyle.Flex : DisplayStyle.None;
+            noticeCallback = callback;
         }
 
         private void ShowStatus()
@@ -1256,14 +1452,19 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             if (string.IsNullOrEmpty(hint.text)) hint.text = DefaultHint;
         }
 
-        private void Save()
+        // Whether the changes are saved now (none left to save counts).
+        private bool Save()
         {
+            bool saved = false;
             try
             {
-                if (root == null || state.edits.Count == 0) return;
+                if (state == null || state.edits.Count == 0) return saved = true;
+                if (root == null) { SetStatus("The avatar is no longer open: the changes can't be saved.", true); return false; }
                 var outcome = MenuSave.Save(root, state.edits, state, MenuSave.Removals.Of(draft));
+                saved = outcome.Saved;
                 if (outcome.Saved)
                 {
+                    savedPins = outcome.Pins;
                     var parts = new List<string>();
                     if (outcome.Assets > 0) parts.Add(outcome.Assets + (outcome.Assets == 1 ? " menu asset" : " menu assets"));
                     if (outcome.Components > 0) parts.Add(outcome.Components + (outcome.Components == 1 ? " component" : " components"));
@@ -1283,6 +1484,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 Refresh();
                 rootVisualElement.schedule.Execute(() => { if (status != null && !statusWarning) { status = null; ShowStatus(); } }).StartingIn(9000);
             }
+            return saved;
         }
 
         // Like My Avatar's texture Save: the assets and the avatar's scene go to disk (with Unit Git, a "menu change"

@@ -27,6 +27,12 @@ namespace Orbiters.MyAvatar.Editor
         private IVisualElementScheduledItem pending;
         // fixedText: open surfaces fixed by themselves; brokenText: materials that render again. Both keep the card shown.
         private string shown, fixedText, brokenText;
+        // The materials the last fix made render: its note goes once one of them doesn't render again (an Undo).
+        private readonly HashSet<int> fixedBroken = new HashSet<int>();
+        // What doesn't render, planned again only when that changed or the project changed (a shader may have come).
+        private string brokenKey;
+        private List<BrokenMaterial> broken = new List<BrokenMaterial>();
+        private bool projectChanged = true;
 
         [InitializeOnLoadMethod]
         private static void Register() => OrbitersFeatures.Register(new OrbitersFeature
@@ -55,16 +61,9 @@ namespace Orbiters.MyAvatar.Editor
             // Opens on press, like the optimization card.
             header.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) Show(!Open, remember: true); });
             Show(Open, remember: false);
-            EditorApplication.hierarchyChanged += Schedule;
-            // A shader installed or a material fixed elsewhere (MCP, the material's own inspector) changes what renders.
-            EditorApplication.projectChanged += Schedule;
-            Undo.undoRedoPerformed += Schedule;
-            OrbitersFeatures.Changed += FeatureChanged;
-            RegisterCallback<DetachFromPanelEvent>(_ =>
-            {
-                EditorApplication.hierarchyChanged -= Schedule; EditorApplication.projectChanged -= Schedule;
-                Undo.undoRedoPerformed -= Schedule; OrbitersFeatures.Changed -= FeatureChanged;
-            });
+            // Back on screen (docked again, the Inspector rebuilt): it listens again and looks again.
+            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); projectChanged = true; Schedule(); });
+            RegisterCallback<DetachFromPanelEvent>(_ => Unsubscribe());
             // Once on screen: fixing materials creates assets, which waits until the Inspector is built.
             style.display = DisplayStyle.None;
             schedule.Execute(Refresh);
@@ -79,7 +78,31 @@ namespace Orbiters.MyAvatar.Editor
             body.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
+        private void Subscribe()
+        {
+            Unsubscribe();
+            EditorApplication.hierarchyChanged += Schedule;
+            // A shader installed or a material fixed elsewhere (MCP, the material's own inspector) changes what renders.
+            EditorApplication.projectChanged += ProjectChanged;
+            Undo.undoRedoPerformed += Schedule;
+            OrbitersFeatures.Changed += FeatureChanged;
+        }
+
+        private void Unsubscribe()
+        {
+            EditorApplication.hierarchyChanged -= Schedule; EditorApplication.projectChanged -= ProjectChanged;
+            Undo.undoRedoPerformed -= Schedule; OrbitersFeatures.Changed -= FeatureChanged;
+        }
+
         private void FeatureChanged(string key) { if (key == AutoFix) { shown = null; Schedule(); } }
+
+        // Assets change often (every import and save): the card looks again once they settle.
+        private void ProjectChanged()
+        {
+            projectChanged = true;
+            pending?.Pause();
+            pending = schedule.Execute(Refresh).StartingIn(1500);
+        }
 
         private void Schedule()
         {
@@ -87,14 +110,26 @@ namespace Orbiters.MyAvatar.Editor
             pending = schedule.Execute(Refresh).StartingIn(400);
         }
 
+        private List<BrokenMaterial> Broken(GameObject root)
+        {
+            string key = BrokenMaterials.Key(root);
+            if (key == brokenKey && !projectChanged) return broken;
+            brokenKey = key; projectChanged = false;
+            return broken = key.Length == 0 ? new List<BrokenMaterial>() : BrokenMaterials.Inspect(root);
+        }
+
         private void Refresh()
         {
             var root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
             var advice = AvatarMaterials.Inspect(root);
             if (AutoFixOpenSurfaces(advice)) advice = AvatarMaterials.Inspect(root);
-            var broken = BrokenMaterials.Inspect(root);
-            // Undone: they don't render again, the note saying they do goes.
-            if (broken.Count > 0 && brokenText != null) { if (note.text == brokenText) SetNote(null, false); brokenText = null; }
+            var broken = Broken(root);
+            // Undone: what the last fix made render doesn't again, the note saying it does goes.
+            if (brokenText != null && broken.Any(b => fixedBroken.Contains(b.Material.GetInstanceID())))
+            {
+                if (note.text == brokenText) SetNote(null, false);
+                brokenText = null; fixedBroken.Clear();
+            }
             style.display = advice.Count == 0 && broken.Count == 0 && fixedText == null && brokenText == null ? DisplayStyle.None : DisplayStyle.Flex;
             askFirst.style.display = fixedText != null && note.text == fixedText && OrbitersFeatures.IsEnabled(AutoFix) ? DisplayStyle.Flex : DisplayStyle.None;
             int suggestions = advice.Count(a => a.Standard || !a.Locked);
@@ -123,10 +158,10 @@ namespace Orbiters.MyAvatar.Editor
             if (suggestions > 1)
             {
                 var actions = new VisualElement(); actions.AddToClassList("materials__actions"); list.Add(actions);
-                var fixAll = MyAvatarEditor.Button("Fix all", null);
+                Button fixAll = null;
+                fixAll = MyAvatarEditor.PressButton("Fix all", () => Fix(fixAll, advice));
                 fixAll.AddToClassList("mcb-button--primary");
                 fixAll.tooltip = "Move the Standard materials to Toon Standard and show both sides of open surfaces. My Avatar works on copies; Undo restores the materials.";
-                fixAll.clicked += () => Fix(fixAll, advice);
                 actions.Add(fixAll);
             }
         }
@@ -173,12 +208,12 @@ namespace Orbiters.MyAvatar.Editor
             detail.AddToClassList("materials__detail"); texts.Add(detail);
             if (entry.Standard || !entry.Locked)
             {
-                var fix = MyAvatarEditor.Button(entry.Standard ? "Use Toon Standard" : "Show both sides", null);
+                Button fix = null;
+                fix = MyAvatarEditor.PressButton(entry.Standard ? "Use Toon Standard" : "Show both sides", () => Fix(fix, new[] { entry }));
                 fix.AddToClassList("avatar-link");
                 fix.tooltip = entry.Standard
                     ? "Rebuild it with VRChat's Toon Standard, keeping its texture maps" + (entry.HiddenBack ? ", and show both sides." : ".")
                     : "Draw the back of its faces too.";
-                fix.clicked += () => Fix(fix, new[] { entry });
                 row.Add(fix);
             }
             else
@@ -223,6 +258,8 @@ namespace Orbiters.MyAvatar.Editor
                 {
                     int count = BrokenMaterials.Fix(avatar ? TextureOptimization.AvatarRoot(avatar) : null, avatar, entries);
                     brokenText = count == 0 ? null : (count == 1 ? "1 material renders again." : count + " materials render again.") + " Undo restores them.";
+                    fixedBroken.Clear();
+                    if (count > 0) fixedBroken.UnionWith(entries.Where(e => e.Material).Select(e => e.Material.GetInstanceID()));
                     SetNote(brokenText, false);
                 }
                 catch (System.Exception ex) { SetNote(ex.Message, true); }

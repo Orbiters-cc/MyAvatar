@@ -133,8 +133,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
         }
 
         // The avatars of the active scene VRCFury builds (Novabeast and its MCB sliders in MCB Test), on hidden copies. An
-        // avatar VRCFury itself can't build (a broken setup) is left out.
-        [Test]
+        // avatar VRCFury itself can't build (a broken setup) is left out. It depends on the scene open: run it by hand.
+        [Test, Explicit("Compares the avatars of the scene open now: run it by hand.")]
         public void ThePreviewOfTheOpenAvatarsIsWhatVrcFuryBuilds()
         {
             NeedVrcFury();
@@ -210,11 +210,20 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 Assert.AreEqual(1, state.edits.Count, "Ctrl+Z takes the last change back");
                 Undo.PerformRedo();
                 Assert.AreEqual(2, state.edits.Count, "Ctrl+Y brings it back");
-                // Renaming the same item again is one change.
+                // Renaming the same item again is one change, and one Undo step (a slider dragged is one too).
                 state.Add(new MenuEdit { kind = MenuEditKind.Rename, id = "b", text = "B1" }, "Rename B");
                 state.Add(new MenuEdit { kind = MenuEditKind.Rename, id = "b", text = "B2" }, "Rename B");
+                state.Add(new MenuEdit { kind = MenuEditKind.Rename, id = "b", text = "B3" }, "Rename B");
                 Assert.AreEqual(3, state.edits.Count);
-                Assert.AreEqual("B2", state.edits[2].text);
+                Assert.AreEqual("B3", state.edits[2].text);
+                Undo.PerformUndo();
+                Assert.AreEqual(2, state.edits.Count, "one Undo takes the whole rename back");
+                Undo.PerformRedo();
+                Assert.AreEqual("B3", state.edits[2].text);
+                // After an Undo or a Redo, the same change again is a step of its own.
+                state.Add(new MenuEdit { kind = MenuEditKind.Rename, id = "b", text = "B4" }, "Rename B");
+                Undo.PerformUndo();
+                Assert.AreEqual("B3", state.edits[2].text, "Undo takes back only the rename made after the Redo");
             }
             finally
             {
@@ -335,10 +344,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
         {
             NeedVrcFury();
             string name = "Menu Copy Test " + Guid.NewGuid().ToString("N").Substring(0, 8);
-            string folder = MenuSave.CopiesFolder + "/" + name;
-            bool hadCopies = AssetDatabase.IsValidFolder(MenuSave.CopiesFolder);
-            try
+            using (var temp = new TempAssets())
             {
+                string folder = temp.Copies(name);
                 using (var fixture = new MenuFixture(many: false))
                 {
                     fixture.Root.name = name;
@@ -367,11 +375,6 @@ namespace Orbiters.MyAvatar.Editor.Tests
                     Assert.AreEqual("Beanie", copy.controls[0].name);
                     Assert.AreEqual(expected, MenuFixture.Build(fixture.Root));
                 }
-            }
-            finally
-            {
-                if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
-                if (!hadCopies) AssetDatabase.DeleteAsset(MenuSave.CopiesFolder);
             }
         }
 
@@ -491,53 +494,10 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
         // ---- Modular Avatar: its menu rules, on plain data (Modular Avatar is not installed in this project) --------------------
 
-        private sealed class MaSetup
-        {
-            public readonly MaMenu Menu = new MaMenu();
-            private readonly Dictionary<GameObject, MaSource> sources = new Dictionary<GameObject, MaSource>();
-            private readonly GameObject root;
-
-            public MaSetup(GameObject root)
-            {
-                this.root = root;
-                Menu.SourceOf = go => go != null && sources.TryGetValue(go, out var source) ? source : null;
-            }
-
-            public GameObject Object(string name, GameObject parent = null)
-            {
-                var go = new GameObject(name);
-                go.transform.SetParent((parent != null ? parent : root).transform, false);
-                return go;
-            }
-
-            public MaItem Item(GameObject go, ControlType type, string label = "", VRCExpressionsMenu subMenu = null, bool children = false, GameObject childrenOf = null)
-            {
-                var item = new MaItem { Component = go.transform, Label = label, FromChildren = children, ChildrenOf = childrenOf, Control = MenuFixture.Control("unused", type, "", menu: subMenu) };
-                sources[go] = item;
-                return item;
-            }
-
-            public void Group(GameObject go, GameObject target = null) => sources[go] = new MaGroup { Component = go.transform, Target = target };
-
-            public MaInstaller Installer(GameObject go, VRCExpressionsMenu menu = null, VRCExpressionsMenu target = null, bool enabled = true)
-            {
-                var installer = new MaInstaller { Component = go.transform, Menu = menu, Target = target, Enabled = enabled };
-                Menu.Installers.Add(installer);
-                return installer;
-            }
-
-            public void InstallTarget(GameObject go, MaInstaller installer)
-            {
-                var target = new MaInstallTarget { Component = go.transform, Installer = installer };
-                Menu.InstallTargets.Add(target);
-                sources[go] = target;
-            }
-        }
-
         // The avatar's menu, then installers aimed at its asset, then the others; a menu asset with the installers aimed at it;
         // Menu Items named by label or object, submenus from children (shared, loops included), groups, install targets;
         // installers an install target names only there, disabled ones too; 7 items and "More" in a menu of more than 8.
-        private static MaSetup ModularAvatarSetup(MenuFixture fixture)
+        internal static MaSetup ModularAvatarSetup(MenuFixture fixture)
         {
             var ma = new MaSetup(fixture.Root);
             var rootMenu = fixture.Root.GetComponent<VRCAvatarDescriptor>().expressionsMenu;
@@ -751,13 +711,90 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
+        // A new folder in the avatar's menu holding only VRCFury toggles is still a menu of its own (VRCFury's Move Menu Item
+        // fills it at upload): saved as an asset, or the avatar's menu would point at a menu gone after a restart.
+        [Test]
+        public void ANewFolderOfVrcFuryItemsIsSavedAsAMenuToo()
+        {
+            NeedVrcFury();
+            string folder = "Assets/Menu Folder Test " + Guid.NewGuid().ToString("N").Substring(0, 8);
+            using (var fixture = new MenuFixture())
+            {
+                try
+                {
+                    AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
+                    var menu = fixture.Root.GetComponent<VRCAvatarDescriptor>().expressionsMenu;
+                    AssetDatabase.CreateAsset(menu, folder + "/Root.asset");
+                    var index = MenuTree.Index(MenuBuild.Run(MenuInputs.Read(fixture.Root)).Root);
+                    string Id(string name) => index.Values.First(e => e.Node.Name == name).Node.Id;
+                    var edits = new List<MenuEdit> { new MenuEdit { kind = MenuEditKind.Folder, id = "new:v", text = "Toggles", items = new List<string> { Id("Toggle 1"), Id("Toggle 2") } } };
+                    var draft = MenuSave.Draft(fixture.Root, edits, null, out _);
+                    string expected = MenuFixture.Dump(MenuBuild.Paginate(draft.Root, draft.NextText, draft.NextIcon));
+                    var outcome = MenuSave.Save(fixture.Root, edits);
+                    Assert.True(outcome.Saved, outcome.Message);
+                    var control = menu.controls.First(c => c.name == "Toggles");
+                    Assert.AreEqual(folder + "/Toggles.asset", AssetDatabase.GetAssetPath(control.subMenu), "its menu is an asset, next to the avatar's");
+                    Assert.AreEqual(0, control.subMenu.controls.Count, "VRCFury moves the toggles into it at upload");
+                    Assert.AreEqual(expected, MenuFixture.Build(fixture.Root));
+                }
+                finally
+                {
+                    AssetDatabase.DeleteAsset(folder);
+                }
+            }
+        }
+
+        // Random sessions with items left out and settings changed too: Save writes them where they live and keeps the left-out
+        // items found where the menu puts them, or refuses and changes nothing.
+        [TestCase(31)] [TestCase(32)] [TestCase(33)] [TestCase(34)] [TestCase(35)] [TestCase(36)]
+        public void ARandomSessionWithSettingsAndLeftOutItemsSaves(int seed)
+        {
+            NeedVrcFury();
+            using (var fixture = new MenuFixture())
+            {
+                var edits = MenuFixture.RandomEdits(fixture.Root, new System.Random(seed), 9, new[] { fixture.IconA, null }, settings: true);
+                var draft = MenuSave.Draft(fixture.Root, edits, null, out _);
+                string expected = MenuFixture.Dump(MenuBuild.Paginate(draft.Root, draft.NextText, draft.NextIcon));
+                string before = MenuFixture.Preview(fixture.Root);
+                var removals = MenuSave.Removals.Of(draft);
+                var outcome = MenuSave.Save(fixture.Root, edits, null, removals);
+                if (!outcome.Saved)
+                {
+                    Assert.True(Refusal(outcome.Message), outcome.Message);
+                    Assert.AreEqual(before, MenuFixture.Preview(fixture.Root), "a refused save changes nothing");
+                    return;
+                }
+                Assert.AreEqual(expected, MenuFixture.Preview(fixture.Root), "the preview after saving");
+                Assert.AreEqual(expected, MenuFixture.Build(fixture.Root), "VRCFury's build");
+                var left = MenuSave.SavedRemovals(fixture.Root, MenuBuild.Run(MenuInputs.Read(fixture.Root)), out _);
+                Assert.AreEqual(removals.Items.Count, left.Count, "every item left out is found again, as itself");
+            }
+        }
+
+        // An item's id doesn't follow its place in its menu: a control added before it elsewhere leaves pending edits on it.
+        [Test]
+        public void AControlAddedBeforeAnItemLeavesItsEditsOnIt()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            {
+                var clothes = fixture.Root.GetComponent<VRCAvatarDescriptor>().expressionsMenu.controls.First(c => c.name == "Clothes").subMenu;
+                string glasses = MenuTree.Walk(MenuBuild.Run(MenuInputs.Read(fixture.Root)).Root).First(e => e.Node.Name == "Glasses").Node.Id;
+                clothes.controls.Insert(0, MenuFixture.Control("Gloves", ControlType.Toggle, "Hat"));
+                var draft = MenuDraft.Apply(MenuBuild.Run(MenuInputs.Read(fixture.Root)), new List<MenuEdit> { new MenuEdit { kind = MenuEditKind.Rename, id = glasses, text = "Shades" } });
+                CollectionAssert.AreEqual(new[] { "Gloves", "Hat", "Shades" }, MenuTree.Walk(draft.Root).First(e => e.Node.Name == "Clothes").Node.Page.Items.Select(n => n.Name));
+            }
+        }
+
         [Test]
         public void PicturesBecomeMenuIconsVrChatAccepts()
         {
             string file = Path.Combine(Path.GetTempPath(), "orbiters-menu-icon-" + Guid.NewGuid().ToString("N") + ".png");
             var source = new Texture2D(600, 300, TextureFormat.RGBA32, false);
+            // A picture of its own: an identical one imported before would be used again.
+            source.SetPixel(3, 3, new Color((float)new System.Random().NextDouble(), .5f, .25f));
+            source.Apply();
             string asset = null;
-            bool hadFolder = AssetDatabase.IsValidFolder(MenuIcons.Folder);
+            var temp = new TempAssets();
             try
             {
                 File.WriteAllBytes(file, source.EncodeToPNG());
@@ -765,8 +802,11 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 var preview = MenuIcons.Resolve(edit);
                 Assert.NotNull(preview, "the picture shows before anything is imported");
                 Assert.False(EditorUtility.IsPersistent(preview));
-                var texture = MenuIcons.Import(file);
+                var texture = MenuIcons.Import(file, out bool created);
+                Assert.True(created);
                 asset = AssetDatabase.GetAssetPath(texture);
+                Assert.AreSame(texture, MenuIcons.Import(file, out bool again), "the same picture imported again is the same icon");
+                Assert.False(again, "no “name 1.png”");
                 StringAssert.StartsWith(MenuIcons.Folder + "/", asset);
                 var importer = (TextureImporter)AssetImporter.GetAtPath(asset);
                 Assert.AreEqual(256, importer.maxTextureSize);
@@ -779,8 +819,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             {
                 Object.DestroyImmediate(source);
                 if (File.Exists(file)) File.Delete(file);
-                if (asset != null) AssetDatabase.DeleteAsset(asset);
-                if (!hadFolder) AssetDatabase.DeleteAsset(MenuIcons.Folder);
+                temp.Add(asset);
+                temp.Dispose();
             }
         }
     }

@@ -1,6 +1,6 @@
 # My Avatar
 
-## 0.9.9 — 2026-10-12
+## 0.9.9 — 2026-10-13
 
 - **Optimization**: a new section, framed like face tracking, gathers everything that makes the avatar lighter. It shows
   the rank VRChat gives the avatar now (from the SDK, on the platform the project builds for) and offers **Small**, **Big** or **Custom**
@@ -17,7 +17,8 @@
   See [Optimization](#optimization).
 - **Download size**: the section estimates the file players download, drawn as VRChat's own loading bar draws it over
   an avatar that starts downloading ("0% / 16.8 MB", its stripe drifting left), now and at upload, with how long the
-  avatar takes to show once downloaded, in orange over VRChat's limits (200 MB, 10 MB on Quest). Textures, meshes,
+  avatar takes to show once downloaded, in orange over VRChat's limits on the bundle the SDK uploads (200 MB, 10 MB on
+  Quest; unpacked 500 MB, 40 MB on Quest). Textures, meshes,
   blendshapes, animations and shaders are counted at the size the build stores them, then compressed as VRChat
   compresses them: textures are measured on the data the build stores (the upload's copies included), the rest with
   ratios measured on real bundles. On MasculineCanine (Big) it says 14.5 MB for a 15.3 MB bundle, which VRChat shows
@@ -32,6 +33,11 @@
   to 4 m) from how much of the avatar it covers, measured on the meshes, never larger than it is, and compressed for the
   platform; your textures, materials and import settings stay as they are. Copies are kept in `Library` and reused by
   the next upload. The **At upload** estimate (texture memory, download) counts them with every other change.
+  Quick optimization (0.6.0–0.9.8) and what it remembered are gone: textures it optimized keep the PC override it wrote
+  in their import settings (max size, format, crunch), and avatars whose shared textures it copied keep those copies
+  (`Assets/Orbiters/MyAvatar/<id>/Textures` and `Materials`). To go back to the originals, untick **Override for PC**
+  in those textures' import settings and put the original materials back on the renderers; the upload's copies are then
+  made from the originals.
 - **Small** also uploads the same image once when it is imported twice under two names (the same file bytes and import
   settings: a package bringing its own copy of a texture the avatar already has).
 - **Fewer polygons** (Small within 4 mm, Big within 8 mm, a slider under Custom from half a millimetre): each mesh loses
@@ -77,6 +83,23 @@
   Also new there: `AvatarBounds`, the avatar built as an upload builds it in a hidden copy (`HiddenAvatarBuild`), the
   checks (`Orbiters.Toolkit.Editor.VRChat.Checks`), and `VrcFury.IsComponent` / `ModularAvatar.IsComponent`. Its blendshape pruning now also works on meshes imported without Read/Write (outside Play
   mode).
+- **Edit menu**: settings changed together are written in the order made; a menu or parameters asset that other
+  avatars, Full Controllers or prefabs use is copied before it changes (Full Controller items are read-only); the
+  upload's plan is taken before Modular Avatar builds its menu, so its items stay with **Remove default menu**; left-out
+  items are matched by type and parameter too; the window stays open when a save fails; double-click renames the folder
+  itself; number fields keep Backspace and Ctrl+Z; each change is one Undo step; parameters OSC apps drive (heart rate,
+  chatbox…) are never frozen. Items of VRCFury, Modular Avatar or a Full Controller left out before this version have
+  to be left out once more.
+- GoGoLoco, face tracking and the Tools section show what they will install (packages and Creator Companion
+  repositories) before installing anything.
+- Broken materials: a new backup for each original and every fix one Undo step; a texture drop's Undo no longer takes
+  your other changes with it.
+- Gallery: deleting a review needs a deliberate second press, a failed edit keeps what you typed, likes stay in sync,
+  pictures are size-capped and freed, versions compare as versions; the AI's gallery tool only takes pictures from the
+  window or the project.
+- Novabeast and Rexouium looks copy a shared parameters asset before changing it; face tracking converts eye-tracking
+  conditions in every layer and its live test rebuilds when the avatar changed; buttons a section turned off stay off
+  after an action.
 
 ## 0.9.8 — 2026-10-10
 
@@ -490,8 +513,8 @@ project builds for: PC, or Quest when the build target is Android (switch the pl
     the animations move their curves onto it. Meshes whose materials an animation swaps, or that something points at,
     stay apart.
   - polygons within 8 mm instead of 4, and textures sized to stay sharp from 3 m instead of 1 (see below).
-  - textures upload crunched (colour and masks, quality 75; normal maps keep BC5): crunch shrinks the download, not
-    memory. Metallic, roughness and smoothness maps get half the size the others get.
+  - textures upload crunched (colour and masks, quality 75; normal maps keep their format): crunch shrinks the download,
+    not memory. Metallic, roughness and smoothness maps get half the size the others get.
   - the menu's icons upload at 64 px at most: the menus holding a larger one are copied (the menu assets stay as they
     are), and point at copies of the icons compressed for the platform (BC7, ASTC 6x6 on Quest).
   - objects and the parameters only animators use get the shortest names (a, b, ... aa): the build's copies of the
@@ -517,7 +540,10 @@ project builds for: PC, or Quest when the build target is Android (switch the pl
 Click the chosen tile again to turn optimization off. The setting is saved on the component and runs when you build or
 upload (structure at build step -1100: after VRCFury, Modular Avatar and MCB, before d4rkAvatarOptimizer and
 AvatarOptimizer; materials at 9000, after Poiyomi locks). Play mode (Gesture Manager, Av3Emulator) keeps the avatar as
-it is. The console says what each upload removed.
+it is. The console says what each upload removed. The changes to objects and meshes build on one another, and some
+rewire several objects and their animations at once: one that fails part-way stops the upload rather than upload a
+half-changed avatar (the console and the **At upload** estimate say which; turn it off under **Custom** to upload). A
+material or texture change that fails leaves the materials as they render now, and the upload goes on.
 
 Under the tiles, **At upload** estimates the ranks of the uploaded copy: a hidden copy of the avatar (never in your
 scene) goes through the same changes and is measured with the SDK, then each stat that changes is listed with what sets
@@ -537,8 +563,13 @@ avatar's size about 5% under the bundle the SDK uploads (MasculineCanine: 17.7 M
 the bar. A build of MasculineCanine at Big was 15.3 MB (14.5 MB as VRChat shows it); the estimate said 14.5 MB. Until
 its textures are measured (a moment after the section opens), they are estimated from their source images. Blendshapes
 count as the build keeps them: MCB's custom base meshes lose the shapes nothing animates at every upload, and what
-VRCFury and Modular Avatar will animate counts as used. Over 200 MB (PC) or 10 MB (Quest), VRChat refuses the upload:
-the caption turns orange.
+VRCFury and Modular Avatar will animate counts as used. VRChat refuses an upload whose bundle is over 200 MB (10 MB on
+Quest), or over 500 MB unpacked (40 MB on Quest): the caption turns orange and says which. These limits apply to the
+bundle itself, not the 5% smaller size VRChat shows. The ranks count texture memory in the formats the build will have
+(the upload's copies included), not as the editor holds it (often uncompressed).
+
+When the estimate fails, the card says why and keeps it until something changes or you click **Try again**: nothing
+measures it again behind your back.
 
 Under the bar, how long the avatar takes to show once downloaded: unpacking (LZMA), loading its assets and setting it
 up (animator layers, PhysBones), measured on MasculineCanine on a desktop PC (bundle opened in 830 ms, assets loaded in
@@ -553,7 +584,11 @@ of the mesh moves (expressions, visemes, small toggles) are kept exactly as they
 flexes, pose correctives) are carried through. Each try is measured: 99% of the original points within the budget and
 none beyond twice it, at rest, as the avatar stands now and with each broad shape at full weight; and nothing folds (one
 point in 500 at most shades over 60 degrees differently: a fold or a flipped triangle shows even where it stays close).
-Borders, seams, weights and material slots are kept. On MasculineCanine, the blendshapes its expressions and correctives
+Borders, seams, weights and material slots are kept. The budget is measured on the avatar through each mesh's bones and
+bind poses (a mesh imported at scale 100, switched off at rest or given a larger culling box loses what it would at
+scale 1, shown, with its own box). The estimate simplifies one mesh after another in the background; a mesh is known
+by everything it holds (vertices with their UVs, normals and weights, triangles, bind poses, blendshape offsets), so one
+changed in Blender is simplified again. On MasculineCanine, the blendshapes its expressions and correctives
 use lock most of the body, so the gain is small: at 8 mm its upload loses 506 polygons, invisibly (renders of the
 original and the result differ on 0.06% of their pixels). Meshes without expressions (clothing, props, hair) gain more.
 The estimate counts every blendshape as used (it can't see what build tools will animate) and says about 1,000 for
@@ -562,7 +597,8 @@ MasculineCanine.
 The simplifier is **AlterMesh** (`Orbiters.AlterMesh`, in Orbiters Toolkit), derived from
 [Meshia Mesh Simplification](https://github.com/RamType0/Meshia.MeshSimplification) 3.2.0 by Ram.Type-0 (MIT, credited
 in the About window). Changed from Meshia: blendshape normal and tangent offsets are no longer normalized at each
-collapse (it smeared their shading), submeshes left empty no longer crash it, and zero-length bit counts no longer throw.
+collapse (it smeared their shading), submeshes left empty no longer crash it, zero-length bit counts no longer throw,
+and a simplification cancelled (before a script reload) or failing frees its native memory at once.
 
 ### Textures
 
@@ -576,16 +612,26 @@ a texture is **only ever made smaller**: one already smaller than the distance n
 
 Each changed texture uploads as a copy in the format with the best quality per byte of texture memory: BC1 for colour
 whose alpha is unused (measured on the pixels, not taken from the importer), BC7 when alpha is used, BC5 for normal maps
-(DXT5nm ones keep their layout), with mipmaps and mipmap streaming. A crunched texture stays crunched with its quality.
-On Quest a texture keeps its Android format unless **Quest textures** is on. Ramps, lookup tables, gradients, SDF maps,
+(DXT5nm and crunched ones keep their layout; one already in BC5 at its size isn't encoded again), with mipmaps and
+mipmap streaming, not readable (a readable texture keeps a second copy in memory in game). A crunched texture stays
+crunched with its quality. Halving metallic and roughness maps halves the size they would have, with or without
+**Textures sized to the distance**. On Quest a texture keeps its Android format unless **Quest textures** is on (crunch
+on Android or iOS is ETC); an iOS project reads the iPhone import settings. Ramps, lookup tables, gradients, SDF maps,
 very thin strips, HDR images, render textures, sprites and textures that are not plain imported images are left alone,
-and so is anything that would take more memory.
+and so is anything that would take more memory. Only the texture changes (sizes, Quest textures, crunch, smaller
+metallic and roughness) touch textures: under **Custom** without them, every texture uploads as it is. The same image
+imported twice gets the size the most demanding of its uses needs, since one of them takes the others' places.
 
-The copies are made from the texture as imported (halved on the GPU step by step, then compressed) and put on copies of
-the materials that show them, the materials animations swap in included; the build's copies of the animations point at
-them. Your textures, materials and import settings never change, so there is nothing to undo. Copies are kept in
-`Library/OrbitersMyAvatar/UploadTextures` by the image's contents and the copy's size and format (the newest 600), so the
-next upload reuses them. **At upload** shows the texture memory (VRAM, as VRChat ranks it, not download size) before and
+The copies are made from the image file itself when Unity's importer only passes its pixels through (PNG and JPG colour
+and mask images: nothing is compressed twice), else from the texture as imported, never scaled up (a texture the editor
+holds smaller, through mipmap streaming or Build Settings' size override, uploads as it is). They are halved on the GPU
+step by step; their mips keep a cut-out's coverage when the import does (**Mip Maps Preserve Coverage**), then they
+are compressed and put on copies of the materials that show them, the materials and textures animations swap in
+included; the build's copies of the animations point at them. Every copy is made before anything changes: one that
+fails leaves the upload's textures as they are. Your textures, materials and import settings never change, so there is
+nothing to undo. Copies are kept in `Library/OrbitersMyAvatar/UploadTextures` by the image's contents and the copy's size
+and format (up to 1 GB, those used longest ago go first), so the next upload reuses them; the estimate keeps only the
+upload's own there. **At upload** shows the texture memory (VRAM, as VRChat ranks it, not download size) before and
 after, and the download counts the copies with every other change.
 
 ### d4rkAvatarOptimizer
@@ -597,27 +643,44 @@ Avatar is not associated with d4rkAvatarOptimizer.
 
 ## Checks
 
-**Check** builds a hidden copy of the avatar the way an upload does: every build step in its order (VRCFury, Modular
-Avatar, MCB, face tracking, the menu editor...), one per editor frame, in its own preview scene. VRCFury's step freezes
-the editor for a few seconds, as it does at upload. Left out: Poiyomi's material lock and the build cache (they write to
-the project), My Avatar's optimization (it renames objects and parameters) and VRCFury's parameter compressor (it
-reshuffles the synced parameters), so issues name things as you made them. The copy is closed once checked; your avatar
-never changes. Each group shows "Nothing to fix" or its problems (red) and warnings (orange), each with what happens in
-game, how to fix it and where it is.
+**Check** builds a hidden copy of the avatar the way an upload does: the VRChat SDK's build steps in its order (VRCFury,
+Modular Avatar, MCB, face tracking, the menu editor...), all at once as at upload, for the current build target, in its
+own preview scene. The editor pauses while it builds, as it does at upload; **Cancel** on its progress bar stops the
+check and brings the last results back. Left out: Poiyomi's material lock and the build cache (they write to the
+project), My Avatar's optimization (it renames objects and parameters) and VRCFury's parameter compressor (it reshuffles
+the synced parameters and may ask whether to), so issues name things as you made them. VRCFury doesn't ask about Write
+Defaults on the copy: they stay as they are. What VRCFury would stop the build on with a question (more than 256
+contacts or 8192 expression parameters, desktop shaders with Android or iOS as the build target) is reported as an
+**Upload** problem instead, without building; when the other platform's version has one, the Quest group says it
+couldn't be compared. The copy is closed once checked and what its build wrote (VRCFury's build folder, the build cache)
+is deleted; your avatar never changes. Each group shows "Nothing to fix" or its problems (red), warnings (orange) and
+notes (grey), each with what happens in game, how to fix it and where it is. When the avatar changes since (its
+objects, any component, its menus, parameters, controllers, clips, materials, meshes or textures), the result says to
+check again.
 
 - **Menu and parameters**: menus with more than 8 controls (the Action Menu shows 8: the others can't be reached),
   controls on a parameter that isn't an expression parameter (VRChat ignores them) or that no animator has (they move
-  nothing), submenu controls without a menu, and synced parameters no animator reads (bits of the 256 sent for nothing).
-- **Animators**: in every playable layer, transitions and blend trees reading a parameter their controller doesn't
-  have (they never change), and states nothing leads to, from the entry, Any State and the states reached, through
-  sub-state machines.
-- **Holes in the body**: a body shape that hides skin under clothing (Shrink_*, Hide_*) left on at rest while some
-  clothing can be toggled off, and no animation sets it back: with the clothing off, the skin shows a hole.
-- **Quest**: materials whose shader isn't one of VRChat's mobile shaders, components Quest removes (Unity constraints,
-  lights, sounds, cloth, physics, cameras, Final IK: the SDK's PC-only list), and a Poor or Very Poor rank on Quest. When
-  another avatar in the open scenes has the same blueprint (the other platform's version), it is built too and the
-  synced parameters compared: VRChat matches them between versions by their place in the list, so both need the same
-  ones, of the same types, in the same order.
+  nothing), puppets moving a parameter that isn't a Float or one parameter with two axes, values a parameter can't hold
+  (Ints hold 0 to 255, Floats -1 to 1), submenu controls without a menu, parameters listed twice (unless VRCFury, which
+  removes them at upload, is installed) and synced parameters no animator reads (bits of the 256 sent for nothing).
+  Sub-parameters a control keeps from an earlier type are ignored, as VRChat ignores them.
+- **Animators**: in every playable layer, transitions, blend trees (a synced layer's own too) and states' speed, time,
+  mirror and cycle offset reading a parameter their controller doesn't have (they never change), parameter drivers
+  setting or copying a parameter no layer and no expression parameter has (they do nothing), and states nothing leads
+  to, from the entry, Any State and the states reached, through sub-state machines.
+- **Holes in the body**: a body shape that hides skin under clothing (Shrink_*, Hide_*) left on at rest while the
+  clothing over that skin can be toggled off (its object or its renderer), nothing always worn covers it and no
+  animation sets the shape back: with the clothing off, the skin shows a hole. Clothing elsewhere (a hat over a shrunk
+  chest) doesn't count.
+- **Quest**: for the version Quest players see (the avatar's Android version when it has one; else this one, when the
+  build target is Android or iOS or most of its materials use VRChat's mobile shaders), materials whose shader isn't one
+  of VRChat's mobile shaders, components Quest removes (Unity constraints, lights, sounds, cloth, physics, cameras, Final
+  IK: the SDK's PC-only list), and a Poor or Very Poor rank on Quest. A PC-only avatar gets a note instead. The other
+  platform's version (its per-platform override in the SDK's build panel, or the first avatar in the open scenes with
+  the same blueprint whose materials are made for the other platform; copies for the same platform don't count) is
+  built too and the synced parameters compared: VRChat matches them between versions by their place in the list, so
+  both need the same ones, of the same types, in the same order. VRCFury puts the Quest version's in the PC version's
+  order at upload, once this computer uploaded the PC version: then only what the order can't fix is a problem.
 
 ## Export to VRM
 
@@ -672,7 +735,9 @@ Poiyomi's markers and the original shader of a locked material, lilToon's versio
 **Fix materials** fixes them all in one Undo step. Materials in `Assets` are changed where they are, so every avatar
 using one renders again, and each original is kept beside it as "name (old).mat" (its own GUID, labelled
 `MyAvatarBackup`, never listed as broken itself; it renders again as made once its shader is installed); materials inside a package or a model are copied to `Assets/Orbiters/MyAvatar/MaterialEdits/`
-and assigned to this avatar's renderers only. The Console lists what changed. The `myavatar_materials` MCP tool
+and assigned to this avatar's renderers only. Fixing again after an Undo uses the same "(old)" backup when it holds the
+same original (an original imported again since gets "name (old) 1.mat"), and the copy the Undo left unused; a fix that
+fails midway puts everything back and removes the files it made. The Console lists what changed. The `myavatar_materials` MCP tool
 (`inspect`, `fix`) does the same on any scene avatar, with or without My Avatar on it.
 
 ## Thumbnail
@@ -749,6 +814,9 @@ too) and its ear size. A hidden feather group is left out of the upload with its
 textures with it. A Novabeast shows its chest fluff, collar, goggles and mane as chips and its breasts and tail size as
 sliders. A hidden part stays hidden in VRChat: its toggle leaves the menu and its synced bit is freed (it is a shape of
 the body mesh, which stays). A slider sets where it starts in VRChat; the upload starts from the avatar's own pose.
+Looks change this avatar alone: when its expression parameters are shared (with another avatar in the open scenes,
+another prefab of its package such as its other variants, or they sit in a package), the avatar gets its own copy under
+`Assets/Orbiters/MyAvatar/Parameters/` first. Undo and Redo show every chip and slider as the avatar is.
 
 ## Avatar budget
 
@@ -763,7 +831,8 @@ Buttons for tools that go with My Avatar, each marked **Install** until it is in
   then puts its Gesture Manager object at the scene root, or selects the one already there.
 - **Unit Git**: opens Unit Git, after installing it when missing.
 
-An install goes through VPM like any optional dependency; the tool opens once Unity has reloaded.
+An install shows what it downloads first (each package, and the VPM repositories it adds to your Creator Companion,
+which every project uses), then goes through VPM once you accept; the tool opens once Unity has reloaded.
 
 ## Menu
 
@@ -793,7 +862,12 @@ follows the avatar live: change a toggle or a menu asset and it updates.
 - **Settings**: the side panel shows the selected item's type, parameter and value, what it starts at when the avatar
   loads, and whether its parameter is saved and synced, and changes them. They are written on Save to your own VRCFury
   Toggle (toggle, hold button or slider, its default, saved) or to the avatar's own menu (type, parameter, value) and
-  parameters asset (default, saved, synced); an item from a package says its settings stay as its creator made them.
+  parameters asset (default, saved, synced), copied first like the menus when something else uses them, in the order
+  they were made: a default set after picking another parameter goes to that parameter, and a toggle made a slider gets
+  its slider's starting point. Values stay within what VRChat keeps (whole numbers 0 to 255, decimals -1 to 1); syncing
+  one more parameter is refused past 256 synced bits unless VRCFury compresses them at upload. A VRCFury Full
+  Controller's items (VRCFury gives its parameters their own names at upload), Modular Avatar's and a package prefab's
+  say their settings stay as their creator made them.
 - **Leave out**: the red cross at an item's top right (or **Leave out** in the side panel) takes it out of both menus on
   pointer down. Left-out items wait under the Action Menu, in **Left out of the upload**; a click puts one back where
   it was. A place filled up since goes on over a "Next" page: VRCFury splits it, and without VRCFury a "Next" folder
@@ -813,8 +887,11 @@ follows the avatar live: change a toggle or a menu asset and it updates.
 
 **Save** writes each change where it belongs, in one Undo step:
 
-- the avatar's own menu assets are edited (names, icons, order, items moved between them); a menu asset from a package
-  or used by another avatar is copied into `Assets/Orbiters/MyAvatar/Menus/` first and the copy put in its place;
+- the avatar's own menu assets are edited (names, icons, order, items moved between them); a menu or parameters asset
+  from a package, or used by anything else (another avatar, a prefab, another scene, a menu outside the avatar's, a Full
+  Controller), is copied into `Assets/Orbiters/MyAvatar/Menus/` first and the copy put in its place. A new folder in the
+  avatar's menu is a menu of its own even when it only holds what VRCFury moves into it. Copies, new menus and imported
+  pictures a save taken back with Ctrl+Z leaves behind are deleted at a later Save, once nothing uses them;
 - your own VRCFury Toggles and Puppets (in your scene, not from a package's prefab) get their new menu path and icon,
   and your own Modular Avatar Menu Items their new name (label) and icon;
 - everything else (Full Controller menus, prefabs from packages, the folders VRCFury makes for menu paths) is left as it
@@ -824,13 +901,19 @@ follows the avatar live: change a toggle or a menu asset and it updates.
 Then, like the texture Save, it saves the assets and the avatar's scene (with Unit Git, also a local "menu change"
 checkpoint; nothing is pushed). Ctrl+Z still puts the menu back as it was.
 
-Left-out items and **Remove default menu** are kept on the My Avatar component; the menu assets don't change. They act
-at upload, on the build copy after VRCFury: the items go (a folder left empty goes too, and pages close up), and so does
+Left-out items and **Remove default menu** are kept on the My Avatar component; the menu assets don't change. Each
+left-out item is kept with what it is (its type, parameter and the component behind it): a new item of the same name in
+its place stays in, and one missing for now (an accessory left out of the build) stays saved and is left out again once
+it is back. What goes is worked out before Modular Avatar builds, so **Remove default menu** keeps Modular Avatar's items
+and items on its **More** pages are found; only VRCFury's own pages are followed as pages (a folder of yours called
+"Next" is a folder). They act at upload, on the build copy after VRCFury: the items go (a folder left empty goes too, and pages close up), and so does
 what only they switched. Each parameter only they set keeps its default, freeing its synced bits, unless an item still
 in the menu sets it; conditions on it are decided, states and blend tree branches that can no longer play are removed,
 a layer left playing one constant pose is written into the avatar and removed, objects left hidden for good are deleted,
 and materials, textures and animations nothing uses any more stay out of the upload; the parameter budgets (XRay Gizmos,
-My Avatar) count those bits as free already. What the menu didn't switch keeps
+My Avatar) count those bits as free already (not those a submenu another folder still opens keeps, nor those of a
+toggle another of its exclusive tag switches off). Parameters apps set over OSC (heart rate, chatbox and text displays,
+OSCmooth, VRCOSC, by the names those apps use) are never fixed. What the menu didn't switch keeps
 working (the Rexouium's petting still answers to its contacts: only its menu switch goes). The Console sums it up after
 each upload ("[My Avatar] Menu: ..."). An object only moved out of sight rather than switched off stays, like the
 Rexouium's credits plane, which rests shrunk inside its chest once its Credits item is gone.
@@ -840,7 +923,8 @@ Orbiters' toggles, sliders and folders without an icon get a white dot, a gauge 
 icon.
 
 Before keeping anything, Save works out the menu again from what it wrote: when VRCFury would not build exactly the menu
-you edited, nothing is kept and the editor says why. VRCFury finds items by name, so two items with the same name in one
+you edited, or the settings written are not the ones edited, nothing is kept and the editor says why (closing the window
+with **Save** then keeps it open). VRCFury finds items by name, so two items with the same name in one
 menu can't trade places; rename one first. A folder that opens the same menu as another folder (a submenu used twice,
 or one looping back to a menu above it) moves like any other item when it is in the avatar's own menu assets, and keeps
 opening that menu. Such a folder that VRCFury or Modular Avatar adds (a Full Controller's or an installer's) stays where
@@ -856,8 +940,9 @@ under the text show each part: green with most of its shapes, amber with some, g
 missing shapes). A part without any of its shapes is left out of the upload's parameters (no bits spent on it) and comes
 back by itself once the face has its shapes. One click then:
 
-- downloads Adjerry91's Face Tracking Templates (and VRCFury) through VPM when they are missing; the setup finishes once
-  Unity has reloaded its scripts;
+- when Adjerry91's Face Tracking Templates (or VRCFury) are missing, shows what it would download first: each package,
+  and the VPM repositories it adds to your Creator Companion (every project uses them); once you accept, it downloads
+  them and the setup finishes once Unity has imported them (the section says so, or why not);
 - puts the template for that standard on the avatar, pointed at the face mesh (one Undo step).
 
 When you upload, after VRCFury has merged the template: blendshapes it animates under the standard's names animate the

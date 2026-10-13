@@ -70,18 +70,24 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         internal static bool Shown(Options options, FeatherGroup group) =>
-            options.Descriptor.expressionParameters.parameters.First(p => p.name == group.Parameter).defaultValue < .5f;
+            !(options.Descriptor.expressionParameters?.parameters?.FirstOrDefault(p => p != null && p.name == group.Parameter)?.defaultValue >= .5f);
 
         /// <summary>Shows or hides a feather group: its toggle's default, and the scene to match.</summary>
         internal static void SetShown(Options options, FeatherGroup group, bool shown)
         {
             var root = options.Descriptor.transform;
-            var parameters = options.Descriptor.expressionParameters;
+            string name = (shown ? "Show " : "Hide ") + group.Label + " feathers";
             Undo.IncrementCurrentGroup();
             int undo = Undo.GetCurrentGroup();
-            Undo.RecordObject(parameters, (shown ? "Show " : "Hide ") + group.Label + " feathers");
-            parameters.parameters.First(p => p.name == group.Parameter).defaultValue = shown ? 0 : 1;
-            EditorUtility.SetDirty(parameters);
+            // This avatar's alone: parameters shared with its other variants are copied for it first.
+            var parameters = AvatarParameters.Own(options.Descriptor, name);
+            var parameter = parameters?.parameters?.FirstOrDefault(p => p != null && p.name == group.Parameter);
+            if (parameter != null)
+            {
+                Undo.RecordObject(parameters, name);
+                parameter.defaultValue = shown ? 0 : 1;
+                EditorUtility.SetDirty(parameters);
+            }
             foreach (string path in group.Objects)
             {
                 var target = root.Find(path);

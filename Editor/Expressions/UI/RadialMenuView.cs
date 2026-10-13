@@ -116,6 +116,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         private TextField rename;
         private string crumb;
         private VisualElement foldRing;
+        // What the last click did when it changed the page: the folder it opened (its slice, among how many), or going back.
+        private string opened;
+        private int openedSlice = -1, openedCount;
+        private bool wentBack;
 
         public RadialMenuView(IMenuEditor editor)
         {
@@ -328,7 +332,26 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             int index = Choice(p);
             if (index < 0) return;
             var slice = slices[index];
-            if (evt.clickCount >= 2 && !slice.Back && !slice.Quick && editor.CanRename(slice.Node)) { BeginRename(slice.Node); evt.StopPropagation(); return; }
+            // After a click that changed the page: the second press of a double click where the folder it opened was (its
+            // slice on the page it was on) renames that folder; any other press counts as a first click, landing on an item
+            // of the page now shown.
+            bool navigated = opened != null || wentBack;
+            bool first = evt.clickCount < 2 || navigated;
+            string folder = opened;
+            bool rename = evt.clickCount >= 2 && folder != null && openedCount > 0 && p.magnitude >= MinSize && p.magnitude <= MaxSize &&
+                          (int)((Angle(p) + 180f / openedCount) % 360 / (360f / openedCount)) == openedSlice;
+            opened = null; openedSlice = -1; wentBack = false;
+            if (rename)
+            {
+                if (editor.CanBack)
+                {
+                    editor.Back();
+                    if (data?.Page?.Items.FirstOrDefault(n => n.Id == folder) is MenuNode node && editor.CanRename(node)) BeginRename(node);
+                }
+                evt.StopPropagation();
+                return;
+            }
+            if (!first && !slice.Back && !slice.Quick && editor.CanRename(slice.Node)) { BeginRename(slice.Node); evt.StopPropagation(); return; }
             pressedIndex = index; pressedAt = evt.position; pointer = evt.pointerId;
             this.CapturePointer(evt.pointerId);
             slice.Data.experimental.animation.Scale(0.95f, 60);
@@ -367,8 +390,13 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 {
                     var slice = slices[index];
                     slice.Data.experimental.animation.Scale(1.1f, 60);
-                    if (slice.Back) { if (editor.CanBack) click = editor.Back; }
-                    else if (!slice.Quick && slice.Node.IsFolder && slice.Node.Page != null) { var folder = slice.Node; click = () => editor.Open(folder); }
+                    if (slice.Back) { if (editor.CanBack) { wentBack = true; click = editor.Back; } }
+                    else if (!slice.Quick && slice.Node.IsFolder && slice.Node.Page != null)
+                    {
+                        var folder = slice.Node;
+                        opened = folder.Id; openedSlice = index; openedCount = slices.Count;
+                        click = () => editor.Open(folder);
+                    }
                 }
                 Release();
                 click?.Invoke();
@@ -525,7 +553,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         private void OnFileDrag(DragUpdatedEvent evt)
         {
-            if (!MenuArt.Dragged(out _, out _)) return;
+            if (!MenuArt.CanDrop()) return;
             int index = Choice(Local(evt.mousePosition));
             bool ok = index >= 0 && !slices[index].Back && !slices[index].Quick;
             DragAndDrop.visualMode = ok ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;

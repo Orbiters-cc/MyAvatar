@@ -7,7 +7,13 @@ namespace Orbiters.MyAvatar.Editor
     // Small JSON files under Library/OrbitersMyAvatar. They are caches: failures never block applying textures.
     internal static class LibraryStore
     {
-        internal static string Folder => Path.Combine(Path.GetDirectoryName(Application.dataPath), "Library", "OrbitersMyAvatar");
+        internal static string Folder => Override ?? Path.Combine(Path.GetDirectoryName(Application.dataPath), "Library", "OrbitersMyAvatar");
+
+        /// <summary>
+        /// Another folder for every cache while set (tests, for the length of one: they never write the user's). Every caller
+        /// uses it meanwhile, background jobs the user started included.
+        /// </summary>
+        internal static string Override;
 
         internal static T Read<T>(string name) where T : new()
         {

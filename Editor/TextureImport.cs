@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -169,6 +170,25 @@ namespace Orbiters.MyAvatar.Editor
                 (srgb ? 1 : 0) + "\n  isReadable: 0\n  textureType: " + (normal ? 1 : 0) + "\n";
         }
 
+        /// <summary>
+        /// The import settings of a copy of a project texture: every setting of the original (max size, compression, wrap,
+        /// filter, alpha, mipmaps, each platform's size), read another way only (normal map or not, sRGB or not), under a new
+        /// GUID. A platform's chosen format goes back to automatic: one picked for the other reading (BC5 for a normal map)
+        /// would lose channels. Null when the original's settings can't be read that way (the copy then gets <see cref="Meta"/>).
+        /// </summary>
+        internal static string CopyMeta(string original, bool normal, bool srgb)
+        {
+            if (string.IsNullOrEmpty(original) || !original.Contains("TextureImporter:")) return null;
+            var guid = new Regex(@"(?m)^guid: [0-9a-fA-F]{32}[ \t]*\r?$");
+            var type = new Regex(@"(?m)^(  textureType: )-?\d+");
+            var color = new Regex(@"(?m)^(    sRGBTexture: )\d+");
+            if (!guid.IsMatch(original) || !type.IsMatch(original) || !color.IsMatch(original)) return null;
+            string meta = guid.Replace(original, "guid: " + Guid.NewGuid().ToString("N"), 1);
+            meta = type.Replace(meta, "${1}" + (normal ? 1 : 0), 1);
+            meta = Regex.Replace(meta, @"(?m)^(    textureFormat: )-?\d+", "${1}-1");
+            return color.Replace(meta, "${1}" + (srgb ? 1 : 0), 1);
+        }
+
         // ---- The slot an image lands in ---------------------------------------------------------------------
 
         // How a slot reads its image: "normal", "color" (sRGB) or linear "data" (metallic, smoothness, roughness, occlusion,
@@ -213,15 +233,18 @@ namespace Orbiters.MyAvatar.Editor
             }
             if (inPlace.Count + copies.Count == 0) return result;
             if (copies.Count > 0) EnsureFolder(folder + "/Textures");
-            // One import pass; copies get the minimal settings of a dropped file, like ImportAsync's copies.
+            // One import pass; copies keep the original's settings but how they are read (CopyMeta).
             AssetDatabase.StartAssetEditing();
             try
             {
                 foreach (var importer in inPlace) importer.SaveAndReimport();
                 foreach (var (texture, reading, copy) in copies)
                 {
-                    File.Copy(Path.Combine(root, FileUtil.GetPhysicalPath(AssetDatabase.GetAssetPath(texture))), Path.Combine(root, copy));
-                    File.WriteAllText(Path.Combine(root, copy) + ".meta", Meta(reading == "normal", reading == "color"));
+                    string source = Path.Combine(root, FileUtil.GetPhysicalPath(AssetDatabase.GetAssetPath(texture)));
+                    File.Copy(source, Path.Combine(root, copy));
+                    string original = File.Exists(source + ".meta") ? File.ReadAllText(source + ".meta") : null;
+                    File.WriteAllText(Path.Combine(root, copy) + ".meta",
+                        CopyMeta(original, reading == "normal", reading == "color") ?? Meta(reading == "normal", reading == "color"));
                     AssetDatabase.ImportAsset(copy);
                 }
             }

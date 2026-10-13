@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using MCPForUnity.Editor.Helpers;
 using MCPForUnity.Editor.Tools;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace Orbiters.MyAvatar.Editor.MCP
 {
@@ -29,7 +29,7 @@ namespace Orbiters.MyAvatar.Editor.MCP
             try
             {
                 var p = arguments?.ToObject<Parameters>() ?? throw new ArgumentException("Parameters are required.");
-                var root = BrokenMaterials.AvatarRoot(Resolve(p.target));
+                var root = BrokenMaterials.AvatarRoot(SceneReference.Resolve(p.target));
                 if (!root) throw new ArgumentException("target is not an object of an open scene: give an instance ID or a hierarchy path such as 'Avatar' or 'Scene:Avatar'.");
                 var broken = BrokenMaterials.Inspect(root);
                 switch (p.action)
@@ -91,45 +91,17 @@ namespace Orbiters.MyAvatar.Editor.MCP
 
         private static List<string> Names(object value)
         {
+            // Names as written, whatever the editor's language (a number is not formatted its way).
+            string Text(object item) => item is JValue v ? Convert.ToString(v.Value, CultureInfo.InvariantCulture) : Convert.ToString(item, CultureInfo.InvariantCulture);
             IEnumerable<string> names = value switch
             {
-                JArray array => array.Select(t => t.ToString()),
+                JArray array => array.Select(Text),
                 string text => text.Split(','),
-                JValue single when single.Type == JTokenType.String => single.ToString().Split(','),
+                JValue single when single.Type == JTokenType.String => Text(single).Split(','),
                 null => Enumerable.Empty<string>(),
-                _ => new[] { value.ToString() },
+                _ => new[] { Text(value) },
             };
             return names.Select(n => n.Trim()).Where(n => n.Length > 0).ToList();
-        }
-
-        // An instance ID, or a path from a scene root: "Root/Child", optionally "Scene:Root/Child".
-        private static GameObject Resolve(string reference)
-        {
-            if (string.IsNullOrWhiteSpace(reference)) throw new ArgumentException("Provide target (instance ID or hierarchy path).");
-            reference = reference.Trim();
-            if (int.TryParse(reference, out int id))
-            {
-                var found = EditorUtility.InstanceIDToObject(id);
-                var gameObject = found as GameObject ?? (found as Component)?.gameObject;
-                return gameObject && gameObject.scene.IsValid() ? gameObject : null;
-            }
-            string sceneName = null, path = reference;
-            int colon = reference.IndexOf(':');
-            if (colon > 0) { sceneName = reference.Substring(0, colon); path = reference.Substring(colon + 1); }
-            var parts = path.Split('/');
-            for (int s = 0; s < SceneManager.sceneCount; s++)
-            {
-                var scene = SceneManager.GetSceneAt(s);
-                if (!scene.isLoaded || (sceneName != null && scene.name != sceneName && scene.path != sceneName)) continue;
-                foreach (var rootObject in scene.GetRootGameObjects())
-                {
-                    if (rootObject.name != parts[0]) continue;
-                    var current = rootObject.transform;
-                    for (int i = 1; current && i < parts.Length; i++) current = current.Find(parts[i]);
-                    if (current) return current.gameObject;
-                }
-            }
-            return null;
         }
 
         private static string HierarchyPath(GameObject gameObject)

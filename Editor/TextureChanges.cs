@@ -383,8 +383,8 @@ namespace Orbiters.MyAvatar.Editor
 #endif
         }
 
-        // What a checkpoint records: the scene, the dropped textures, generated batches, and the textures whose import
-        // settings Quick optimization changed in place (their .meta holds those settings).
+        // What a checkpoint records: the scene, the dropped textures with their .meta (it holds their import settings),
+        // generated batches, and the assets the caller touched.
         internal static HashSet<string> CheckpointPaths(MyAvatar avatar) => CheckpointPaths(avatar.gameObject.scene, avatar, null);
 
         internal static HashSet<string> CheckpointPaths(UnityEngine.SceneManagement.Scene scene, MyAvatar avatar, IEnumerable<string> touched)

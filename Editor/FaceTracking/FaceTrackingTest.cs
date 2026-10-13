@@ -54,6 +54,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private readonly HashSet<object> viewers = new HashSet<object>();
         private double lastFrame, lastCheck, simulatorStart, unwatched = -1;
+        // When the quick settings last changed (applied live, not a change of the avatar), 0 once taken in.
+        private double settingsAt;
         private bool eyesActive, lipActive;
 
         private FaceTrackingTest(MyAvatar avatar, GameObject root, MyAvatarFaceTracking marker)
@@ -151,6 +153,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         {
             if (marker == null) return;
             bool smoothing = marker.smoothing != Smoothing;
+            settingsAt = Now;
             Features = marker.synced;
             Smoothing = marker.smoothing;
             if (Build != null && Build.Done && Build.Expressive != marker.expressiveMouth) { Rebuild(); return; }
@@ -249,7 +252,15 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (now - lastCheck > 2.0)
             {
                 lastCheck = now;
-                bool stale = FaceTrackingTestBuild.SignatureOf(Root) != Build.Signature;
+                string signature = FaceTrackingTestBuild.SignatureOf(Root);
+                // The quick settings changed the avatar's marker and the test shows them already: taken in once the editor
+                // reported the change (half a second), unless the build was stale before.
+                if (settingsAt > 0 && now - settingsAt > .5)
+                {
+                    settingsAt = 0;
+                    if (!Stale) Build.Rebase(signature);
+                }
+                bool stale = signature != Build.Signature;
                 if (stale != Stale) { Stale = stale; Changed?.Invoke(); }
             }
             if (now - lastFrame < FrameSeconds) return;

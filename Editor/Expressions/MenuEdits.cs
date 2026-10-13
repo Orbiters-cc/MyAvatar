@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEngine;
 using ControlType = VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu.Control.ControlType;
@@ -68,32 +69,59 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return state;
         }
 
+        // The last change, its Undo step and the group current right after it: a change of the same setting coming while
+        // nothing else was recorded (the next tick of a dragged slider) joins that step. Undo and Redo read the edits again
+        // (new objects), so a change after them starts a step of its own.
+        [NonSerialized] private MenuEdit added;
+        [NonSerialized] private int step = -1, afterStep = -1;
+        // The names of the Undo steps changes made here were recorded under.
+        [NonSerialized] private readonly HashSet<string> names = new HashSet<string>();
+
+        /// <summary>Whether an Undo step of this name is a change made here (Undo and Redo of it only change the edits).</summary>
+        public bool Made(string undoName) => undoName != null && names.Contains(undoName);
+
         public void Add(MenuEdit edit, string undoName)
         {
-            Undo.RecordObject(this, undoName);
             // Consecutive renames, icons or settings of one item are one change (a slider dragged, a name typed).
             var last = edits.Count > 0 ? edits[edits.Count - 1] : null;
-            if (last != null && last.kind == edit.kind && last.id == edit.id && (edit.kind == MenuEditKind.Rename || edit.kind == MenuEditKind.Icon || edit.kind >= MenuEditKind.Type))
-                edits[edits.Count - 1] = edit;
+            bool same = last != null && last.kind == edit.kind && last.id == edit.id && (edit.kind == MenuEditKind.Rename || edit.kind == MenuEditKind.Icon || edit.kind >= MenuEditKind.Type);
+            bool join = same && ReferenceEquals(last, added) && step >= 0 && Undo.GetCurrentGroup() == afterStep;
+            // A step of its own, named after the change: never added to what the current group held (a save, a test's last
+            // operation), and an Undo of it is known by its name (Made).
+            if (!join) Undo.IncrementCurrentGroup();
+            int group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName(undoName);
+            names.Add(undoName);
+            Undo.RecordObject(this, undoName);
+            if (same) edits[edits.Count - 1] = edit;
             else edits.Add(edit);
             revision++;
             // One Undo step per change, even when several happen in one frame.
             Undo.FlushUndoRecordObjects();
+            if (join) Undo.CollapseUndoOperations(step);
+            else step = group;
             Undo.IncrementCurrentGroup();
+            afterStep = Undo.GetCurrentGroup();
+            added = edit;
         }
 
         /// <summary>Several edits as one change (one Undo step).</summary>
         public void Add(IEnumerable<MenuEdit> list, string undoName)
         {
+            Undo.IncrementCurrentGroup();
+            Undo.SetCurrentGroupName(undoName);
+            names.Add(undoName);
             Undo.RecordObject(this, undoName);
             edits.AddRange(list);
             revision++;
             Undo.FlushUndoRecordObjects();
             Undo.IncrementCurrentGroup();
+            step = afterStep = -1;
         }
 
         public void Clear(string undoName)
         {
+            step = afterStep = -1;
             if (edits.Count == 0) return;
             Undo.RecordObject(this, undoName);
             edits.Clear();
@@ -224,10 +252,15 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         /// <summary>
         /// Where an item's settings live: its parameter's, shared by every item driving it, when the parameter is the avatar's
-        /// own; the item's own for a VRCFury toggle (it makes its parameter).
+        /// own; the item's own for a VRCFury toggle (it makes its parameter), and for a Full Controller's own parameter (VRCFury
+        /// gives it its own name at upload).
         /// </summary>
-        public static string SettingsKey(MenuNode node) =>
-            node.Origin?.Kind == MenuOriginKind.Toggle ? "item:" + node.Id : "parameter:" + MenuSave.ItemParameter(node);
+        public static string SettingsKey(MenuNode node)
+        {
+            if (node.Origin?.Kind == MenuOriginKind.Toggle) return "item:" + node.Id;
+            string parameter = MenuSave.ItemParameter(node);
+            return MenuSave.AvatarsParameter(node, parameter) ? "parameter:" + parameter : "controller:" + node.Id;
+        }
 
         /// <summary>The menu as shown in the editor and uploaded: without the items left out of the upload.</summary>
         public MenuPage Visible()
@@ -290,7 +323,11 @@ namespace Orbiters.MyAvatar.Editor.Expressions
     {
         public const string Folder = "Assets/Orbiters/MyAvatar/Menu Icons";
         public static readonly string[] Extensions = { ".png", ".jpg", ".jpeg", ".tga", ".psd", ".bmp", ".tif", ".tiff", ".gif", ".exr" };
-        private static readonly Dictionary<string, Texture2D> Files = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+        // Pictures read for the preview, with when their file was written: a picture changed since is read again.
+        private static readonly Dictionary<string, (Texture2D Texture, DateTime Written)> Files = new Dictionary<string, (Texture2D, DateTime)>(StringComparer.OrdinalIgnoreCase);
+
+        [InitializeOnLoadMethod]
+        private static void ReleaseOnReload() => AssemblyReloadEvents.beforeAssemblyReload += ReleasePreviews;
 
         public static bool IsImage(string path) => !string.IsNullOrEmpty(path) && Extensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
@@ -301,28 +338,87 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return string.IsNullOrEmpty(edit.file) ? null : Load(edit.file);
         }
 
-        /// <summary>An image file outside the project, read once into a texture that is never saved.</summary>
+        /// <summary>An image file outside the project, read into a texture that is never saved (until <see cref="ReleasePreviews"/>).</summary>
         public static Texture2D Load(string file)
         {
-            if (Files.TryGetValue(file, out var texture) && texture != null) return texture;
             try
             {
-                if (!File.Exists(file)) return null;
-                texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, name = Path.GetFileNameWithoutExtension(file) };
+                var written = File.Exists(file) ? File.GetLastWriteTimeUtc(file) : default;
+                if (Files.TryGetValue(file, out var known) && known.Texture != null && (written == default || written == known.Written)) return known.Texture;
+                if (written == default) return null;
+                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave, name = Path.GetFileNameWithoutExtension(file) };
                 if (!texture.LoadImage(File.ReadAllBytes(file))) { UnityEngine.Object.DestroyImmediate(texture); return null; }
                 texture.wrapMode = TextureWrapMode.Clamp;
-                Files[file] = texture;
+                if (known.Texture != null) UnityEngine.Object.DestroyImmediate(known.Texture);
+                Files[file] = (texture, written);
                 return texture;
             }
             catch (Exception) { return null; }
         }
 
+        /// <summary>Destroys the pictures read for the preview (the last menu editor closed, scripts reloading).</summary>
+        public static void ReleasePreviews()
+        {
+            foreach (var (texture, _) in Files.Values) if (texture != null) UnityEngine.Object.DestroyImmediate(texture);
+            Files.Clear();
+        }
+
+        /// <summary>The project's texture at <paramref name="path"/> (a project path, or a full path inside the project), or null.</summary>
+        public static Texture2D ProjectTexture(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            string project = Path.GetFullPath(Directory.GetCurrentDirectory()).Replace('\\', '/').TrimEnd('/') + "/";
+            string full = Path.GetFullPath(path).Replace('\\', '/');
+            return full.StartsWith(project, StringComparison.OrdinalIgnoreCase) ? AssetDatabase.LoadAssetAtPath<Texture2D>(full.Substring(project.Length)) : null;
+        }
+
+        /// <summary>
+        /// A sprite as a picture: its texture when it is the whole texture, else its part of the sheet cut out into a picture
+        /// file (in the project's Temp folder), imported on Save like a picture from the computer.
+        /// </summary>
+        public static void FromSprite(Sprite sprite, out Texture2D texture, out string file)
+        {
+            texture = null; file = null;
+            var source = sprite != null ? sprite.texture : null;
+            if (source == null) return;
+            var rect = sprite.rect;
+            if (Mathf.Approximately(rect.width, source.width) && Mathf.Approximately(rect.height, source.height)) { texture = source; return; }
+            var target = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            var active = RenderTexture.active;
+            var cut = new Texture2D(Mathf.Max(1, (int)rect.width), Mathf.Max(1, (int)rect.height), TextureFormat.RGBA32, false);
+            try
+            {
+                Graphics.Blit(source, target);
+                RenderTexture.active = target;
+                cut.ReadPixels(new Rect(rect.x, rect.y, cut.width, cut.height), 0, 0);
+                cut.Apply();
+                string folder = Path.Combine(Path.GetFullPath("Temp"), "Orbiters Menu Icons", MenuInputs.Key(sprite));
+                Directory.CreateDirectory(folder);
+                file = Path.Combine(folder, SafePaths.FileName(sprite.name, "Sprite") + ".png");
+                File.WriteAllBytes(file, cut.EncodeToPNG());
+            }
+            finally
+            {
+                RenderTexture.active = active;
+                RenderTexture.ReleaseTemporary(target);
+                UnityEngine.Object.DestroyImmediate(cut);
+            }
+        }
+
         /// <summary>
         /// Imports an image file as a menu icon texture: VRChat wants menu icons compressed and at most 256 pixels; they are
-        /// drawn over the menu, so alpha is transparency and there are no mipmaps.
+        /// drawn over the menu, so alpha is transparency and there are no mipmaps. The same picture imported before is used
+        /// again (<paramref name="created"/> false: saving twice makes no "name 1.png"); a file deleted since its preview was
+        /// read is imported from the preview. Null when neither is there any more.
         /// </summary>
-        public static Texture2D Import(string file)
+        public static Texture2D Import(string file, out bool created)
         {
+            created = false;
+            byte[] bytes;
+            string extension = Path.GetExtension(file).ToLowerInvariant();
+            if (File.Exists(file)) bytes = File.ReadAllBytes(file);
+            else if (Files.TryGetValue(file, out var preview) && preview.Texture != null) { bytes = preview.Texture.EncodeToPNG(); extension = ".png"; }
+            else return null;
             if (!AssetDatabase.IsValidFolder(Folder))
             {
                 string parent = "Assets";
@@ -332,10 +428,17 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     parent += "/" + part;
                 }
             }
-            string name = Path.GetFileNameWithoutExtension(file);
-            string path = AssetDatabase.GenerateUniqueAssetPath(Folder + "/" + name + Path.GetExtension(file).ToLowerInvariant());
-            File.Copy(file, path, false);
+            foreach (var existing in Directory.GetFiles(Folder).Where(IsImage))
+            {
+                if (new FileInfo(existing).Length != bytes.Length || !File.ReadAllBytes(existing).SequenceEqual(bytes)) continue;
+                var known = AssetDatabase.LoadAssetAtPath<Texture2D>(existing.Replace('\\', '/'));
+                if (known != null) return known;
+            }
+            string path = AssetDatabase.GenerateUniqueAssetPath(Folder + "/" + SafePaths.FileName(Path.GetFileNameWithoutExtension(file), "Icon") + extension);
+            SafePaths.RequireLength(Path.GetFullPath(path));
+            File.WriteAllBytes(path, bytes);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            created = true;
             if (AssetImporter.GetAtPath(path) is TextureImporter importer)
             {
                 importer.textureType = TextureImporterType.Default;

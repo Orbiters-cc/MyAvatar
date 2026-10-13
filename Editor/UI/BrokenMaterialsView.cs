@@ -22,12 +22,12 @@ namespace Orbiters.MyAvatar.Editor
             if (fixable.Count > 0)
             {
                 var actions = new VisualElement(); actions.AddToClassList("materials__actions"); Add(actions);
-                var button = MyAvatarEditor.Button(fixable.Count == 1 ? "Fix material" : "Fix " + fixable.Count + " materials", null);
+                Button button = null;
+                button = MyAvatarEditor.PressButton(fixable.Count == 1 ? "Fix material" : "Fix " + fixable.Count + " materials", () => fix(button, fixable));
                 button.AddToClassList("mcb-button--primary");
                 button.tooltip = "Move them to the shaders listed above in one step. Materials in this project are fixed where they are, so every avatar " +
                                  "using them renders again, and each original stays beside it as “name (old)”; materials inside a package or a model are copied " +
                                  "for this avatar. Undo restores everything.";
-                button.clicked += () => fix(button, fixable);
                 actions.Add(button);
             }
 #if MYAVATAR_VPM

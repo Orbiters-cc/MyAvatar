@@ -209,12 +209,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             catch (UnauthorizedAccessException) { }
         }
 
+        // Only pictures taken in through GalleryPictures are sent (the window and MCP both put them there), whatever the
+        // saved draft says.
         private static string OwnPicture(GalleryCreatorDraft draft) =>
-            !string.IsNullOrEmpty(draft.thumbnailPath) && File.Exists(draft.thumbnailPath) ? draft.thumbnailPath : null;
+            GalleryPictures.Owned(draft.thumbnailPath) && File.Exists(draft.thumbnailPath) ? draft.thumbnailPath : null;
 
         // The asset page's pictures that still exist, at most the ones the server takes in one request.
         private static List<string> Previews(GalleryCreatorDraft draft, int max = GalleryCreatorDraft.MaxPreviews) =>
-            draft.previewPaths.Where(p => !string.IsNullOrEmpty(p) && File.Exists(p)).Take(max).ToList();
+            draft.previewPaths.Where(p => GalleryPictures.Owned(p) && File.Exists(p)).Take(max).ToList();
 
         // The asset's picture: the draft's own image, else the first package's first prefab as My Avatar renders it, in
         // a file made for this request (generated) that the caller deletes.

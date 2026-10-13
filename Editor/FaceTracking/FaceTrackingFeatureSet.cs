@@ -180,9 +180,16 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             });
         }
 
-        /// <summary>The features an upload keeps: the chosen ones the face has shapes for (as <see cref="FaceTrackingBuild"/> does).</summary>
-        internal static FaceTrackingFeatures Built(MyAvatarFaceTracking marker) =>
-            marker == null ? FaceTrackingFeatures.None
-                : marker.synced & FaceTrackingDetection.Trackable(FaceTrackingStandard.Find(marker.standard), marker.face != null ? marker.face.sharedMesh : null);
+        /// <summary>
+        /// The features an upload keeps: the chosen ones the face has shapes for, that face being the one the build animates
+        /// (the marker's, or the face found on the avatar when the marker's is gone, as <see cref="FaceTrackingBuild"/> does).
+        /// </summary>
+        internal static FaceTrackingFeatures Built(MyAvatarFaceTracking marker)
+        {
+            if (marker == null) return FaceTrackingFeatures.None;
+            var descriptor = marker.GetComponentInParent<VRC.SDKBase.VRC_AvatarDescriptor>(true);
+            var face = descriptor != null ? FaceTrackingSetup.CurrentFace(marker, descriptor.transform) : marker.face;
+            return marker.synced & FaceTrackingDetection.Trackable(FaceTrackingStandard.Find(marker.standard), face != null ? face.sharedMesh : null);
+        }
     }
 }

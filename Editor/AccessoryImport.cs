@@ -143,7 +143,7 @@ namespace Orbiters.MyAvatar.Editor
                 catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException || ex is NotSupportedException || ex is ArgumentException)
                 {
                     DeleteFolder(target);
-                    drop.refused.Add(name + ": not opened. " + (ex is InvalidDataException ? ex.Message : "It is not a readable ZIP."));
+                    drop.refused.Add(name + ": not opened. " + ZipProblem(ex));
                     return;
                 }
                 Add(drop, target, target, projectRoot, staging, parents, budget, depth + 1);
@@ -169,6 +169,20 @@ namespace Orbiters.MyAvatar.Editor
                 drop.refused.Add(name + ": a source file, not a Unity model. Export it as FBX first.");
             else if (ext == ".unity") drop.refused.Add(name + ": setup scenes are not supported yet. Drop the model or prefab it uses.");
         }
+
+        // Why a ZIP was not opened, in words that lead to the fix: a path too long for Windows says how much shorter the
+        // project's folder must be; a damaged or unsafe archive says what is wrong with it; a file that can't be written
+        // or read says so; only what isn't a ZIP is called that.
+        internal static string ZipProblem(Exception ex) =>
+            ex is PathTooLongException || ex is InvalidDataException ? ex.Message
+            : ex is IOException || ex is UnauthorizedAccessException ? "It could not be extracted: " + ex.Message
+            : "It is not a readable ZIP.";
+
+        // The same for a .unitypackage: copied into the staging folder first, then read.
+        internal static string PackageProblem(Exception ex) =>
+            ex is PathTooLongException ? ex.Message
+            : ex is IOException && !(ex is EndOfStreamException) || ex is UnauthorizedAccessException ? "It could not be read: " + ex.Message
+            : "It is not a readable Unity package.";
 
         internal static void AddDoc(List<Doc> docs, string name, Func<string> read)
         {
@@ -294,7 +308,7 @@ namespace Orbiters.MyAvatar.Editor
                 preview = await UnityPackagePreview.CreateAsync(copy, index, cancellation);
             }
             catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException)
-            { review.refused = name + ": not imported, it is not a readable Unity package."; return review; }
+            { review.refused = name + ": not imported. " + PackageProblem(ex); return review; }
             review.docs = PackageDocs(index);
             review.code = preview.CodeFiles;
             review.replaced = preview.Replaced;

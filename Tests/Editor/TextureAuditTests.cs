@@ -14,15 +14,20 @@ using UnityEngine.TestTools;
 
 namespace Orbiters.MyAvatar.Editor.Tests
 {
-    // Texture sets and Quick optimization: import settings of reused textures, alpha, repeated optimizations, checkpoints,
-    // packed slots, UV layout groups, accessory scope and the manual slot menu.
+    // Texture sets: import settings of reused textures, alpha, checkpoints, packed slots, UV layout groups, accessory scope
+    // and the manual slot menu.
     public sealed class TextureAuditTests
     {
         private Scene scene;
         private readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         private readonly List<string> folders = new List<string>();
+        private TestCaches caches;
 
-        [SetUp] public void SetUp() => scene = EditorSceneManager.NewPreviewScene();
+        [SetUp] public void SetUp()
+        {
+            caches = new TestCaches();
+            scene = EditorSceneManager.NewPreviewScene();
+        }
 
         [TearDown] public void TearDown()
         {
@@ -31,6 +36,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             foreach (var folder in folders) if (AssetDatabase.IsValidFolder(folder)) AssetDatabase.DeleteAsset(folder);
             folders.Clear();
             EditorSceneManager.ClosePreviewScene(scene);
+            caches.Dispose();
         }
 
         private T Own<T>(T value) where T : UnityEngine.Object { owned.Add(value); return value; }

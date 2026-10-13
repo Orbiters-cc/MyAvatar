@@ -64,8 +64,11 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             int items = all.Count(e => !e.Node.IsFolder), folders = all.Count(e => e.Node.IsFolder);
             int pending = MenuEditorWindow.PendingChanges(root);
             int defaults = MenuUploadBuild.DefaultItems(built.Root).Count;
-            int left = avatar.menuRemovals.Count;
-            bool removed = avatar.removeDefaultMenu;
+            // The component the menu editor saves to and the upload reads (the avatar's first My Avatar), and the items it
+            // leaves out that are in the menu now.
+            var settings = MenuSave.SettingsOf(root);
+            if (settings == null) settings = avatar;
+            int left = MenuSave.SavedRemovals(root, built, out bool removed).Count;
             string state = items + ":" + folders + ":" + pending + ":" + built.VrcFury + ":" + built.ModularAvatar + ":" + defaults + ":" + left + ":" + removed;
             if (state == shown) return;
             shown = state;
@@ -96,10 +99,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 : "Leave the avatar's own menu (" + defaults + " items, as its creator made it) out of the upload, with the layers only its items switch: what they don't touch keeps working (a petting reaction stays, its on/off switch goes), and what they could only show (other materials, hidden objects) isn't uploaded.";
             Orbiters.Toolkit.Editor.ButtonInteraction.RegisterImmediateClick(strip, () =>
             {
-                Undo.RecordObject(avatar, removed ? "Put the default menu back" : "Remove default menu");
-                avatar.removeDefaultMenu = !removed;
-                EditorUtility.SetDirty(avatar);
-                PrefabUtility.RecordPrefabInstancePropertyModifications(avatar);
+                Undo.RecordObject(settings, removed ? "Put the default menu back" : "Remove default menu");
+                settings.removeDefaultMenu = !removed;
+                EditorUtility.SetDirty(settings);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(settings);
                 shown = null;
                 Refresh();
                 MenuEditorWindow.Refreshed(root);

@@ -158,7 +158,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public List<GalleryVariant> variants = new List<GalleryVariant>();
         public List<string> platforms = new List<string>();
         public List<int> bases = new List<int>();
-        public bool Compatible => state == "compatible" && variants.Count > 0;
+        public bool Compatible => state == "compatible" && release != null && variants != null && variants.Count > 0;
     }
 
     internal sealed class GalleryAsset

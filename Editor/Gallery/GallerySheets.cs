@@ -64,7 +64,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             titleRow.Add(reviews.Like);
             var creator = GalleryUI.Box("gallery-creator", body);
             var face = new Image { scaleMode = ScaleMode.ScaleAndCrop }; face.AddToClassList("gallery-creator__avatar"); creator.Add(face);
-            if (!string.IsNullOrEmpty(asset.creator?.avatarUrl)) GalleryImages.Show(face, asset.creator.avatarUrl);
+            if (!string.IsNullOrEmpty(asset.creator?.avatarUrl)) GalleryImages.ShowAvatar(face, asset.creator.avatarUrl);
             GalleryUI.Text("by " + (asset.creator?.username ?? "unknown creator") + (asset.creator?.trusted == true ? " · trusted creator" : ""), "gallery-creator__name", creator);
 
             var fit = asset.fit;
@@ -140,40 +140,44 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             GalleryUI.Box(null, body).style.height = 16;
         }
 
-        // Takes the creator's published version out of the gallery: the first press asks, the second withdraws.
-        // Copies already installed keep working.
+        // Takes the creator's published version out of the gallery: the first press asks, the second withdraws (never the
+        // second click of a double-click). Copies already installed keep working.
         private static Button WithdrawLink(int assetId, GalleryRelease release, Action withdrawn)
         {
             Button link = null;
-            bool armed = false;
-            link = GalleryUI.Button("Withdraw", async () =>
+            GalleryUI.TwoPress press = null;
+            link = GalleryUI.Button("Withdraw", () => press.Press(), "gallery-link");
+            press = new GalleryUI.TwoPress(link, armed =>
             {
-                if (!armed)
-                {
-                    armed = true; link.text = $"Withdraw {release.version}?"; link.AddToClassList("gallery-link--danger");
-                    link.tooltip = "It leaves the gallery. Copies already installed keep working.";
-                    return;
-                }
+                link.text = armed ? $"Withdraw {release.version}?" : "Withdraw";
+                link.EnableInClassList("gallery-link--danger", armed);
+                link.tooltip = armed ? "It leaves the gallery. Copies already installed keep working." : null;
+            }, async () =>
+            {
                 link.SetEnabled(false); link.text = "Withdrawing…";
                 try { await GalleryApi.WithdrawReleaseAsync(assetId, release.id); withdrawn(); }
                 catch (Exception ex)
                 {
-                    armed = false; link.SetEnabled(true); link.text = "Withdraw"; link.RemoveFromClassList("gallery-link--danger");
+                    link.SetEnabled(true); link.text = "Withdraw"; link.RemoveFromClassList("gallery-link--danger");
                     link.tooltip = "Could not withdraw it: " + ex.Message;
                 }
-            }, "gallery-link");
+            });
             link.style.marginLeft = 4;
             return link;
         }
 
-        // Markdown to readable text: headings, emphasis, links and images keep their words.
+        // Markdown to readable text: headings, emphasis, code, links and images keep their words. Only markup goes: a
+        // snake_case name, a lone * or _, "#1" and "<3" stay as written, and only real HTML tags are taken out.
         internal static string PlainText(string markdown)
         {
             string text = Regex.Replace(markdown ?? "", @"!\[[^\]]*\]\([^)]*\)", "");
             text = Regex.Replace(text, @"\[([^\]]+)\]\([^)]*\)", "$1");
-            text = Regex.Replace(text, @"^#{1,6}\s*", "", RegexOptions.Multiline);
-            text = Regex.Replace(text, @"(\*\*|__|\*|_|`)", "");
-            text = Regex.Replace(text, @"<[^>]+>", "");
+            text = Regex.Replace(text, @"^ {0,3}#{1,6}[ \t]+", "", RegexOptions.Multiline);
+            text = Regex.Replace(text, @"(`+)(?!`)(.+?)(?<!`)\1(?!`)", "$2");
+            text = Regex.Replace(text, @"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", "$2");
+            text = Regex.Replace(text, @"(?<![\w*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![\w*])", "$1");
+            text = Regex.Replace(text, @"(?<![\w_])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![\w_])", "$1");
+            text = Regex.Replace(text, @"</?[A-Za-z][A-Za-z0-9-]*(\s+[A-Za-z_:][^<>]*)?\s*/?>", "");
             return Regex.Replace(text, @"\n{3,}", "\n\n").Trim();
         }
 

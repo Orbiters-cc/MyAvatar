@@ -40,6 +40,36 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.AreEqual(new Vector2Int(300, 200), TextureOptimization.Capped(300, 200, 512));
         }
 
+        // Halving takes the size a texture has one mip level down, not a cap above it, and stops at its floor.
+        [Test] public void HalvingTakesOneMipLevelAboveItsFloor()
+        {
+            Assert.AreEqual(new Vector2Int(512, 1024), TextureOptimization.Half(new Vector2Int(1024, 2048), 64));
+            Assert.AreEqual(new Vector2Int(256, 256), TextureOptimization.Half(new Vector2Int(512, 512), 64));
+            Assert.AreEqual(new Vector2Int(64, 64), TextureOptimization.Half(new Vector2Int(64, 64), 64));
+            Assert.AreEqual(new Vector2Int(64, 32), TextureOptimization.Half(new Vector2Int(128, 64), 64));
+        }
+
+        // Crunch on Android and iOS holds ETC blocks: ETC2 when alpha is used.
+        [Test] public void MobileCrunchHoldsEtcBlocks()
+        {
+            Assert.AreEqual(TextureFormat.ETC_RGB4Crunched, TextureOptimization.MobileCrunch(false));
+            Assert.AreEqual(TextureFormat.ETC2_RGBA8Crunched, TextureOptimization.MobileCrunch(true));
+            Assert.IsTrue(TextureOptimization.Crunched(TextureOptimization.MobileCrunch(true)));
+        }
+
+        // Matcaps, rims, reflections and sphere maps are found by whole words of the slot's name: "Primary", "Trim" and
+        // "Atmosphere" are maps like any other.
+        [Test] public void DirectionMapsAreFoundByWholeWords()
+        {
+            foreach (string slot in new[] { "_MatCapTex MatCap", "_Matcap Matcap", "_MatCap2ndTex MatCap 2nd", "_RimTex Rim Light", "_ReflCube Reflection Cube", "_EnvMap Environment", "_SphereAddTex Sphere" })
+                Assert.IsTrue(TextureDensity.ViewMapped(slot), slot);
+            foreach (string slot in new[] { "_PrimaryColorTex Primary", "_TrimTex Trim", "_AtmosphereTex Atmosphere", "_MainTex Albedo" })
+                Assert.IsFalse(TextureDensity.ViewMapped(slot), slot);
+            Assert.IsTrue(TextureDensity.SurfaceMap("_MetallicGlossMap Metallic"));
+            Assert.IsTrue(TextureDensity.SurfaceMap("Body_Roughness"));
+            Assert.IsFalse(TextureDensity.SurfaceMap("Gunmetal_BaseColor"));
+        }
+
         [Test] public void DataTexturesAreExcluded()
         {
             Assert.IsNull(TextureOptimization.Exclusion("Assets/Body_BaseColor.png", "Body_BaseColor", "_MainTex Main Texture", 2048, 2048));

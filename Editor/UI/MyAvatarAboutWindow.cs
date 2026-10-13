@@ -19,7 +19,7 @@ namespace Orbiters.MyAvatar.Editor
             Author = "Enzo DUTRA / blackorbit",
             Version = PackageInfo.FindForAssembly(typeof(MyAvatarAboutWindow).Assembly)?.version,
             NoticesPath = NoticesPath,
-            Caption = "My Avatar works with these projects and downloads them through VPM when you ask; Gesture Manager's menu view, AlterMesh (from Meshia) and the thumbnail fonts ship with it. Click one to read its license.",
+            Caption = "My Avatar works with these projects and downloads them through VPM when you ask; Gesture Manager's menu view, the thumbnail fonts and GoGoLoco's logo ship with it, AlterMesh (from Meshia) with Orbiters Toolkit. Click one to read its license.",
             Logo = () =>
             {
                 var svg = AssetDatabase.LoadAssetAtPath<TextAsset>("Packages/orbiters.myavatar/Editor/UI/MyAvatarLogo.svg.txt");

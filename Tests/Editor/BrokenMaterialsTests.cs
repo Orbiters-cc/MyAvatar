@@ -306,6 +306,52 @@ namespace Orbiters.MyAvatar.Editor.Tests
             UndoFix();
         }
 
+        // The same name, another original (imported again since the first fix was undone): both are kept.
+        [Test]
+        public void AnotherOriginalGetsABackupOfItsOwn()
+        {
+            var skin = Broken("Skin", LilToon, m => { m.SetFloat("_lilToonVersion", 36); m.SetColor("_Color", Color.green); });
+            var root = Avatar();
+            Part(root, "Body", skin);
+            var entry = BrokenMaterials.Inspect(root).Single();
+            BrokenMaterials.Fix(root, null, new[] { entry });
+            UndoFix();
+            using (var values = new Saved(skin)) values.SetColor("_Color", Color.blue);
+            EditorUtility.SetDirty(skin);
+
+            var again = BrokenMaterials.Inspect(root).Single();
+            BrokenMaterials.Fix(root, null, new[] { again });
+
+            Assert.AreEqual(folder + "/Skin (old) 1.mat", again.Backup, "the other original gets the next name");
+            Assert.AreEqual(Color.green, SavedMaterial.Read(AssetDatabase.LoadAssetAtPath<Material>(entry.Backup)).Colors["_Color"], "the first backup stays as it was");
+            Assert.AreEqual(Color.blue, SavedMaterial.Read(AssetDatabase.LoadAssetAtPath<Material>(again.Backup)).Colors["_Color"]);
+            UndoFix();
+        }
+
+        // A copy is never fixed again for another avatar: each fix makes its own (an unused one goes as a generated file;
+        // this avatar is a test's, so its copies are not tracked with the user's).
+        [Test]
+        public void EachFixMakesItsOwnCopy()
+        {
+            var shared = Broken("Shared", Guid.NewGuid().ToString("N"), m => { m.SetColor("_Color", Color.red); m.SetOverrideTag("VRCFallback", "Toon"); });
+            var root = Avatar();
+            var renderer = Part(root, "Body", shared).GetComponent<Renderer>();
+            BrokenMaterials.Fix(root, null, new[] { BrokenMaterials.Inspect(root).Single() }, copyAll: true);
+            var copy = renderer.sharedMaterial;
+            assets.Add(AssetDatabase.GetAssetPath(copy));
+            Assert.False(Orbiters.Toolkit.Editor.Storage.GeneratedAssets.IsTracked(AssetDatabase.GetAssetPath(copy)), "a test's copy stays out of the user's list");
+            UndoFix();
+            Assert.AreEqual(shared, renderer.sharedMaterial);
+
+            BrokenMaterials.Fix(root, null, new[] { BrokenMaterials.Inspect(root).Single() }, copyAll: true);
+
+            var again = renderer.sharedMaterial;
+            assets.Add(AssetDatabase.GetAssetPath(again));
+            Assert.AreNotEqual(copy, again, "a new copy: the first may be someone else's now");
+            Assert.IsNull(BrokenMaterials.Problem(again));
+            UndoFix();
+        }
+
         [Test]
         public void ParticleEffectsAreNotGuessed()
         {

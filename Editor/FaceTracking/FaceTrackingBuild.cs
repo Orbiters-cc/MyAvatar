@@ -269,6 +269,13 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 .SelectMany(l => States(l.stateMachine)).SelectMany(s => Shapes(s.motion, plan.FacePath)), StringComparer.Ordinal);
             int gated = 0;
             var resting = new HashSet<AnimatorStateMachine>();
+            // The avatar's own Bool "EyeTrackingActive" is the template's Float once merged: its If and IfNot read it as over or
+            // under a half, in every layer (eye props and eye bones too, not only the face's).
+            if (eye.type == AnimatorControllerParameterType.Float)
+                foreach (var layer in fx.layers.Where(l => l.stateMachine != null))
+                    foreach (var transition in Transitions(layer.stateMachine).Where(t => t.conditions.Any(c => c.parameter == EyeTracking && (c.mode == AnimatorConditionMode.If || c.mode == AnimatorConditionMode.IfNot))))
+                        transition.conditions = transition.conditions.Select(c => c.parameter != EyeTracking || c.mode != AnimatorConditionMode.If && c.mode != AnimatorConditionMode.IfNot ? c
+                            : new AnimatorCondition { parameter = EyeTracking, mode = c.mode == AnimatorConditionMode.If ? AnimatorConditionMode.Greater : AnimatorConditionMode.Less, threshold = .5f }).ToArray();
             foreach (var layer in fx.layers)
             {
                 var machine = layer.stateMachine;
@@ -297,12 +304,6 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     resting.Add(machine);
                     gated++;
                 }
-                // The avatar's own Bool "EyeTrackingActive" is the template's Float once merged: its If and IfNot read it
-                // as over or under a half.
-                if (eye.type == AnimatorControllerParameterType.Float)
-                    foreach (var transition in transitions.Where(t => t.conditions.Any(c => c.parameter == EyeTracking && (c.mode == AnimatorConditionMode.If || c.mode == AnimatorConditionMode.IfNot))))
-                        transition.conditions = transition.conditions.Select(c => c.parameter != EyeTracking || c.mode != AnimatorConditionMode.If && c.mode != AnimatorConditionMode.IfNot ? c
-                            : new AnimatorCondition { parameter = EyeTracking, mode = c.mode == AnimatorConditionMode.If ? AnimatorConditionMode.Greater : AnimatorConditionMode.Less, threshold = .5f }).ToArray();
                 // Blinks the avatar animates itself wait while the eyes are tracked: transitions into a state that closes
                 // the eyes, not those back to one holding them open.
                 foreach (var transition in transitions.Where(t => t.destinationState != null && Raised(t.destinationState.motion, plan.FacePath).Any(blinks.Contains)))

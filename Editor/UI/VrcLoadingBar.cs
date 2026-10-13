@@ -1,3 +1,5 @@
+using System.Globalization;
+using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -14,7 +16,8 @@ namespace Orbiters.MyAvatar.Editor
         // The progress pill sits 3 px inside the bar; at 0% it is 40 px long, with one stripe 16 px wide leaning 3.5 px, 11 px
         // in at mid-height. The text starts 56 px from the bar's left end.
         private const float Inset = 3f, FillWidth = 40f, StripeStart = 11f, StripeWidth = 16f, StripeLean = 3.5f, TextLeft = 56f;
-        // The stripe drifts left by one pill length every two seconds and comes back in from the right, a pixel per tick.
+        // The stripe drifts left by one pill length every two seconds and comes back in from the right, a pixel per tick. It is
+        // drawn once and moved: a tick only shifts it, and only while it can be seen.
         private const float Drift = FillWidth / 2f;
         private const long Tick = (long)(1000f / Drift);
         private static readonly Color Back = Hex(0x172C4B), Edge = Hex(0x1E4271), Rim = Hex(0x164676), Shade = Hex(0x3F8FC3), Fill = Hex(0x48ADD8), Stripe = Hex(0x3692C7);
@@ -22,7 +25,6 @@ namespace Orbiters.MyAvatar.Editor
         private readonly Label text;
         private readonly VisualElement stripes;
         private IVisualElementScheduledItem animation;
-        private float offset;
 
         public VrcLoadingBar()
         {
@@ -41,7 +43,13 @@ namespace Orbiters.MyAvatar.Editor
             {
                 animation?.Pause();
                 double start = Time.realtimeSinceStartupAsDouble;
-                animation = schedule.Execute(() => { offset = (float)((Time.realtimeSinceStartupAsDouble - start) * Drift % FillWidth); stripes.MarkDirtyRepaint(); }).Every(Tick);
+                animation = schedule.Execute(() =>
+                {
+                    // Unity in front and the bar inside its window (not scrolled out of view): otherwise nothing repaints.
+                    if (!InternalEditorUtility.isApplicationActive || panel == null || !panel.visualTree.worldBound.Overlaps(worldBound)) return;
+                    float offset = (float)((Time.realtimeSinceStartupAsDouble - start) * Drift % FillWidth);
+                    stripes.style.translate = new Translate(-Mathf.Round(offset), 0, 0);
+                }).Every(Tick);
             });
             RegisterCallback<DetachFromPanelEvent>(_ => animation?.Pause());
         }
@@ -49,10 +57,11 @@ namespace Orbiters.MyAvatar.Editor
         /// <summary>Shows the download's size, as VRChat writes it.</summary>
         public void SetSize(long bytes) => text.text = "0% / " + Format(bytes);
 
+        // As VRChat writes it, whatever the system's language: "17.7 MB".
         internal static string Format(long bytes)
         {
             double megabytes = bytes / 1048576.0;
-            return (megabytes < 100 ? megabytes.ToString("0.#") : megabytes.ToString("0")) + " MB";
+            return megabytes.ToString(megabytes < 100 ? "0.#" : "0", CultureInfo.InvariantCulture) + " MB";
         }
 
         // The bar, its edge and the darker rim around the progress pill.
@@ -66,14 +75,14 @@ namespace Orbiters.MyAvatar.Editor
             painter.fillColor = Rim; painter.Fill();
         }
 
-        // One stripe per pill length, drifted left; the one leaving on the left comes back in on the right.
-        private void DrawStripes(MeshGenerationContext context)
+        // One stripe per pill length, the next one waiting to the right: once drifted a whole length left, it starts over.
+        private static void DrawStripes(MeshGenerationContext context)
         {
             var painter = context.painter2D;
             float top = 1f, bottom = Height - 2f * Inset - 1.5f, half = StripeLean / 2f;
-            for (int k = -1; k <= 1; k++)
+            for (int k = 0; k <= 1; k++)
             {
-                float x = StripeStart - offset + k * FillWidth;
+                float x = StripeStart + k * FillWidth;
                 painter.BeginPath();
                 painter.MoveTo(new Vector2(x + half, top));
                 painter.LineTo(new Vector2(x + StripeWidth + half, top));

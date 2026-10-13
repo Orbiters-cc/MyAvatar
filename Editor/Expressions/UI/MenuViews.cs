@@ -160,20 +160,31 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             }
         }
 
-        /// <summary>A texture dragged in: one from the project, or an image file.</summary>
+        /// <summary>Whether a picture is being dragged in (a texture or sprite of the project, an image file).</summary>
+        public static bool CanDrop() =>
+            DragAndDrop.objectReferences.Any(r => r is Texture2D || r is Sprite s && s.texture != null) || (DragAndDrop.paths ?? Array.Empty<string>()).Any(MenuIcons.IsImage);
+
+        /// <summary>
+        /// The picture dropped: a texture of the project (also one dropped from the computer's file browser), a sprite's part of
+        /// its sheet, or an image file imported on Save.
+        /// </summary>
         public static bool Dragged(out Texture2D texture, out string file)
         {
             texture = null; file = null;
             foreach (var reference in DragAndDrop.objectReferences)
             {
                 if (reference is Texture2D t) { texture = t; return true; }
-                if (reference is Sprite s && s.texture != null) { texture = s.texture; return true; }
+                if (reference is Sprite s && s.texture != null)
+                {
+                    MenuIcons.FromSprite(s, out texture, out file);
+                    return texture != null || file != null;
+                }
             }
             foreach (var path in DragAndDrop.paths ?? Array.Empty<string>())
             {
                 if (!MenuIcons.IsImage(path)) continue;
-                var asset = path.StartsWith("Assets/", StringComparison.Ordinal) || path.StartsWith("Packages/", StringComparison.Ordinal) ? AssetDatabase.LoadAssetAtPath<Texture2D>(path) : null;
-                if (asset != null) texture = asset; else file = Path.GetFullPath(path);
+                texture = MenuIcons.ProjectTexture(path);
+                if (texture == null) file = Path.GetFullPath(path);
                 return true;
             }
             return false;

@@ -24,9 +24,13 @@ namespace Orbiters.MyAvatar.Editor.Tests
             public readonly MenuEditorWindow Window;
             private readonly IPanel panel;
 
-            public Driver(GameObject root)
+            /// <param name="template">A window this one copies, as Orbiters Toolkit's capture copies a window to show it off-screen.</param>
+            /// <param name="before">Runs on the window before it is shown.</param>
+            public Driver(GameObject root, MenuEditorWindow template = null, Action<MenuEditorWindow> before = null)
             {
                 Window = ScriptableObject.CreateInstance<MenuEditorWindow>();
+                if (template != null) EditorJsonUtility.FromJsonOverwrite(EditorJsonUtility.ToJson(template), Window);
+                before?.Invoke(Window);
                 typeof(MenuEditorWindow).GetField("root", Members).SetValue(Window, root);
                 Window.position = new Rect(-32000, -32000, 1220, 860);
                 var showMode = typeof(EditorWindow).Assembly.GetType("UnityEditor.ShowMode");
@@ -40,9 +44,16 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
             public int Edits => Window.State.edits.Count;
 
-            public void Down(Vector2 at) => Send(EventType.MouseDown, at);
+            public void Down(Vector2 at, int clicks = 1) => Send(EventType.MouseDown, at, clicks);
             public void Move(Vector2 at) => Send(EventType.MouseDrag, at);
-            public void Up(Vector2 at) => Send(EventType.MouseUp, at);
+            public void Up(Vector2 at, int clicks = 1) => Send(EventType.MouseUp, at, clicks);
+
+            /// <summary>A double click: a click, then a press and a release counting two clicks.</summary>
+            public void DoubleClick(Vector2 at)
+            {
+                Down(at); Up(at); Layout();
+                Down(at, 2); Up(at, 2); Layout();
+            }
 
             /// <summary>A press, a drag through <paramref name="via"/> and a release at <paramref name="to"/>.</summary>
             public void Drag(Vector2 from, Vector2 to, params Vector2[] via)
@@ -63,9 +74,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 scheduler.GetType().GetMethod("UpdateScheduledEvents", Members).Invoke(scheduler, null);
             }
 
-            private void Send(EventType type, Vector2 at)
+            private void Send(EventType type, Vector2 at, int clicks = 1)
             {
-                var e = new Event { type = type, mousePosition = at, button = 0, clickCount = 1 };
+                var e = new Event { type = type, mousePosition = at, button = 0, clickCount = clicks };
                 EventBase evt = type == EventType.MouseDown ? PointerDownEvent.GetPooled(e) : type == EventType.MouseDrag ? (EventBase)PointerMoveEvent.GetPooled(e) : PointerUpEvent.GetPooled(e);
                 using (evt) panel.visualTree.SendEvent(evt);
                 typeof(PointerCaptureHelper).GetMethod("ProcessPointerCapture", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
@@ -279,6 +290,160 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 driver.Up(driver.Center(edit.id));
                 Assert.AreEqual(1, driver.Window.Path.Count, "a click opens a folder");
             }
+        }
+
+        // A double click on a folder renames it: its first click opens it, and the second press, landing on the page it
+        // opened, goes back and names the folder in place instead of renaming what is inside.
+        [Test]
+        public void DoubleClickingAFolderRenamesTheFolder()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            using (var driver = new Driver(FullerClothes(fixture)))
+            {
+                string clothes = Id(fixture.Root, "Clothes");
+                driver.DoubleClick(driver.Center(clothes));
+                Assert.AreEqual(0, driver.Window.Path.Count, "back on the main menu");
+                Assert.AreEqual(clothes, driver.Window.Quick.Renaming, "the folder is renamed, not the item inside it");
+                Assert.AreEqual(0, driver.Edits);
+
+                // A double click on an item still renames it.
+                string dance = Id(fixture.Root, "Dance");
+                driver.DoubleClick(driver.Center(dance));
+                Assert.AreEqual(dance, driver.Window.Quick.Renaming);
+            }
+        }
+
+        [Test]
+        public void DoubleClickingAFolderInTheActionMenuRenamesTheFolder()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            using (var driver = new Driver(FullerClothes(fixture)))
+            {
+                string clothes = Id(fixture.Root, "Clothes");
+                driver.DoubleClick(driver.Window.Radial.IconOf(clothes).Value);
+                Assert.AreEqual(0, driver.Window.Path.Count, "back on the main menu");
+                Assert.AreEqual(clothes, driver.Window.Radial.Renaming, "the folder is renamed, not the item inside it");
+            }
+        }
+
+        // Closing with changes and choosing Save: when the save is refused, the changes stay and so does the window.
+        [Test]
+        public void ARefusedSaveKeepsTheChangesUnsaved()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            using (var driver = new Driver(fixture.Root))
+            {
+                // A default for a parameter the avatar doesn't have: Save refuses it.
+                string hat = Id(fixture.Root, "Hat");
+                driver.Window.State.Add(new MenuEdit { kind = MenuEditKind.Parameter, id = hat, text = "Nope" }, "Parameter of Hat");
+                driver.Window.State.Add(new MenuEdit { kind = MenuEditKind.Default, id = hat, number = 1 }, "Default of Hat");
+                typeof(MenuEditorWindow).GetMethod("Refresh", Members).Invoke(driver.Window, null);
+                Assert.True(driver.Window.hasUnsavedChanges);
+
+                driver.Window.SaveChanges();
+
+                Assert.True(driver.Window.hasUnsavedChanges, "the window stays, saying why");
+                Assert.AreEqual(2, driver.Edits, "the changes are still there");
+            }
+        }
+
+        // The changes not saved go with the window (Undo can't bring back what nothing shows any more).
+        [Test]
+        public void TheChangesGoWithTheWindow()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            {
+                MenuEditState state;
+                using (var driver = new Driver(fixture.Root))
+                {
+                    state = driver.Window.State;
+                    state.Add(new MenuEdit { kind = MenuEditKind.Rename, id = Id(fixture.Root, "Dance"), text = "Groove" }, "Rename Dance");
+                }
+                Assert.True(state == null, "destroyed with the window");
+            }
+        }
+
+        // Orbiters Toolkit captures a window off-screen in a copy made from its serialized state: the copy shows the same
+        // changes without sharing them, and closing it leaves the window's changes (and their Undo) as they were.
+        [Test]
+        public void ACopyOfTheWindowLeavesItsChangesAlone()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            using (var driver = new Driver(fixture.Root))
+            {
+                // The window as the user opened it from My Avatar (the copy's serialized state says so too).
+                typeof(MenuEditorWindow).GetField("opened", Members).SetValue(driver.Window, true);
+                var state = driver.Window.State;
+                state.Add(new MenuEdit { kind = MenuEditKind.Rename, id = Id(fixture.Root, "Dance"), text = "Groove" }, "Rename Dance");
+                typeof(MenuEditorWindow).GetMethod("Refresh", Members).Invoke(driver.Window, null);
+                // A copy never shown, then one shown.
+                var unshown = ScriptableObject.CreateInstance<MenuEditorWindow>();
+                EditorJsonUtility.FromJsonOverwrite(EditorJsonUtility.ToJson(driver.Window), unshown);
+                Object.DestroyImmediate(unshown);
+                Assert.True(state != null && driver.Window.State == state && state.edits.Count == 1, "an unshown copy closed");
+                using (var copy = new Driver(fixture.Root, driver.Window))
+                {
+                    Assert.AreNotSame(state, copy.Window.State, "the copy works on its own clone");
+                    Assert.AreEqual(1, copy.Edits, "with the same changes");
+                }
+                Assert.True(state != null && state.edits.Count == 1, "closing the copy leaves the window's changes");
+                // A copy whose serialized state brought the window's own changes along (the reference itself).
+                using (var copy = new Driver(fixture.Root, driver.Window, w => typeof(MenuEditorWindow).GetField("state", Members).SetValue(w, state)))
+                {
+                    Assert.AreNotSame(state, copy.Window.State, "it works on a clone too");
+                    Assert.AreEqual(1, copy.Edits);
+                }
+                Assert.True(state != null && state.edits.Count == 1, "closing that copy leaves them too");
+                Assert.True(driver.Window.hasUnsavedChanges);
+            }
+        }
+
+        // Changes elsewhere (another object, a material) don't build the menu again; the avatar's do; an Undo of a change made
+        // here only shows the edits again.
+        [Test]
+        public void OnlyTheAvatarsChangesBuildItsMenuAgain()
+        {
+            using (var fixture = new MenuFixture(vrcFury: false))
+            using (var driver = new Driver(fixture.Root))
+            {
+                var elsewhere = new GameObject("Elsewhere");
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(elsewhere, fixture.Scene);
+                var dirty = typeof(MenuEditorWindow).GetField("dirty", Members);
+                var changes = typeof(MenuEditorWindow).GetMethod("OnObjectChanges", Members);
+                void Changed(GameObject target)
+                {
+                    var builder = new ObjectChangeEventStream.Builder(Unity.Collections.Allocator.Temp);
+                    var e = new ChangeGameObjectOrComponentPropertiesEventArgs(target.GetInstanceID(), fixture.Scene);
+                    builder.PushChangeGameObjectOrComponentPropertiesEvent(ref e);
+                    var stream = builder.ToStream(Unity.Collections.Allocator.Temp);
+                    try { changes.Invoke(driver.Window, new object[] { stream }); }
+                    finally { stream.Dispose(); builder.Dispose(); }
+                }
+                try
+                {
+                    dirty.SetValue(driver.Window, false);
+                    Changed(elsewhere);
+                    Assert.False((bool)dirty.GetValue(driver.Window), "another object");
+                    Changed(fixture.Root);
+                    Assert.True((bool)dirty.GetValue(driver.Window), "the avatar");
+
+                    typeof(MenuEditorWindow).GetMethod("Refresh", Members).Invoke(driver.Window, null);
+                    Assert.False((bool)dirty.GetValue(driver.Window));
+                    driver.Window.State.Add(new MenuEdit { kind = MenuEditKind.Rename, id = Id(fixture.Root, "Dance"), text = "Groove" }, "Rename “Dance”");
+                    Undo.PerformUndo();
+                    Assert.False((bool)dirty.GetValue(driver.Window), "an Undo of a change made here");
+                    Assert.AreEqual(0, driver.Edits);
+                }
+                finally { Object.DestroyImmediate(elsewhere); }
+            }
+        }
+
+        // Clothes with six items: the second press of a double click on it lands on one of them once it is open.
+        private static GameObject FullerClothes(MenuFixture fixture)
+        {
+            var clothes = fixture.Root.GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>().expressionsMenu.controls.First(c => c.name == "Clothes").subMenu;
+            for (int i = 0; i < 4; i++) clothes.controls.Add(MenuFixture.Control("Extra " + i, VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionsMenu.Control.ControlType.Toggle, "Hat"));
+            return fixture.Root;
         }
 
         private static string FindName(MenuEditorWindow window) => window.rootVisualElement.Q<TextField>(className: "me-name")?.value;

@@ -16,9 +16,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private static StyleSheet sheet;
         internal static StyleSheet Sheet => sheet ? sheet : sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(StyleSheetPath);
 
+        // Gallery text comes from Orbiters and its members (names, reviews, descriptions): shown as written, never read as
+        // rich text tags.
         internal static Label Text(string text, string className, VisualElement parent = null)
         {
-            var label = new Label(text ?? "");
+            var label = new Label(text ?? "") { enableRichText = false };
             if (!string.IsNullOrEmpty(className)) foreach (var name in className.Split(' ')) label.AddToClassList(name);
             parent?.Add(label);
             return label;
@@ -73,7 +75,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         /// <summary>
         /// Compares "1.10.0" and "1.9.2" by their numbers, like the server (semver): a pre-release ("1.0.0-beta") comes
-        /// before its release, pre-release texts break ties, and build text ("+…") does not count.
+        /// before its release, pre-releases compare part by part ("beta.2" before "beta.10", numbers before words, fewer
+        /// parts first), and build text ("+…") does not count.
         /// </summary>
         internal static int CompareVersions(string a, string b)
         {
@@ -87,7 +90,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             string Pre(string v) { string core = (v ?? "").Split('+')[0]; int dash = core.IndexOf('-'); return dash < 0 ? null : core.Substring(dash + 1); }
             string preA = Pre(a), preB = Pre(b);
             if ((preA == null) != (preB == null)) return preA == null ? 1 : -1;
-            return string.CompareOrdinal(preA ?? "", preB ?? "");
+            if (preA == null) return 0;
+            string[] dotsA = preA.Split('.'), dotsB = preB.Split('.');
+            for (int i = 0; i < Math.Min(dotsA.Length, dotsB.Length); i++)
+            {
+                bool xn = ulong.TryParse(dotsA[i], NumberStyles.None, CultureInfo.InvariantCulture, out ulong xv);
+                bool yn = ulong.TryParse(dotsB[i], NumberStyles.None, CultureInfo.InvariantCulture, out ulong yv);
+                int order = xn && yn ? xv.CompareTo(yv) : xn ? -1 : yn ? 1 : Math.Sign(string.CompareOrdinal(dotsA[i], dotsB[i]));
+                if (order != 0) return order;
+            }
+            return dotsA.Length.CompareTo(dotsB.Length);
         }
 
         internal enum State { Add, Buy, Installed, Update, Working, Question, Failed, Unavailable }
@@ -146,6 +158,74 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var ring = Box(className);
             ring.schedule.Execute(() => ring.style.rotate = new Rotate(new Angle((float)(EditorApplication.timeSinceStartup * 360d % 360d)))).Every(16);
             return ring;
+        }
+
+        /// <summary>
+        /// Arms a two-press action (delete, withdraw) on the first press and runs it on the second. The second counts only
+        /// once the button was let go (pointer or key: a held key repeats without that) and <see cref="TwoPress.ConfirmDelay"/>
+        /// after the first, longer than Windows' double-click: the second click of a double-click never confirms. The armed
+        /// state goes back by itself after <see cref="TwoPress.ArmedFor"/>.
+        /// </summary>
+        internal sealed class TwoPress
+        {
+            internal const double ConfirmDelay = 0.6, ArmedFor = 4;
+            private readonly VisualElement button;
+            private readonly Action<bool> show;
+            private readonly Action confirm;
+            private readonly Func<double> clock;
+            private double armedAt = -1;
+            private bool released, shown;
+            private IVisualElementScheduledItem expiry;
+
+            /// <param name="button">What is pressed (its release is watched; null in tests, which call <see cref="Release"/>).</param>
+            /// <param name="show">Shows the armed state (true) or the resting one (false).</param>
+            /// <param name="clock">Seconds; the editor's clock unless a test gives its own.</param>
+            internal TwoPress(VisualElement button, Action<bool> show, Action confirm, Func<double> clock = null)
+            {
+                this.button = button; this.show = show; this.confirm = confirm;
+                this.clock = clock ?? (() => EditorApplication.timeSinceStartup);
+                button?.RegisterCallback<PointerUpEvent>(_ => Release(), TrickleDown.TrickleDown);
+                // Let go elsewhere: the pointer left the button first.
+                button?.RegisterCallback<PointerLeaveEvent>(_ => Release());
+                button?.RegisterCallback<KeyUpEvent>(_ => Release(), TrickleDown.TrickleDown);
+            }
+
+            internal bool Armed => armedAt >= 0 && clock() - armedAt <= ArmedFor;
+
+            /// <summary>The button was let go since it was armed.</summary>
+            internal void Release() { if (armedAt >= 0) released = true; }
+
+            internal void Press()
+            {
+                double now = clock();
+                if (!Armed)
+                {
+                    armedAt = now;
+                    released = false;
+                    Show(true);
+                    expiry?.Pause();
+                    expiry = button?.schedule.Execute(Disarm).StartingIn((long)(ArmedFor * 1000));
+                    return;
+                }
+                if (!released || now - armedAt < ConfirmDelay) return;
+                Disarm();
+                confirm();
+            }
+
+            internal void Disarm()
+            {
+                expiry?.Pause(); expiry = null;
+                armedAt = -1; released = false;
+                Show(false);
+            }
+
+            // Each state is shown once: arming again after the time ran out adds nothing twice.
+            private void Show(bool armed)
+            {
+                if (shown == armed) return;
+                shown = armed;
+                show(armed);
+            }
         }
 
         /// <summary>A soft band sweeping over a placeholder while it loads.</summary>

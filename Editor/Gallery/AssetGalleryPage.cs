@@ -345,6 +345,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             var asset = card.Asset;
             if (!avatar || AccessoryService.Busy(avatar)) { ShowMessage("My Avatar is still busy with this avatar. Try again in a moment."); return; }
+            if (asset.fit == null || !asset.fit.Compatible) { ShowMessage(asset.name + " has no package for this avatar any more."); return; }
             var variant = asset.fit.variants[0];
             // Optimistic: the card shows its progress at once, before the job's first step reports.
             var job = GalleryInstaller.Start(avatar, asset, asset.fit.release, variant, setup);
@@ -353,7 +354,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private void Update(GalleryCard card)
         {
-            card.Bind(card.Asset, card.Installed, GalleryInstaller.Update(avatar, card.Asset, card.Installed));
+            var job = GalleryInstaller.Update(avatar, card.Asset, card.Installed);
+            if (job == null) { ShowMessage(card.Asset.name + " has no newer package for this avatar any more."); return; }
+            card.Bind(card.Asset, card.Installed, job);
         }
 
         private void OpenQuestion(GalleryCard card, GalleryJob job)

@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.Storage;
+using Orbiters.Toolkit.Editor.VRChat.Parameters;
+using Orbiters.Toolkit.Storage;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
@@ -14,15 +18,16 @@ namespace Orbiters.MyAvatar.Editor.Expressions
     /// Writes menu edits where they belong, in one Undo step:
     /// <list type="bullet">
     /// <item>the avatar's own menu assets are edited (renamed, reordered, given icons, items moved between them), copied first
-    /// when they are in a package or used by another avatar;</item>
+    /// when they are not the avatar's alone (<see cref="Writer"/>);</item>
     /// <item>the avatar's own VRCFury Toggles and Puppets get their new menu path and icon;</item>
     /// <item>everything else (Full Controller menus, prefabs from packages, folders VRCFury makes for menu paths) is changed
     /// with VRCFury's own Move Menu Item, Set Icon, Reorder Menu Item and Override Menu Settings, on one object at the end
     /// of the avatar, "Menu edits (My Avatar)", rewritten at every Save.</item>
     /// </list>
     /// Items' settings (type, parameter, value; their parameter's default, saved and synced) are written into the avatar's own
-    /// menu and parameter assets, or its own VRCFury toggles; what the upload leaves out is saved on its My Avatar component.
-    /// The result is checked by building the menu again: the avatar must build exactly the edited menu, else nothing is kept.
+    /// menu and parameter assets (copied the same way), or its own VRCFury toggles; what the upload leaves out is saved on its
+    /// My Avatar component. The result is checked by building the menu again: the avatar must build exactly the edited menu,
+    /// with the edited settings, else nothing is kept.
     /// </summary>
     internal static partial class MenuSave
     {
@@ -36,13 +41,21 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             public bool Saved;
             public string Message;
             public int Assets, Components, Features;
-            /// <summary>Menu copies made by this save: deleted again when it fails.</summary>
+            /// <summary>Menu and parameters copies, and new menus, made by this save: deleted again when it fails.</summary>
             public readonly List<string> Created = new List<string>();
             /// <summary>Every asset the save wrote or made (menus, copies, imported icons), to be saved to disk with the scene.</summary>
             public readonly HashSet<string> Touched = new HashSet<string>();
+            /// <summary>
+            /// The ids the save kept for the avatar's menu controls it renamed, copied or made (an item of the avatar's menu is
+            /// known by its name): the editor finds the items it showed under their new ids with them.
+            /// </summary>
+            public IReadOnlyDictionary<VRCExpressionsMenu.Control, string> Pins;
         }
 
         private sealed class Failure : Exception { public Failure(string message) : base(message) { } }
+
+        /// <summary>The My Avatar component holding what the avatar's upload leaves out of the menu (the editor, the card and the upload read the same one).</summary>
+        public static MyAvatar SettingsOf(GameObject root) => root != null ? root.GetComponentInChildren<MyAvatar>(true) : null;
 
         /// <summary>The object holding My Avatar's saved menu edits, if the avatar has one.</summary>
         public static GameObject EditsObject(GameObject root)
@@ -51,6 +64,21 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             foreach (Transform child in root.transform)
                 if (child.name == EditsName && OnlyVrcFury(child.gameObject)) return child.gameObject;
             return null;
+        }
+
+        /// <summary>
+        /// Whether menu changes of an object put after the saved edits since (Move Menu Item, Reorder Menu Item, Set Icon) now
+        /// run after them, and may move, reorder or change the icons of what was saved. Items are created before any of those
+        /// run, wherever they are, and the first Override Menu Settings wins: objects with only those change nothing.
+        /// </summary>
+        public static bool EditsOutrun(GameObject root)
+        {
+            var edits = EditsObject(root);
+            if (edits == null || edits.transform.GetSiblingIndex() == root.transform.childCount - 1) return false;
+            var specs = MenuInputs.Read(root).Specs;
+            bool Saved(MenuSpec spec) => spec.Component != null && spec.Component.transform.IsChildOf(edits.transform);
+            int last = specs.Where(Saved).Select(s => s.Number).DefaultIfEmpty(-1).Max();
+            return specs.Any(s => !Saved(s) && s.Number > last && (s is MoveSpec || s is ReorderSpec || s is SetIconSpec));
         }
 
         // VRCFury allows its root-only features on a child of the avatar holding nothing but VRCFury components.
@@ -81,25 +109,41 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             int group = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName("Save menu");
             var outcome = new Outcome();
+            var imported = new List<string>();
+            // The menu the avatar builds now: the first attempt starts from it (the others start again after an Undo).
+            var now = MenuBuild.Run(MenuInputs.Read(root));
+            // Removals no item answers to now (an accessory's, while it is left out of the build) are kept as they are.
+            var kept = removals != null ? Unresolved(root, now) : null;
+            // What the avatar shares is looked up once for every attempt.
+            var sharing = new Lazy<Sharing>(() => new Sharing(root));
+            // Settings that change the synced bits are checked against the budget the avatar has now.
+            bool budgeted = edits.Any(e => e.kind == MenuEditKind.Synced || e.kind == MenuEditKind.Type || e.kind == MenuEditKind.Parameter);
+            var budget = budgeted ? AvatarParameterBudget.Estimate(root) : default;
             try
             {
-                var list = ImportFiles(edits, out var imported);
+                var list = ImportFiles(edits, imported);
                 // The avatar's own assets and components first; when VRCFury would then build something else, more is left to
                 // VRCFury's features, and at last everything.
                 string first = null, last = null;
                 foreach (var strategy in new[] { Strategy.Direct, Strategy.Careful, Strategy.Features })
                 {
-                    string problem = TrySave(root, list, strategy, outcome);
+                    string problem = TrySave(root, list, strategy, outcome, now, sharing, budgeted ? budget : (ParameterBudget?)null);
+                    now = null;
                     if (problem == null)
                     {
-                        if (removals != null) WriteRemovals(root, removals);
+                        if (removals != null) WriteRemovals(root, removals, kept);
                         outcome.Touched.UnionWith(imported);
                         outcome.Touched.UnionWith(outcome.Created);
                         state?.Clear("Save menu");
                         // Pending records join the group now, so Ctrl+Z undoes the whole save at once.
                         Undo.FlushUndoRecordObjects();
                         Undo.CollapseUndoOperations(group);
+                        Undo.IncrementCurrentGroup();
                         outcome.Saved = true;
+                        // Copies, new menus and pictures this save made are generated files: one an Undo of the save leaves
+                        // unused goes (kept aside for the session: a Redo brings it back). Not for an avatar of a preview scene
+                        // (tests, hidden copies): what made it cleans up.
+                        if (!UnityEditor.SceneManagement.EditorSceneManager.IsPreviewScene(root.scene)) GeneratedAssets.Track(imported.Concat(outcome.Created));
                         return outcome;
                     }
                     first ??= problem;
@@ -113,6 +157,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     group = Undo.GetCurrentGroup();
                     Undo.SetCurrentGroupName("Save menu");
                 }
+                Delete(imported);
                 // The last way tried (VRCFury's features only) says best what can't be done, unless VRCFury is missing.
                 return new Outcome { Message = last != null && VrcFury.Component != null ? last : first };
             }
@@ -121,6 +166,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 Undo.FlushUndoRecordObjects();
                 Undo.RevertAllDownToGroup(group);
                 Delete(outcome);
+                Delete(imported);
+                if (ex is Failure) return new Outcome { Message = ex.Message };
                 Debug.LogException(ex);
                 return new Outcome { Message = "The menu could not be saved: " + ex.Message };
             }
@@ -133,23 +180,34 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             Direct,
             /// <summary>Only what no menu path names.</summary>
             Careful,
-            /// <summary>Nothing: VRCFury's features only.</summary>
+            /// <summary>Nothing: VRCFury's features only (items' settings still go into the avatar's own assets).</summary>
             Features,
         }
 
         private static void Delete(Outcome outcome)
         {
-            foreach (var path in outcome.Created) AssetDatabase.DeleteAsset(path);
+            Delete(outcome.Created);
             outcome.Created.Clear();
         }
 
-        // One attempt: the reason it failed, or null when the avatar now builds the edited menu.
-        private static string TrySave(GameObject root, List<MenuEdit> edits, Strategy strategy, Outcome outcome)
+        private static void Delete(List<string> paths)
+        {
+            foreach (var path in paths) AssetDatabase.DeleteAsset(path);
+            paths.Clear();
+        }
+
+        // One attempt: the reason it failed, or null when the avatar now builds the edited menu with the edited settings.
+        // <paramref name="now"/> is the menu the avatar builds as the attempt starts, when known.
+        private static string TrySave(GameObject root, List<MenuEdit> edits, Strategy strategy, Outcome outcome, MenuBuildResult now, Lazy<Sharing> sharing, ParameterBudget? budget)
         {
             try
             {
-                var pins = new Dictionary<VRCExpressionsMenu.Control, string>(MenuBuild.Run(MenuInputs.Read(root)).ControlIds);
-                var draft = Draft(root, edits, pins, out var built);
+                now ??= MenuBuild.Run(MenuInputs.Read(root));
+                var pins = new Dictionary<VRCExpressionsMenu.Control, string>(now.ControlIds);
+                // Without pins, the ids are the ones pinned: the menu as it builds now.
+                var draft = MenuDraft.Apply(now, edits);
+                var writer = new Writer(root, pins, outcome, sharing);
+                outcome.Pins = pins;
                 bool vrcFuryInstalled = VrcFury.Component != null;
                 if (strategy != Strategy.Features)
                 {
@@ -158,34 +216,43 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     var refs = References(MenuInputs.Read(root, skip), start, ownToggles: strategy == Strategy.Careful);
                     var made = new Dictionary<string, (VRCExpressionsMenu Menu, VRCExpressionsMenu.Control Control)>();
                     Materialize(root, draft, made, pins);
-                    if (EnsureWritable(root, draft, start, refs, pins, outcome))
+                    if (EnsureWritable(root, draft, start, refs, writer))
                     {
-                        draft = Draft(root, edits, pins, out built);
+                        draft = Draft(root, edits, pins, out _);
                         Materialize(root, draft, made, pins);
                     }
-                    WriteAssets(root, draft, start, refs, outcome, made.Values.Select(m => m.Menu).ToList());
+                    WriteAssets(root, draft, start, refs, outcome, writer, made.Values.Select(m => m.Menu).ToList());
                     if (vrcFuryInstalled) WriteComponents(root, draft, Snapshot(root, skip, pins), outcome);
                 }
-                WriteSettings(root, edits, pins, outcome);
+                WriteSettings(root, edits, draft, writer, outcome);
+                if (budget != null)
+                {
+                    // The same rule as the editor's: over VRChat's synced bits once VRCFury compressed what it can.
+                    var after = AvatarParameterBudget.Estimate(root);
+                    if (after.OverBudget && (!budget.Value.OverBudget || after.BuiltBits > budget.Value.BuiltBits))
+                        throw new Failure("These settings need " + after.BuiltBits + " synced bits, more than VRChat's " + ParameterBudget.MaxSyncedBits + ": sync fewer parameters.");
+                }
                 var specs = Features(root, draft, pins);
                 if (specs.Count > 0 && !vrcFuryInstalled) throw new Failure("These changes need VRCFury: add it to the project with the Creator Companion.");
                 WriteEditsObject(root, specs);
                 outcome.Features = specs.Count;
-                var after = MenuBuild.Run(MenuInputs.Read(root), new MenuBuildOptions { Pins = pins });
-                string difference = Difference(draft.Root, after.Root);
-                if (difference == null && (after.NextText != draft.NextText || after.NextIcon != draft.NextIcon)) difference = "the “Next” items";
-                return difference == null ? null : "VRCFury would build a different menu (" + difference + ").";
+                var built = MenuBuild.Run(MenuInputs.Read(root), new MenuBuildOptions { Pins = pins });
+                string difference = Difference(draft.Root, built.Root);
+                if (difference == null && (built.NextText != draft.NextText || built.NextIcon != draft.NextIcon)) difference = "the “Next” items";
+                if (difference != null) return "VRCFury would build a different menu (" + difference + ").";
+                string settings = SettingsDifference(root, edits, draft, built);
+                return settings == null ? null : "The settings saved are not the ones edited (" + settings + ").";
             }
             catch (Failure failure) { return failure.Message; }
         }
 
         // ---- Icons -----------------------------------------------------------------------------------------------------------
 
-        // Image files become textures in the project now; edits refer to them from here on.
-        private static List<MenuEdit> ImportFiles(IReadOnlyList<MenuEdit> edits, out List<string> paths)
+        // Image files become textures in the project now (a picture imported before is used again); edits refer to them from
+        // here on. The files this import made are listed in <paramref name="created"/> (removed again when the save fails).
+        private static List<MenuEdit> ImportFiles(IReadOnlyList<MenuEdit> edits, List<string> created)
         {
             var imported = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
-            paths = new List<string>();
             var list = new List<MenuEdit>();
             foreach (var edit in edits)
             {
@@ -194,8 +261,9 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 {
                     if (!imported.TryGetValue(copy.file, out var texture))
                     {
-                        imported[copy.file] = texture = MenuIcons.Import(copy.file);
-                        if (texture != null && EditorUtility.IsPersistent(texture)) paths.Add(AssetDatabase.GetAssetPath(texture));
+                        imported[copy.file] = texture = MenuIcons.Import(copy.file, out bool made);
+                        if (texture == null) throw new Failure("The picture “" + System.IO.Path.GetFileName(copy.file) + "” is no longer there: choose it again.");
+                        if (made) created.Add(AssetDatabase.GetAssetPath(texture));
                     }
                     copy.icon = texture; copy.file = null;
                 }
@@ -361,59 +429,22 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         }
 
         // Assets the save changes that are not the avatar's alone are copied first (with their parents up to the descriptor).
-        private static bool EnsureWritable(GameObject root, MenuDraft draft, Start start, HashSet<string> refs, Dictionary<VRCExpressionsMenu.Control, string> pins, Outcome outcome)
+        private static bool EnsureWritable(GameObject root, MenuDraft draft, Start start, HashSet<string> refs, Writer writer)
         {
             var plan = PlanAssets(root, draft, start, refs);
-            var shared = SharedMenus(root);
-            var descriptor = root.GetComponent<VRCAvatarDescriptor>();
-            var copies = new Dictionary<VRCExpressionsMenu, VRCExpressionsMenu>();
-            var parents = Parents(descriptor != null ? descriptor.expressionsMenu : null);
-            VRCExpressionsMenu Own(VRCExpressionsMenu asset)
-            {
-                if (copies.TryGetValue(asset, out var done)) return done;
-                if (Writable(asset, shared)) return copies[asset] = asset;
-                var copy = Object.Instantiate(asset);
-                copy.name = asset.name;
-                string folder = Folder(CopiesFolder + "/" + Safe(root.name));
-                string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + Safe(asset.name) + ".asset");
-                AssetDatabase.CreateAsset(copy, path);
-                outcome.Created.Add(path);
-                for (int i = 0; i < asset.controls.Count && i < copy.controls.Count; i++)
-                    if (asset.controls[i] != null && pins.TryGetValue(asset.controls[i], out var id)) pins[copy.controls[i]] = id;
-                copies[asset] = copy;
-                outcome.Assets++;
-                if (descriptor != null && descriptor.expressionsMenu == asset)
-                {
-                    Undo.RecordObject(descriptor, "Save menu");
-                    descriptor.expressionsMenu = copy;
-                    EditorUtility.SetDirty(descriptor);
-                    PrefabUtility.RecordPrefabInstancePropertyModifications(descriptor);
-                }
-                if (parents.TryGetValue(asset, out var holders))
-                    foreach (var parent in holders.ToList())
-                    {
-                        var owned = Own(parent);
-                        Undo.RecordObject(owned, "Save menu");
-                        foreach (var control in owned.controls) if (control != null && control.subMenu == asset) control.subMenu = copy;
-                        EditorUtility.SetDirty(owned);
-                        Touch(outcome, owned);
-                    }
-                return copy;
-            }
             bool copied = false;
             foreach (var asset in plan.Lists.Keys.ToList())
-                if (Changes(plan, asset) && Own(asset) != asset) copied = true;
+                if (Changes(plan, asset) && writer.Own(asset) != asset) copied = true;
             return copied;
         }
 
-        private static void WriteAssets(GameObject root, MenuDraft draft, Start start, HashSet<string> refs, Outcome outcome, List<VRCExpressionsMenu> fresh)
+        private static void WriteAssets(GameObject root, MenuDraft draft, Start start, HashSet<string> refs, Outcome outcome, Writer writer, List<VRCExpressionsMenu> fresh)
         {
             var plan = PlanAssets(root, draft, start, refs);
-            var shared = SharedMenus(root);
             var changed = plan.Lists.Keys.Where(a => Changes(plan, a)).ToList();
             foreach (var asset in changed)
-                if (!Writable(asset, shared)) throw new Failure("“" + asset.name + "” can't be edited.");
-            CreateMenus(root, plan, changed, fresh, outcome);
+                if (!writer.Writable(asset)) throw new Failure("“" + asset.name + "” can't be edited.");
+            CreateMenus(root, plan, fresh, outcome);
             // Every asset is recorded before any changes: a control moving between two assets is one object, and Undo must
             // see it as it was in both.
             if (changed.Count > 0) Undo.RecordObjects(changed.ToArray<Object>(), "Save menu");
@@ -470,24 +501,25 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             }
         }
 
-        // The new menus a save writes become assets: next to the menu holding them, else with My Avatar's menu copies. A menu
-        // held by a menu that is not an asset (a test avatar's) stays in memory like it.
-        private static void CreateMenus(GameObject root, AssetPlan plan, List<VRCExpressionsMenu> changed, List<VRCExpressionsMenu> fresh, Outcome outcome)
+        // The new menus a save writes become assets: next to the menu holding them, else with My Avatar's menu copies. One
+        // holding only items VRCFury's features move into it is one too (its menu holds it whatever is in it). A menu held by
+        // a menu that is not an asset (a test avatar's) stays in memory like it.
+        private static void CreateMenus(GameObject root, AssetPlan plan, List<VRCExpressionsMenu> fresh, Outcome outcome)
         {
-            var waiting = fresh.Where(m => m != null && changed.Contains(m) && !EditorUtility.IsPersistent(m)).ToList();
+            VRCExpressionsMenu Holder(VRCExpressionsMenu menu) => plan.Lists.FirstOrDefault(l => l.Value.Any(c => c != null && c.subMenu == menu)).Key;
+            var waiting = fresh.Where(m => m != null && !EditorUtility.IsPersistent(m) && Holder(m) != null).Distinct().ToList();
             for (int pass = 0; pass < 8 && waiting.Count > 0; pass++)
                 foreach (var menu in waiting.ToList())
                 {
-                    var holder = plan.Lists.FirstOrDefault(l => l.Value.Any(c => c != null && c.subMenu == menu)).Key;
-                    if (holder == null) { waiting.Remove(menu); continue; }
+                    var holder = Holder(menu);
                     if (fresh.Contains(holder) && waiting.Contains(holder)) continue;
                     waiting.Remove(menu);
                     string holderPath = AssetDatabase.GetAssetPath(holder);
                     if (string.IsNullOrEmpty(holderPath)) continue;
                     string folder = holderPath.StartsWith("Assets/", StringComparison.Ordinal) && AssetDatabase.IsOpenForEdit(holderPath)
                         ? System.IO.Path.GetDirectoryName(holderPath).Replace('\\', '/')
-                        : Folder(CopiesFolder + "/" + Safe(root.name));
-                    string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + Safe(menu.name) + ".asset");
+                        : Folder(CopiesFolder + "/" + SafePaths.FileName(root.name, "Avatar"));
+                    string path = NewAssetPath(folder, menu.name, "Menu");
                     AssetDatabase.CreateAsset(menu, path);
                     outcome.Created.Add(path);
                     outcome.Touched.Add(path);
@@ -522,34 +554,197 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             if (!string.IsNullOrEmpty(path)) outcome.Touched.Add(path);
         }
 
-        private static bool Writable(VRCExpressionsMenu asset, HashSet<VRCExpressionsMenu> shared)
-        {
-            string path = AssetDatabase.GetAssetPath(asset);
-            if (string.IsNullOrEmpty(path)) return !shared.Contains(asset);
-            return path.StartsWith("Assets/", StringComparison.Ordinal) && !shared.Contains(asset) && AssetDatabase.IsOpenForEdit(path);
-        }
+        // ---- Copies before writing ----------------------------------------------------------------------------------------------
 
-        // Menus other avatars in the open scenes use, and menus Full Controllers merge: editing them would change those too.
-        private static HashSet<VRCExpressionsMenu> SharedMenus(GameObject root)
+        /// <summary>
+        /// One save's way into the avatar's own menu and parameters assets: one that is not the avatar's alone (in a package,
+        /// or used by another avatar, a prefab, another scene, another menu or a Full Controller) is copied into the avatar's
+        /// folder of <see cref="CopiesFolder"/> first and the copy put in its place (with the menus holding it, up to the
+        /// descriptor). Structural edits and settings both go through it.
+        /// </summary>
+        private sealed class Writer
         {
-            var shared = new HashSet<VRCExpressionsMenu>();
-            for (int s = 0; s < UnityEngine.SceneManagement.SceneManager.sceneCount; s++)
+            private readonly GameObject root;
+            private readonly VRCAvatarDescriptor descriptor;
+            private readonly Dictionary<VRCExpressionsMenu.Control, string> pins;
+            private readonly Outcome outcome;
+            private readonly Dictionary<Object, Object> copies = new Dictionary<Object, Object>();
+            private readonly Dictionary<VRCExpressionsMenu, List<VRCExpressionsMenu>> parents;
+            private readonly Lazy<Sharing> sharing;
+
+            public Writer(GameObject root, Dictionary<VRCExpressionsMenu.Control, string> pins, Outcome outcome, Lazy<Sharing> sharing)
             {
-                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(s);
-                if (!scene.isLoaded) continue;
-                foreach (var top in scene.GetRootGameObjects())
-                foreach (var descriptor in top.GetComponentsInChildren<VRCAvatarDescriptor>(true))
-                    if (descriptor.gameObject != root) AddTree(descriptor.expressionsMenu, shared);
+                this.root = root;
+                this.pins = pins;
+                this.outcome = outcome;
+                this.sharing = sharing;
+                descriptor = root.GetComponent<VRCAvatarDescriptor>();
+                parents = Parents(descriptor != null ? descriptor.expressionsMenu : null);
             }
-            foreach (var spec in MenuInputs.Read(root).Specs.OfType<FullControllerSpec>())
-                foreach (var (menu, _) in spec.Menus) AddTree(menu, shared);
-            return shared;
+
+            private Sharing Sharing => sharing.Value;
+
+            /// <summary>Whether the save may write <paramref name="asset"/> as it is.</summary>
+            public bool Writable(Object asset)
+            {
+                if (asset == null) return false;
+                // Its own copies, and assets it found writable already.
+                if (copies.TryGetValue(asset, out var known) && known == asset) return true;
+                string path = AssetDatabase.GetAssetPath(asset);
+                if (path.Length > 0 && (!path.StartsWith("Assets/", StringComparison.Ordinal) || !AssetDatabase.IsOpenForEdit(path))) return false;
+                return !Sharing.Shared(asset);
+            }
+
+            /// <summary>The menu to write instead of <paramref name="asset"/>: itself, or its copy (made now, its controls keeping their ids).</summary>
+            public VRCExpressionsMenu Own(VRCExpressionsMenu asset)
+            {
+                if (copies.TryGetValue(asset, out var done)) return (VRCExpressionsMenu)done;
+                if (Writable(asset)) { copies[asset] = asset; return asset; }
+                var copy = Object.Instantiate(asset);
+                copy.name = asset.name;
+                CreateCopy(copy, asset.name, "Menu");
+                for (int i = 0; i < asset.controls.Count && i < copy.controls.Count; i++)
+                    if (asset.controls[i] != null && pins.TryGetValue(asset.controls[i], out var id)) pins[copy.controls[i]] = id;
+                copies[asset] = copies[copy] = copy;
+                if (descriptor != null && descriptor.expressionsMenu == asset)
+                {
+                    Undo.RecordObject(descriptor, "Save menu");
+                    descriptor.expressionsMenu = copy;
+                    EditorUtility.SetDirty(descriptor);
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(descriptor);
+                }
+                if (parents.TryGetValue(asset, out var holders))
+                    foreach (var parent in holders.ToList())
+                    {
+                        var owned = Own(parent);
+                        Undo.RecordObject(owned, "Save menu");
+                        foreach (var control in owned.controls) if (control != null && control.subMenu == asset) control.subMenu = copy;
+                        EditorUtility.SetDirty(owned);
+                        Touch(outcome, owned);
+                    }
+                return copy;
+            }
+
+            /// <summary>The avatar's parameters asset to write: its own, or a copy put in its place (the rule My Avatar's looks share, <see cref="AvatarParameters"/>).</summary>
+            public VRCExpressionParameters OwnParameters()
+            {
+                var parameters = descriptor != null ? descriptor.expressionParameters : null;
+                if (parameters == null) throw new Failure("The avatar has no expression parameters.");
+                if (copies.TryGetValue(parameters, out var done)) return (VRCExpressionParameters)done;
+                var own = AvatarParameters.Own(descriptor, "Save menu", out string created);
+                copies[parameters] = copies[own] = own;
+                if (created != null) { outcome.Created.Add(created); outcome.Assets++; }
+                return own;
+            }
+
+            private void CreateCopy(Object copy, string name, string fallback)
+            {
+                string path = NewAssetPath(Folder(CopiesFolder + "/" + SafePaths.FileName(root.name, "Avatar")), name, fallback);
+                AssetDatabase.CreateAsset(copy, path);
+                outcome.Created.Add(path);
+                outcome.Assets++;
+            }
+
+            /// <summary>The menu as the avatar builds it now, by id (copies keep their controls' ids).</summary>
+            public Dictionary<string, MenuTree.Entry> Live() => MenuTree.Index(MenuBuild.Run(MenuInputs.Read(root), new MenuBuildOptions { Pins = pins }).Root);
         }
 
-        private static void AddTree(VRCExpressionsMenu menu, HashSet<VRCExpressionsMenu> set)
+        /// <summary>
+        /// The menus and parameters the avatar shares with something else, so writing them would change that too: other
+        /// avatars, VRCFury Full Controllers and Modular Avatar Menu Installers in the open scenes (this avatar's own too: they
+        /// merge their menu as it is), and any prefab, scene or menu of the project using them, besides the avatar's own scene
+        /// and menus.
+        /// </summary>
+        private sealed class Sharing
+        {
+            private static readonly string[] Users = { "t:Prefab", "t:Scene", "t:VRCExpressionsMenu" };
+            private readonly HashSet<Object> used = new HashSet<Object>();
+            private readonly HashSet<string> own = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private readonly List<string> candidates = new List<string>();
+            private readonly Dictionary<VRCExpressionsMenu, List<VRCExpressionsMenu>> parents;
+            private readonly Dictionary<Object, bool> known = new Dictionary<Object, bool>();
+            private readonly string ownPrefab;
+            private Dictionary<string, List<string>> users;
+
+            public Sharing(GameObject root)
+            {
+                for (int s = 0; s < UnityEngine.SceneManagement.SceneManager.sceneCount; s++)
+                {
+                    var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(s);
+                    if (!scene.isLoaded) continue;
+                    foreach (var top in scene.GetRootGameObjects())
+                    foreach (var other in top.GetComponentsInChildren<VRCAvatarDescriptor>(true))
+                    {
+                        if (other.gameObject == root) continue;
+                        AddTree(other.expressionsMenu, used);
+                        if (other.expressionParameters != null) used.Add(other.expressionParameters);
+                        Merged(other.gameObject);
+                    }
+                }
+                Merged(root);
+                // The avatar's own scene and menus use them without sharing them.
+                var descriptor = root.GetComponent<VRCAvatarDescriptor>();
+                own.Add(root.scene.path ?? "");
+                var stage = UnityEditor.SceneManagement.PrefabStageUtility.GetPrefabStage(root);
+                if (stage != null) own.Add(stage.assetPath);
+                // The prefab the avatar is an instance of uses the copies My Avatar made for it once its overrides are applied:
+                // those stay the avatar's own (else every save would copy them again). Anything else that prefab uses (the
+                // creator's menus) is shared with its other instances and variants, and copied once.
+                if (PrefabUtility.IsPartOfPrefabInstance(root)) ownPrefab = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(root);
+                foreach (var menu in MenuPaths.Menus(descriptor != null ? descriptor.expressionsMenu : null))
+                {
+                    string path = AssetDatabase.GetAssetPath(menu);
+                    if (path.Length > 0) { own.Add(path); candidates.Add(path); }
+                }
+                if (descriptor != null && descriptor.expressionParameters != null) candidates.Add(AssetDatabase.GetAssetPath(descriptor.expressionParameters));
+                parents = Parents(descriptor != null ? descriptor.expressionsMenu : null);
+            }
+
+            // What an avatar's VRCFury Full Controllers and Modular Avatar Menu Installers merge.
+            private void Merged(GameObject avatar)
+            {
+                foreach (var (_, feature, kind) in VrcFury.Features(avatar))
+                {
+                    if (kind != "FullController") continue;
+                    if (VrcFury.Field(feature, "menus") is System.Collections.IEnumerable menus)
+                        foreach (var entry in menus) AddTree(VrcFury.ObjectReference(VrcFury.Field(entry, "menu")) as VRCExpressionsMenu, used);
+                    if (VrcFury.Field(feature, "prms") is System.Collections.IEnumerable prms)
+                        foreach (var entry in prms)
+                            if (VrcFury.ObjectReference(VrcFury.Field(entry, "parameters")) is VRCExpressionParameters asset) used.Add(asset);
+                }
+                foreach (var installer in MaMenus.Read(avatar)?.Installers ?? new List<MaInstaller>()) AddTree(installer.Menu, used);
+            }
+
+            public bool Shared(Object asset)
+            {
+                if (asset == null) return false;
+                if (known.TryGetValue(asset, out bool shared)) return shared;
+                // (A menu holding itself is answered by its other holders.)
+                known[asset] = false;
+                // Whatever uses a menu holding it reaches it too.
+                shared = used.Contains(asset) || UsedByFiles(asset) ||
+                         asset is VRCExpressionsMenu menu && parents.TryGetValue(menu, out var holders) && holders.Any(Shared);
+                return known[asset] = shared;
+            }
+
+            private bool UsedByFiles(Object asset)
+            {
+                string path = AssetDatabase.GetAssetPath(asset);
+                if (path.Length == 0) return false;
+                if (users == null || !users.ContainsKey(path))
+                {
+                    if (!candidates.Contains(path)) candidates.Add(path);
+                    users = ProjectReferences.DirectUsers(candidates, Users);
+                }
+                bool copy = path.StartsWith(CopiesFolder + "/", StringComparison.Ordinal);
+                return users.TryGetValue(path, out var list) && list.Any(u => !own.Contains(u) && !(copy && string.Equals(u, ownPrefab, StringComparison.OrdinalIgnoreCase)));
+            }
+        }
+
+        private static void AddTree(VRCExpressionsMenu menu, HashSet<Object> set)
         {
             if (menu == null || !set.Add(menu)) return;
-            foreach (var control in menu.controls) if (control != null && control.subMenu != null) AddTree(control.subMenu, set);
+            foreach (var control in menu.controls ?? new List<VRCExpressionsMenu.Control>()) if (control != null && control.subMenu != null) AddTree(control.subMenu, set);
         }
 
         // For each submenu asset of the avatar's menu, the menus holding it.
@@ -560,7 +755,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             void Visit(VRCExpressionsMenu m)
             {
                 if (m == null || !seen.Add(m)) return;
-                foreach (var control in m.controls)
+                foreach (var control in m.controls ?? new List<VRCExpressionsMenu.Control>())
                 {
                     if (control?.subMenu == null) continue;
                     if (!parents.TryGetValue(control.subMenu, out var list)) parents[control.subMenu] = list = new List<VRCExpressionsMenu>();
@@ -581,11 +776,12 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return path;
         }
 
-        private static string Safe(string name)
+        // A new asset's path in a folder, named after what it holds (as a plain file name), short enough for Unity.
+        private static string NewAssetPath(string folder, string name, string fallback)
         {
-            var invalid = System.IO.Path.GetInvalidFileNameChars();
-            var clean = new string((name ?? "Menu").Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim();
-            return clean.Length == 0 ? "Menu" : clean;
+            string path = AssetDatabase.GenerateUniqueAssetPath(folder + "/" + SafePaths.FileName(name, fallback) + ".asset");
+            SafePaths.RequireLength(System.IO.Path.GetFullPath(path));
+            return path;
         }
 
         // ---- The avatar's own VRCFury Toggles and Puppets ------------------------------------------------------------------
@@ -1003,7 +1199,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 if (a == null || b == null) return a == b ? null : where + ": a submenu is missing";
                 if (!seen.Add(a)) return null;
                 if (a.Items.Count != b.Items.Count)
-                    return where + ": " + a.Items.Count + " items instead of " + b.Items.Count + " (" + string.Join(", ", b.Items.Select(n => n.Name)) + ")";
+                    return where + ": " + b.Items.Count + " items instead of " + a.Items.Count + " (" + string.Join(", ", b.Items.Select(n => n.Name)) + ")";
                 for (int i = 0; i < a.Items.Count; i++)
                 {
                     MenuNode x = a.Items[i], y = b.Items[i];

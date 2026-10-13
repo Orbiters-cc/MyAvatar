@@ -21,7 +21,7 @@ namespace Orbiters.MyAvatar.Editor.MCP
     /// draft as the "Publish to the gallery" window, builds and tests packages with the same rules, and publishes or
     /// withdraws only with a code the user approved.
     /// </summary>
-    [McpForUnityTool("myavatar_gallery", Description = "Create and publish My Avatar gallery assets (clothes, accessories). inspect shows the draft shared with the 'Publish to the gallery' window, scene avatars (target_id) and the API it publishes to. configure merges data into that draft (draftSchema from inspect; existingAssetId picks one of the creator's assets, 0 a new one; variants take prefabPaths or packagePath, and manifest setup prefabs by path; reset:true starts over). list_assets reads the creator's assets and avatar bases. build packages every variant (or `variant`) with the packaging rules; test installs one built variant on target_id. Publishing needs preview_publish, then explicit human approval of the shown summary and rights statement, then confirm_publish with the returned code; withdraw likewise needs preview_withdraw and confirm_withdraw. Never infer approval. Network and build actions return pending jobs (poll status).", RequiresPolling = true, PollAction = "status", MaxPollSeconds = 180)]
+    [McpForUnityTool("myavatar_gallery", Description = "Create and publish My Avatar gallery assets (clothes, accessories). inspect shows the draft shared with the 'Publish to the gallery' window, scene avatars (target_id) and the API it publishes to. configure merges data into that draft (draftSchema from inspect; existingAssetId picks one of the creator's assets, 0 a new one; variants take prefabPaths or packagePath, and manifest setup prefabs by path; thumbnailPath and previewPaths take the window's own pictures or a PNG/JPEG under Assets, taken in as new pictures, and refuse any other file; reset:true starts over). list_assets reads the creator's assets and avatar bases. build packages every variant (or `variant`) with the packaging rules; test installs one built variant on target_id. Publishing needs preview_publish, then explicit human approval of the shown summary and rights statement, then confirm_publish with the returned code; withdraw likewise needs preview_withdraw and confirm_withdraw. Never infer approval. Network and build actions return pending jobs (poll status).", RequiresPolling = true, PollAction = "status", MaxPollSeconds = 180)]
     public static class GalleryAuthoringTool
     {
         public sealed class Parameters
@@ -61,7 +61,8 @@ namespace Orbiters.MyAvatar.Editor.MCP
                 switch (p.action)
                 {
                     case "configure":
-                        Configure(draft, data ?? throw new ArgumentException("Provide the draft fields to change."));
+                        GalleryDraftChanges.Apply(data ?? throw new ArgumentException("Provide the draft fields to change."));
+                        GalleryPublisher.NotifyDraftReplaced();
                         return new SuccessResponse("Gallery draft saved; the Publish to the gallery window shows it.", Summary(GalleryCreatorDraft.Load()));
                     case "list_assets":
                         return Start(p.action, async () =>
@@ -148,55 +149,6 @@ namespace Orbiters.MyAvatar.Editor.MCP
                 variantSchema = new { label = "PC", source = "prefab | package", prefabPaths = new[] { "Assets/Example/Item.prefab" }, packagePath = "C:/path/item.unitypackage",
                     platforms = new[] { "pc", "android", "ios" }, baseScope = "any | bases", baseIds = new int[0] },
             };
-        }
-
-        // Fields the user decides through approval or the window only, and what Orbiters answered.
-        private static readonly string[] Protected = { "rights", "assetId", "newAsset", "releaseId", "releaseAssetId", "idempotencyKey", "draftId", "picturesSent", "message", "messageError" };
-
-        private static void Configure(GalleryCreatorDraft draft, JObject data)
-        {
-            if (data.Value<bool?>("reset") == true) { GalleryCreatorDraft.Clear(); draft = GalleryCreatorDraft.Load(); }
-            data = (JObject)data.DeepClone();
-            data.Remove("reset");
-            // Another asset (or a new one) drops the draft version and uploads that belonged to the previous one.
-            if (data["existingAssetId"] != null) draft.Target(data.Value<int?>("existingAssetId") ?? 0);
-            else if (data.Value<bool?>("newAsset") == true) draft.Target(0);
-            data.Remove("existingAssetId");
-            foreach (string key in Protected) data.Remove(key);
-            if (data["variants"] is JArray variants)
-                foreach (var variant in variants.OfType<JObject>())
-                {
-                    if (variant["prefabPaths"] is JArray paths)
-                    {
-                        variant["prefabGuids"] = new JArray(paths.Select(path =>
-                        {
-                            string guid = AssetDatabase.AssetPathToGUID((string)path);
-                            if (string.IsNullOrEmpty(guid) || AssetDatabase.LoadAssetAtPath<GameObject>((string)path) == null) throw new ArgumentException("Not a prefab in this project: " + path);
-                            return guid;
-                        }));
-                        variant.Remove("prefabPaths");
-                        if (variant["source"] == null) variant["source"] = "prefab";
-                    }
-                    if (variant["packagePath"] != null && variant["source"] == null) variant["source"] = "package";
-                    // Setup prefabs are named by path; their GUID comes from the project.
-                    foreach (var prefab in (variant["manifest"]?["setups"] as JArray ?? new JArray()).OfType<JObject>().SelectMany(s => (s["prefabs"] as JArray ?? new JArray()).OfType<JObject>()))
-                    {
-                        string path = (string)prefab["path"];
-                        if (string.IsNullOrEmpty(path)) continue;
-                        string guid = AssetDatabase.AssetPathToGUID(path);
-                        if (string.IsNullOrEmpty(guid)) throw new ArgumentException("Not an asset in this project: " + path);
-                        prefab["guid"] = guid;
-                        if (prefab["name"] == null) prefab["name"] = System.IO.Path.GetFileNameWithoutExtension(path);
-                    }
-                    foreach (string key in new[] { "report", "uploadedId", "uploadedRelease", "uploadedFingerprint", "testJob" }) variant.Remove(key);
-                }
-            JsonConvert.PopulateObject(data.ToString(), draft, new JsonSerializerSettings { ObjectCreationHandling = ObjectCreationHandling.Replace });
-            foreach (var variant in draft.variants) variant.manifest.FixDefault();
-            // New or replaced pictures go to Orbiters with the next publish.
-            if (data["thumbnailPath"] != null || data["previewPaths"] != null || data["replacePreviews"] != null) draft.picturesSent = false;
-            draft.rights = false;
-            draft.Save();
-            GalleryPublisher.NotifyDraftReplaced();
         }
 
         private static MyAvatar Avatar(int id, bool required)

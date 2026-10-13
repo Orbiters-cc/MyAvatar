@@ -15,6 +15,12 @@
 .opt-estimate__title { margin: 0; padding: 0; color: #f2f2f2; font-size: 12px; -unity-font-style: bold; }
 .opt-estimate__aside { margin: 0; padding: 0; color: #8f8f8f; font-size: 11px; }
 .opt-estimate__none { margin: 6px 0 0 0; padding: 0; color: #8f8f8f; font-size: 11px; white-space: normal; }
+.opt-estimate__error { margin: 2px 0 0 0; padding: 0; color: #ffb020; font-size: 11px; white-space: normal; }
+/* Measured again: the last figures stay in place, dimmed. */
+.opt-download, .opt-download__caption, .opt-ranks, .opt-estimate__why, .opt-stats { transition-property: opacity; transition-duration: 0.15s; }
+.opt-estimate--measuring .opt-download, .opt-estimate--measuring .opt-download__caption, .opt-estimate--measuring .opt-ranks,
+.opt-estimate--measuring .opt-estimate__why, .opt-estimate--measuring .opt-stats { opacity: 0.5; }
+.mcb-button.opt-button.opt-estimate__retry { align-self: flex-start; margin: 10px 0 0 0; }
 .opt-download { flex-direction: row; align-items: center; height: 31px; margin-top: 2px; }
 .opt-download__delta { flex-grow: 1; }
 .opt-download__caption { margin: 2px 0 6px 52px; padding: 0; color: #8f8f8f; font-size: 10px; white-space: normal; }

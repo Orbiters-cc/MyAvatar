@@ -236,6 +236,66 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
         private static System.Collections.IList Rules(Component vrcFury) => (System.Collections.IList)VrcFury.Field(VrcFury.Content(vrcFury), "rewriteBindings");
 
+        // An eye prop shown while the eyes are not tracked moves no face shape: its Bool conditions still read the Float.
+        [Test]
+        public void EyeTrackingConditionsReadTheTemplatesFloatInEveryLayer()
+        {
+            var face = Mesh(Rexouium);
+            var fx = new AnimatorController(); owned.Add(fx);
+            Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Eyes", (Clip(("Blink_L", 100f)), "FT/v2/EyeLidLeft"));
+            var props = Layer(fx, "Eye props");
+            var hidden = props.AddState("Hidden"); props.defaultState = hidden;
+            var shown = props.AddState("Shown"); shown.motion = Clip();
+            var show = hidden.AddTransition(shown); show.AddCondition(AnimatorConditionMode.IfNot, 0, FaceTrackingBuild.EyeTracking);
+            var hide = shown.AddTransition(hidden); hide.AddCondition(AnimatorConditionMode.If, 0, FaceTrackingBuild.EyeTracking);
+
+            FaceTrackingBuild.Finish(fx, FaceTrackingStandard.SRanipal, "Body", face);
+
+            var off = show.conditions.Single(c => c.parameter == FaceTrackingBuild.EyeTracking);
+            var on = hide.conditions.Single(c => c.parameter == FaceTrackingBuild.EyeTracking);
+            Assert.AreEqual(AnimatorConditionMode.Less, off.mode); Assert.AreEqual(.5f, off.threshold);
+            Assert.AreEqual(AnimatorConditionMode.Greater, on.mode); Assert.AreEqual(.5f, on.threshold);
+        }
+
+        // A hand-gesture tree moving the tongue shape and the jaw: before the face tracking layers it leaves both to tracking;
+        // after them, a quiet tree would hold the tracked shape at rest over the tracking, so only the jaw rests there.
+        [Test]
+        public void ALayerAfterTheTrackingKeepsItsTrackedShapesAndRestsTheJaw()
+        {
+            var face = Mesh(Rexouium);
+            var fx = new AnimatorController(); owned.Add(fx);
+            fx.AddParameter("GestureRightWeight", AnimatorControllerParameterType.Float);
+            fx.AddParameter(FaceTrackingBuild.LipTracking, AnimatorControllerParameterType.Float);
+            var avatar = new GameObject("Avatar"); owned.Add(avatar);
+            var jaw = new GameObject("Jaw").transform; jaw.SetParent(new GameObject("Head").transform); jaw.parent.SetParent(avatar.transform);
+            AnimatorState Gesture(string layer)
+            {
+                var pull = Clip(("LipTrack_TongueExtend", 100f));
+                AnimationUtility.SetEditorCurve(pull, EditorCurveBinding.FloatCurve("Head/Jaw", typeof(Transform), "m_LocalPosition.y"), AnimationCurve.Constant(0, 1, .1f));
+                var state = Layer(fx, layer).AddState("Pull");
+                state.motion = Tree(layer + " Tree", "GestureRightWeight", (0f, Clip()), (1f, pull));
+                return state;
+            }
+            var before = Gesture("Before");
+            Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Mouth", (Clip(("LipTrack_TongueExtend", 100f)), "FT/v2/TongueOut"));
+            var after = Gesture("After");
+
+            FaceTrackingBuild.Finish(fx, FaceTrackingStandard.SRanipal, "Body", face, avatar.transform);
+
+            IEnumerable<EditorCurveBinding> Tracked(AnimatorState state)
+            {
+                var quiet = (BlendTree)state.motion;
+                Assert.AreEqual(FaceTrackingBuild.LipTracking, quiet.blendParameter);
+                return ((BlendTree)quiet.children[1].motion).children.SelectMany(c => AnimationUtility.GetCurveBindings((AnimationClip)c.motion));
+            }
+            var early = Tracked(before).ToList();
+            Assert.False(early.Any(b => b.propertyName == "blendShape.LipTrack_TongueExtend"), "before the tracking: tracking's alone");
+            Assert.False(early.Any(b => b.path == "Head/Jaw"));
+            var late = Tracked(after).ToList();
+            Assert.True(late.Any(b => b.propertyName == "blendShape.LipTrack_TongueExtend"), "after it: not held at rest over the tracking");
+            Assert.False(late.Any(b => b.path == "Head/Jaw"), "the jaw rests while tracked");
+        }
+
         [Test]
         public void BlinksWaitWhileTrackedOnlyOnTheWayToClosedEyes()
         {

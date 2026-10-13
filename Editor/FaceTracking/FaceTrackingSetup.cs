@@ -8,7 +8,8 @@ using UnityEngine;
 namespace Orbiters.MyAvatar.Editor.FaceTracking
 {
     /// <summary>
-    /// Sets up Adjerry91's face tracking template in one click: installs it (and VRCFury) through VPM when missing, puts the
+    /// Sets up Adjerry91's face tracking template in one click: installs it (and VRCFury) through VPM when missing, once the
+    /// plan of what it downloads was accepted (<see cref="Downloads"/>), puts the
     /// template for the avatar's blendshape standard on the avatar and points it at the face mesh. The template's files
     /// stay as they are, as its author asks; the build animates the face's own blendshape names and keeps hand gestures
     /// off the face while tracking (<see cref="FaceTrackingBuild"/>).
@@ -18,20 +19,32 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         private const string VrcFuryId = "com.vrcfury.vrcfury";
         // The template animates a mesh named "Body" at the avatar's root.
         internal const string TemplateFace = "Body";
-        private static readonly PackageSetup Downloads = new PackageSetup("FaceTracking", "face tracking", "VRCFury or Adjerry91’s Face Tracking Templates",
+        /// <summary>The downloads face tracking needs, and the avatars waiting for them.</summary>
+        internal static readonly PackageSetup Downloads = new PackageSetup("FaceTracking", "face tracking", "VRCFury or Adjerry91’s Face Tracking Templates",
             () => VrcFury.Installed && FaceTrackingDetection.TemplatesInstalled, Finish);
 
-        /// <summary>Sets up face tracking on <paramref name="root"/>, installing what is missing first. Returns a note for the user.</summary>
+        /// <summary>The packages to download before face tracking can be set up (package ids), empty when none.</summary>
+        internal static List<string> Missing()
+        {
+            var missing = new List<string>();
+            if (!VrcFury.Installed) missing.Add(VrcFuryId);
+            if (!FaceTrackingDetection.TemplatesInstalled) missing.Add(FaceTrackingDetection.PackageId);
+            return missing;
+        }
+
+        /// <summary>
+        /// Sets up face tracking on <paramref name="root"/> once nothing is missing (<see cref="Missing"/>; the section
+        /// downloads it first). Returns a note for the user.
+        /// </summary>
         internal static string Start(MyAvatar avatar, Transform root)
         {
             var report = FaceTrackingDetection.Inspect(root);
             if (report.SetUp) return "Face tracking is already set up on this avatar.";
             if (!report.Ready) return "This avatar's face does not have enough face tracking blendshapes.";
-            var missing = new List<string>();
-            if (!VrcFury.Installed) missing.Add(VrcFuryId);
-            if (!FaceTrackingDetection.TemplatesInstalled) missing.Add(FaceTrackingDetection.PackageId);
-            if (missing.Count == 0) { Downloads.StopWaiting(); return Apply(root, report); }
-            return Downloads.Download(avatar, missing);
+            var missing = Missing();
+            if (missing.Count > 0) return "Download " + string.Join(" and ", missing) + " first.";
+            Downloads.Forget(avatar);
+            return Apply(root, report);
         }
 
         /// <summary>Puts the template on the avatar (one Undo step). Null when done, else why not.</summary>

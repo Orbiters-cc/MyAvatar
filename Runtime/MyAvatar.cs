@@ -179,10 +179,17 @@ namespace Orbiters.MyAvatar
         public List<string> path = new List<string>();
         /// <summary>For each name of <see cref="path"/>: which item of that name it is in its menu (0 for the first).</summary>
         public List<int> nth = new List<int>();
-        /// <summary>What it was when it was deleted, to show it among the deleted items: its control type, icon and parameter.</summary>
+        /// <summary>
+        /// What it was when it was deleted: its control type, icon and parameter. Only an item of that type and parameter at
+        /// its path is left out (a new item of the same name is not).
+        /// </summary>
         public int type;
         public Texture2D icon;
         public string parameter;
+        /// <summary>The component behind the item (a VRCFury Toggle, a Modular Avatar Menu Item…), null for a menu asset's control.</summary>
+        public Component source;
+        /// <summary>Whether a component was behind the item: once it is deleted, <see cref="source"/> reads null, and the item is gone.</summary>
+        public bool fromComponent;
 
         public string Name => path.Count > 0 ? path[path.Count - 1] : "";
     }

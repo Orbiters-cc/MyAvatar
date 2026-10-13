@@ -80,7 +80,9 @@ namespace Orbiters.MyAvatar.Editor
     /// to the best shader in the project: its own family keeps every setting, another family gets its texture, color, normal
     /// map, emission and blending. Materials in the project are fixed where they are (every avatar using one renders again),
     /// the original kept beside each as "name (old)"; those in packages or models are copied into My Avatar's folder for this
-    /// avatar. One Undo step restores everything.
+    /// avatar. One Undo step restores everything. A backup holding the same original is used again when the material is
+    /// fixed again after an Undo; copies are tracked as generated files (one an Undo left unused goes, a Redo brings it
+    /// back), and a fix that fails midway leaves nothing behind.
     /// </summary>
     internal static class BrokenMaterials
     {
@@ -94,20 +96,43 @@ namespace Orbiters.MyAvatar.Editor
         /// <summary>
         /// Keeps <paramref name="material"/>'s file as it is now beside it, as "name (old).mat" with its own GUID and the backup
         /// label (with the shader it was made for, it renders again once that shader is installed). A backup already there
-        /// (fixed before, then undone) is the same original and stays. Returns its path, null for a material without a .mat file.
+        /// holding exactly this original (fixed before, then undone) stays; one of another original (the material imported
+        /// again since) is kept too, and this one gets the next name. Returns its path, null for a material without a .mat file.
         /// </summary>
-        internal static string Backup(Material material)
+        internal static string Backup(Material material) => Backup(material, out _);
+
+        private static string Backup(Material material, out bool made)
         {
+            made = false;
             string path = material ? AssetDatabase.GetAssetPath(material) : null;
             if (string.IsNullOrEmpty(path) || !path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase) || !AssetDatabase.IsMainAsset(material)) return null;
-            string target = Path.GetDirectoryName(path).Replace('\\', '/') + "/" + Path.GetFileNameWithoutExtension(path) + BackupSuffix + ".mat";
-            if (IsBackup(AssetDatabase.LoadAssetAtPath<Material>(target))) return target;
-            target = AssetDatabase.GenerateUniqueAssetPath(target);
             AssetDatabase.SaveAssetIfDirty(material);
+            string folder = Path.GetDirectoryName(path).Replace('\\', '/'), name = Path.GetFileNameWithoutExtension(path) + BackupSuffix;
+            string target = folder + "/" + name + ".mat";
+            for (int i = 1; File.Exists(target); i++)
+            {
+                var kept = AssetDatabase.LoadAssetAtPath<Material>(target);
+                if (IsBackup(kept) && SameOriginal(material, kept)) return target;
+                target = folder + "/" + name + " " + i + ".mat";
+            }
             if (!AssetDatabase.CopyAsset(path, target)) throw new IOException("Could not keep a copy of " + path + " before fixing it.");
+            made = true;
             var copy = AssetDatabase.LoadAssetAtPath<Material>(target);
             AssetDatabase.SetLabels(copy, AssetDatabase.GetLabels(copy).Append(BackupLabel).Distinct().ToArray());
             return target;
+        }
+
+        // The same original: what both saved (shader, values, textures, tags, keywords, queue), whatever their names.
+        internal static bool SameOriginal(Material material, Material backup)
+        {
+            if (!material || !backup) return false;
+            SavedMaterial x = SavedMaterial.Read(material), y = SavedMaterial.Read(backup);
+            bool Same<T>(Dictionary<string, T> a, Dictionary<string, T> b, Func<T, T, bool> equal) =>
+                a.Count == b.Count && a.All(pair => b.TryGetValue(pair.Key, out var other) && equal(pair.Value, other));
+            return x.ShaderGuid == y.ShaderGuid && x.Queue == y.Queue &&
+                   Same(x.Floats, y.Floats, (a, b) => a == b) && Same(x.Colors, y.Colors, (a, b) => a == b) && Same(x.Tags, y.Tags, (a, b) => a == b) &&
+                   Same(x.Textures, y.Textures, (a, b) => a.Texture == b.Texture && a.Scale == b.Scale && a.Offset == b.Offset) &&
+                   x.Keywords.OrderBy(k => k, StringComparer.Ordinal).SequenceEqual(y.Keywords.OrderBy(k => k, StringComparer.Ordinal));
         }
 
         /// <summary>Why <paramref name="material"/> does not render, or null when it does.</summary>
@@ -131,6 +156,32 @@ namespace Orbiters.MyAvatar.Editor
         /// <summary>The materials below <paramref name="root"/> that do not render, each with its plan.</summary>
         internal static List<BrokenMaterial> Inspect(GameObject root, ShaderCatalog catalog = null)
         {
+            var found = Find(root);
+            catalog ??= new ShaderCatalog();
+            foreach (var entry in found)
+            {
+                MaterialShaders.Plan(entry, SavedMaterial.Read(entry.Material), catalog);
+                entry.Copy = entry.Target && ReadOnly(entry.Material);
+                // Particles, trails and lines need a particle shader: only their own family's shader is safe to guess.
+                if (entry.Target && !entry.Rebind && entry.Renderers.Any(r => r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer))
+                {
+                    entry.Target = null; entry.Copy = false;
+                    entry.Kept.Clear(); entry.Lost.Clear();
+                    entry.Reason = "It draws a particle effect, trail or line: pick a particle shader for it.";
+                }
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// What does not render below <paramref name="root"/> as a short key (each material, why, and its renderers), without
+        /// reading the materials' files or planning: what <see cref="Inspect"/> finds changed when the key changed.
+        /// </summary>
+        internal static string Key(GameObject root) =>
+            string.Join("|", Find(root).Select(e => e.Material.GetInstanceID() + ":" + e.Problem + ":" + string.Join(",", e.Renderers.Select(r => r.GetInstanceID()))));
+
+        private static List<BrokenMaterial> Find(GameObject root)
+        {
             var found = new Dictionary<Material, BrokenMaterial>();
             if (!root) return new List<BrokenMaterial>();
             var fine = new HashSet<Material>();
@@ -148,19 +199,6 @@ namespace Orbiters.MyAvatar.Editor
                         found[material] = entry = new BrokenMaterial { Material = material, Problem = problem };
                     }
                     if (!entry.Renderers.Contains(renderer)) entry.Renderers.Add(renderer);
-                }
-            }
-            catalog ??= new ShaderCatalog();
-            foreach (var entry in found.Values)
-            {
-                MaterialShaders.Plan(entry, SavedMaterial.Read(entry.Material), catalog);
-                entry.Copy = entry.Target && ReadOnly(entry.Material);
-                // Particles, trails and lines need a particle shader: only their own family's shader is safe to guess.
-                if (entry.Target && !entry.Rebind && entry.Renderers.Any(r => r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer))
-                {
-                    entry.Target = null; entry.Copy = false;
-                    entry.Kept.Clear(); entry.Lost.Clear();
-                    entry.Reason = "It draws a particle effect, trail or line: pick a particle shader for it.";
                 }
             }
             return found.Values.OrderBy(e => e.Material.name, StringComparer.OrdinalIgnoreCase).ToList();
@@ -193,33 +231,58 @@ namespace Orbiters.MyAvatar.Editor
             var renderers = new List<Renderer>();
             var edited = new List<Material>();
             var log = new List<string>();
-            foreach (var entry in list)
+            // Files this fix made: removed again when it fails midway. The copies are generated files once it worked.
+            var made = new List<string>();
+            var copies = new List<string>();
+            bool done = false;
+            try
             {
-                var source = entry.Material;
-                var saved = SavedMaterial.Read(source);
-                string before = entry.MadeFor ?? MaterialShaders.Pretty(source.shader ? source.shader.name : null);
-                if (entry.Copy || copyAll)
+                foreach (var entry in list)
                 {
-                    TextureImport.EnsureFolder(AvatarMaterials.Folder);
-                    var copy = new Material(source) { name = source.name };
-                    MaterialShaders.Convert(copy, entry, saved);
-                    AssetDatabase.CreateAsset(copy, AssetDatabase.GenerateUniqueAssetPath(AvatarMaterials.Folder + "/" + FileName(source.name) + ".mat"));
-                    replacements[source] = copy;
-                    renderers.AddRange(entry.Renderers);
-                    log.Add(source.name + " (" + before + " → " + entry.Target.name + ", copied to " + AssetDatabase.GetAssetPath(copy) + Lost(entry) + ")");
+                    var source = entry.Material;
+                    var saved = SavedMaterial.Read(source);
+                    string before = entry.MadeFor ?? MaterialShaders.Pretty(source.shader ? source.shader.name : null);
+                    if (entry.Copy || copyAll)
+                    {
+                        TextureImport.EnsureFolder(AvatarMaterials.Folder);
+                        // Always a new copy: one made before may be another avatar's now.
+                        var copy = new Material(source) { name = source.name };
+                        MaterialShaders.Convert(copy, entry, saved);
+                        string path = AssetDatabase.GenerateUniqueAssetPath(AvatarMaterials.Folder + "/" + FileName(source.name) + ".mat");
+                        AssetDatabase.CreateAsset(copy, path);
+                        made.Add(path);
+                        copies.Add(path);
+                        replacements[source] = copy;
+                        renderers.AddRange(entry.Renderers);
+                        log.Add(source.name + " (" + before + " → " + entry.Target.name + ", copied to " + AssetDatabase.GetAssetPath(copy) + Lost(entry) + ")");
+                    }
+                    else
+                    {
+                        entry.Backup = Backup(source, out bool backedUp);
+                        if (backedUp) made.Add(entry.Backup);
+                        Undo.RecordObject(source, "Fix materials");
+                        MaterialShaders.Convert(source, entry, saved);
+                        EditorUtility.SetDirty(source);
+                        if (EditorUtility.IsPersistent(source)) edited.Add(source);
+                        log.Add(source.name + " (" + before + " → " + entry.Target.name + Lost(entry) + (entry.Backup != null ? "; original kept as " + entry.Backup : "") + ")");
+                    }
                 }
-                else
+                if (replacements.Count > 0) AvatarMaterials.Reassign(avatar, renderers, replacements);
+                done = true;
+            }
+            finally
+            {
+                if (!done)
                 {
-                    entry.Backup = Backup(source);
-                    Undo.RecordObject(source, "Fix materials");
-                    MaterialShaders.Convert(source, entry, saved);
-                    EditorUtility.SetDirty(source);
-                    if (EditorUtility.IsPersistent(source)) edited.Add(source);
-                    log.Add(source.name + " (" + before + " → " + entry.Target.name + Lost(entry) + (entry.Backup != null ? "; original kept as " + entry.Backup : "") + ")");
+                    // Nothing stays half converted: the materials and renderers go back, and the files made for it go.
+                    Undo.CollapseUndoOperations(group);
+                    Undo.RevertAllDownToGroup(group);
+                    foreach (string path in made) AssetDatabase.DeleteAsset(path);
                 }
             }
-            if (replacements.Count > 0) AvatarMaterials.Reassign(avatar, renderers, replacements);
             foreach (var material in edited) AssetDatabase.SaveAssetIfDirty(material);
+            // A test's avatar (in a preview scene) is not the user's: its copies are not tracked with the user's.
+            if (!UnityEditor.SceneManagement.EditorSceneManager.IsPreviewScene(root.scene)) Orbiters.Toolkit.Editor.Storage.GeneratedAssets.Track(copies);
             Undo.CollapseUndoOperations(group);
             SceneView.RepaintAll();
             Debug.Log("[My Avatar] Fixed " + list.Count + (list.Count == 1 ? " material" : " materials") + " of " + root.name + " that did not render: " +

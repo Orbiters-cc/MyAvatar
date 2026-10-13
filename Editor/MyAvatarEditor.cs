@@ -119,7 +119,7 @@ namespace Orbiters.MyAvatar.Editor
                 Run = work => Run(work),
                 AiOn = () => aiConnected && aiEnabled,
                 SetAi = enabled => _ = SetAiAsync(enabled),
-                ApplyTextures = (images, scope) => Import(images, scope),
+                ApplyTextures = (images, scope, tail) => Import(images, scope, tail),
                 Background = status => zone.SetBackground(status),
                 Zone = zone,
                 OwnsZone = () => accessoryDrop,
@@ -247,8 +247,9 @@ namespace Orbiters.MyAvatar.Editor
             await Import(paths);
         }
 
-        // Scope: only the materials of these objects (the accessories an accessory drop just added).
-        private async Task Import(string[] paths, Transform[] scope = null)
+        // Scope: only the materials of these objects (the accessories an accessory drop just added). Tail: the drop's Undo
+        // step, which the textures join when nothing else was done while they were read.
+        private async Task Import(string[] paths, Transform[] scope = null, UndoTail tail = null)
         {
             var cancellation = operation.Token;
             int started = revision;
@@ -286,12 +287,17 @@ namespace Orbiters.MyAvatar.Editor
             zone.ShowProgress(.9f, "Applying to " + entries.Where(e => e.material).Select(e => e.material).Distinct().Count() + " materials…");
             await Task.Yield();
             cancellation.ThrowIfCancellationRequested();
-            Undo.RecordObject(avatar, "My Avatar: texture set");
-            int count = TextureChanges.Apply(avatar, entries, folder, scoped);
-            if (count == 0) { avatar.undoMaterials.Clear(); avatar.canRedo = false; }
-            avatar.textures = entries; avatar.batchFolder = folder; avatar.batchScope = scoped; avatar.notice = null;
-            TextureMemory.Record(avatar, entries);
-            TextureChanges.Dirty(avatar);
+            int count = 0;
+            void Apply()
+            {
+                Undo.RecordObject(avatar, "My Avatar: texture set");
+                count = TextureChanges.Apply(avatar, entries, folder, scoped);
+                if (count == 0) { avatar.undoMaterials.Clear(); avatar.canRedo = false; }
+                avatar.textures = entries; avatar.batchFolder = folder; avatar.batchScope = scoped; avatar.notice = null;
+                TextureMemory.Record(avatar, entries);
+                TextureChanges.Dirty(avatar);
+            }
+            if (tail != null) tail.Join(Apply); else Apply();
             zone.ShowProgress(1f, "Done");
             await FinishImportAsync(ask ? () => ResolveAsync(token, payload, entries, unmatched, open, folder) : (Func<Task>)null,
                 cancellation, started);
@@ -359,17 +365,34 @@ namespace Orbiters.MyAvatar.Editor
             if (!active || !avatar || busy || !Running.Add(avatar.GetInstanceID())) return;
             if (edits) Edited();
             int id = avatar.GetInstanceID(); busy = true; operation = new CancellationTokenSource();
-            content.Query<Button>().ForEach(b => b.SetEnabled(false));
+            PauseButtons();
             try { await work(); }
             catch (OperationCanceledException) { note = "Cancelled."; noteWarning = false; }
             catch (Exception ex) { note = ex.Message; noteWarning = true; }
             finally
             {
                 Running.Remove(id); busy = false; operation?.Dispose(); operation = null;
-                if (active && root != null) { content.Query<Button>().ForEach(b => b.SetEnabled(true)); RefreshResults(); }
+                if (active && root != null) { ResumeButtons(); RefreshResults(); }
+                else paused.Clear();
                 var next = pendingAi; pendingAi = null;
                 if (next != null && active && aiEnabled && avatar) _ = next();
             }
+        }
+
+        // While a drop works, the page's buttons wait; afterwards only those paused here come back: one a section turned off
+        // for its own reason (a version that can't be removed, a limit, a download under way) stays off.
+        private readonly List<Button> paused = new List<Button>();
+
+        private void PauseButtons()
+        {
+            paused.Clear();
+            content.Query<Button>().ForEach(b => { if (b.enabledSelf) { b.SetEnabled(false); paused.Add(b); } });
+        }
+
+        private void ResumeButtons()
+        {
+            foreach (var button in paused) if (button.panel != null && !button.enabledSelf) button.SetEnabled(true);
+            paused.Clear();
         }
 
         // One line that summarises the current set: counts per dropped file, not per material it was applied to.
@@ -457,6 +480,14 @@ namespace Orbiters.MyAvatar.Editor
             button.RegisterCallback<PointerDownEvent>(_ => button.AddToClassList("pressed"), TrickleDown.TrickleDown);
             button.RegisterCallback<PointerUpEvent>(_ => button.RemoveFromClassList("pressed"), TrickleDown.TrickleDown);
             button.RegisterCallback<PointerLeaveEvent>(_ => button.RemoveFromClassList("pressed"));
+            return button;
+        }
+
+        /// <summary>A button acting on press (pointer, mouse or keyboard), with Unity's click as the fallback (ButtonInteraction).</summary>
+        internal static Button PressButton(string text, Action action)
+        {
+            var button = Button(text, () => { });
+            Orbiters.Toolkit.Editor.ButtonInteraction.RegisterImmediateClick(button, action);
             return button;
         }
         [MenuItem("GameObject/Orbiters/My Avatar", false, 20)]

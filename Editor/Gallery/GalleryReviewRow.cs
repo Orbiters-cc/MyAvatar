@@ -7,8 +7,9 @@ using UnityEngine.UIElements;
 namespace Orbiters.MyAvatar.Editor.Gallery
 {
     /// <summary>
-    /// One review in an asset's details: its author's face and name, "Owns it" when they own the asset, when, the text and
-    /// its likes. The author edits it in place, and deletes it with a second press, like a version's Withdraw.
+    /// One review in an asset's details: its author's face and name, "Owns it" when they own the asset, when, the text (as
+    /// written: reviews are plain text) and its likes. The author edits it in place, and deletes it with a second press,
+    /// like a version's Withdraw.
     /// </summary>
     internal sealed class GalleryReviewRow : VisualElement
     {
@@ -18,23 +19,28 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             void ToggleLike(GalleryReview review);
             /// <summary>Opens the review in place for editing, or closes it (null).</summary>
             void Edit(GalleryReview review);
+            /// <summary>What the field being edited holds now: kept while the list shows again.</summary>
+            void Typed(string content);
             void Save(GalleryReview review, string content);
             void Delete(GalleryReview review);
         }
 
         internal GalleryReview Review { get; }
+        /// <summary>The review is open for editing here: the list keeps this row as it is while it shows again.</summary>
+        internal bool Editing { get; }
         private readonly IHost host;
         private Button like;
         private Label likeCount;
 
-        internal GalleryReviewRow(GalleryReview review, IHost host, bool editing = false)
+        /// <param name="editing">The text of the review being edited, null when it is shown.</param>
+        internal GalleryReviewRow(GalleryReview review, IHost host, string editing = null)
         {
-            Review = review; this.host = host;
+            Review = review; this.host = host; Editing = editing != null;
             AddToClassList("review");
             EnableInClassList("review--pending", review.pending);
             var face = new Image { scaleMode = ScaleMode.ScaleAndCrop };
             face.AddToClassList("review__avatar");
-            if (!string.IsNullOrEmpty(review.author?.avatarUrl)) GalleryImages.Show(face, review.author.avatarUrl);
+            if (!string.IsNullOrEmpty(review.author?.avatarUrl)) GalleryImages.ShowAvatar(face, review.author.avatarUrl);
             Add(face);
             var body = GalleryUI.Box("review__body", this);
             var header = GalleryUI.Box("review__header", body);
@@ -42,8 +48,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (review.isCreator) GalleryUI.Text("Creator", "review__badge review__badge--creator", header);
             else if (review.ownsAsset) GalleryUI.Text("Owns it", "review__badge", header).tooltip = "Owns this asset.";
             GalleryUI.Text(review.pending ? "Posting…" : Ago(review.createdAt) + (review.edited ? " · edited" : ""), "review__meta", header);
-            if (editing) { Editor(body); return; }
-            GalleryUI.Text(GallerySheets.PlainText(review.content), "review__text", body);
+            if (editing != null) { Editor(body, editing); return; }
+            GalleryUI.Text(review.content, "review__text", body);
             var footer = GalleryUI.Box("review__footer", body);
             like = LikePill(review.likedByCurrentUser, review.likeCount, small: true, out likeCount);
             like.tooltip = review.mine ? "Likes of your review" : !host.SignedIn ? "Sign in to Orbiters at the top of My Avatar to like reviews." : review.likedByCurrentUser ? "Unlike" : "Like";
@@ -52,28 +58,31 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             footer.Add(like);
             if (!review.mine || review.pending) return;
             footer.Add(Tool(GalleryReviewIcon.Kind.Edit, "Edit your review", () => host.Edit(Review), "review__tool"));
-            Button delete = null;
-            delete = Tool(GalleryReviewIcon.Kind.Delete, "Delete your review", () =>
+            GalleryUI.TwoPress press = null;
+            var delete = Tool(GalleryReviewIcon.Kind.Delete, "Delete your review", () => press.Press(), "review__tool review__tool--delete");
+            var confirm = GalleryUI.Text("Delete?", "review__tool-label");
+            press = new GalleryUI.TwoPress(delete, armed =>
             {
-                if (delete.ClassListContains("review__tool--armed")) { host.Delete(Review); return; }
-                delete.AddToClassList("review__tool--armed");
-                delete.Add(GalleryUI.Text("Delete?", "review__tool-label"));
-                delete.tooltip = "Press again to delete your review.";
-            }, "review__tool review__tool--delete");
+                delete.EnableInClassList("review__tool--armed", armed);
+                if (armed) { if (confirm.parent != delete) delete.Add(confirm); }
+                else confirm.RemoveFromHierarchy();
+                delete.tooltip = armed ? "Press again to delete your review." : "Delete your review";
+            }, () => host.Delete(Review));
             footer.Add(delete);
         }
 
-        private void Editor(VisualElement body)
+        private void Editor(VisualElement body, string text)
         {
-            var field = new TextField { multiline = true, maxLength = GalleryReviews.MaxLength, value = Review.content ?? "" };
+            var field = new TextField { multiline = true, maxLength = GalleryReviews.MaxLength, value = text };
             field.AddToClassList("review-field");
             body.Add(field);
             var actions = GalleryUI.Box("review-field__actions", body);
             actions.Add(GalleryUI.Button("Cancel", () => host.Edit(null), "gallery-link"));
             var save = GalleryUI.Button("Save", () => host.Save(Review, field.value), "gallery-btn--add");
-            field.RegisterValueChangedCallback(evt => save.SetEnabled(!string.IsNullOrWhiteSpace(evt.newValue)));
+            save.SetEnabled(!string.IsNullOrWhiteSpace(text));
+            field.RegisterValueChangedCallback(evt => { host.Typed(evt.newValue ?? ""); save.SetEnabled(!string.IsNullOrWhiteSpace(evt.newValue)); });
             actions.Add(save);
-            field.schedule.Execute(() => field.Focus());
+            field.schedule.Execute(() => { field.Focus(); field.SelectRange(field.value.Length, field.value.Length); });
         }
 
         private static Button Tool(GalleryReviewIcon.Kind kind, string tooltip, Action action, string className)

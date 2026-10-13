@@ -13,14 +13,17 @@ namespace Orbiters.MyAvatar.Editor
     // one row each with an "All" row on top, and its looks when it has them (Rexouium's feather groups and ear size, Novabeast's
     // parts, breasts and tail size).
     // Rows are rebuilt only when the PhysBones or chains themselves change; any other edit (an Undo of a choice) updates
-    // the rows in place so nothing jumps.
+    // the rows in place so nothing jumps. The looks too: an Undo or Redo shows each chip and slider as it is again.
     internal sealed class AvatarCustomizationSection : AvatarSection
     {
         private readonly MyAvatar avatar;
         private readonly VisualElement physics, looks;
         private IVisualElementScheduledItem pending;
-        private string structure;
+        private string structure, looksStructure;
+        private bool undone;
         private readonly List<Action<List<PhysBonePartInfo>>> updates = new List<Action<List<PhysBonePartInfo>>>();
+        // Each look's control shown again from the avatar as it is.
+        private readonly List<Action> lookUpdates = new List<Action>();
 
         internal AvatarCustomizationSection(MyAvatar avatar) : base("Avatar customization", card: false)
         {
@@ -32,11 +35,28 @@ namespace Orbiters.MyAvatar.Editor
             physics = new VisualElement(); physics.AddToClassList("custom__physics"); frame.Add(physics);
             looks = new VisualElement(); looks.AddToClassList("custom__looks"); frame.Add(looks);
             BuildLooks();
-            EditorApplication.hierarchyChanged += Schedule;
-            Undo.undoRedoPerformed += Schedule;
-            RegisterCallback<DetachFromPanelEvent>(_ => { EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; });
+            Subscribe();
+            // Listening while on screen: docked again (or the Inspector rebuilt), it listens again and catches up.
+            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); undone = true; Schedule(); });
+            RegisterCallback<DetachFromPanelEvent>(_ => Unsubscribe());
             Refresh();
         }
+
+        private void Subscribe()
+        {
+            Unsubscribe();
+            EditorApplication.hierarchyChanged += Schedule;
+            Undo.undoRedoPerformed += Undone;
+        }
+
+        private void Unsubscribe()
+        {
+            EditorApplication.hierarchyChanged -= Schedule;
+            Undo.undoRedoPerformed -= Undone;
+        }
+
+        // An Undo or Redo may also take back what the looks read (a copy of the parameters, a part's toggle).
+        private void Undone() { undone = true; Schedule(); }
 
         private void Schedule()
         {
@@ -47,6 +67,12 @@ namespace Orbiters.MyAvatar.Editor
         private void Refresh()
         {
             if (!avatar) return;
+            if (undone)
+            {
+                undone = false;
+                if (LooksStructure() != looksStructure) BuildLooks();
+            }
+            foreach (var update in lookUpdates) update();
             var parts = PhysBoneParts.Scan(avatar.transform);
             string current = string.Join("|", parts.Select(p =>
                 p.Part + ":" + string.Join(",", p.PhysBones.Select(b => b.GetInstanceID())) + ":" + string.Join(",", p.Unphysicked.Select(t => t.GetInstanceID()))));
@@ -181,13 +207,25 @@ namespace Orbiters.MyAvatar.Editor
 
         // ---- Looks ----
 
+        // What the looks are made of: they are built again only when that changed.
+        private string LooksStructure()
+        {
+            var root = TextureOptimization.AvatarRoot(avatar);
+            var options = RexouiumOptions.Find(root);
+            var nova = NovabeastOptions.Find(root);
+            return string.Join(",", options.Feathers.Select(f => f.Parameter)) + "|" + (options.Ears != null ? options.Ears.GetInstanceID() : 0) + "|" +
+                   string.Join(",", nova.Parts.Select(p => p.Parameter)) + "|" + (nova.Breasts != null) + (nova.Tail != null);
+        }
+
         private void BuildLooks()
         {
-            looks.Clear();
+            looks.Clear(); lookUpdates.Clear();
+            looksStructure = LooksStructure();
             var root = TextureOptimization.AvatarRoot(avatar);
             var options = RexouiumOptions.Find(root);
             var nova = NovabeastOptions.Find(root);
             if (!options.Any && !nova.Any) { looks.style.display = DisplayStyle.None; return; }
+            looks.style.display = DisplayStyle.Flex;
             var title = new Label("Looks"); title.AddToClassList("custom__subtitle"); looks.Add(title);
             if (nova.Any) BuildNovabeast(nova);
             if (!options.Any) return;
@@ -199,21 +237,34 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var group in options.Feathers)
                 {
                     var item = group;
-                    var chip = MyAvatarEditor.Button("", null);
-                    chip.AddToClassList("custom__chip");
-                    chip.tooltip = "Show the " + item.Label.ToLowerInvariant() + " feathers, in the scene and in VRChat. Feathers hidden here are left out of the upload " +
-                                   "(their meshes, materials and textures), with their “" + item.Parameter + "” menu toggle.";
-                    var check = new VectorIcon(IconGlyph.Check); check.AddToClassList("custom__chip-check"); chip.Add(check);
-                    var text = new Label(item.Label); text.AddToClassList("custom__chip-text"); text.pickingMode = PickingMode.Ignore; chip.Add(text);
-                    void Show(bool on) => chip.EnableInClassList("custom__chip--on", on);
-                    Show(RexouiumOptions.Shown(options, item));
-                    // The chip turns at once; the menu default and the scene follow.
-                    chip.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) Show(!chip.ClassListContains("custom__chip--on")); }, TrickleDown.TrickleDown);
-                    chip.clicked += () => { bool on = chip.ClassListContains("custom__chip--on"); RexouiumOptions.SetShown(options, item, on); };
-                    chips.Add(chip);
+                    Chip(chips, item.Label, "Show the " + item.Label.ToLowerInvariant() + " feathers, in the scene and in VRChat. Feathers hidden here are left out of the upload " +
+                                            "(their meshes, materials and textures), with their “" + item.Parameter + "” menu toggle.",
+                        () => RexouiumOptions.Shown(options, item), on => RexouiumOptions.SetShown(options, item, on));
                 }
             }
             if (options.Ears != null) looks.Add(Ears(options));
+        }
+
+        // A look's chip turns at once on press and turns back when the press ends anywhere but on it; the click sets the look
+        // (the menu default and the scene follow), and an Undo or Redo shows it as it is again.
+        private void Chip(VisualElement chips, string label, string tooltip, Func<bool> shown, Action<bool> set)
+        {
+            var chip = MyAvatarEditor.Button("", null);
+            chip.AddToClassList("custom__chip");
+            chip.tooltip = tooltip;
+            var check = new VectorIcon(IconGlyph.Check); check.AddToClassList("custom__chip-check"); chip.Add(check);
+            var text = new Label(label); text.AddToClassList("custom__chip-text"); text.pickingMode = PickingMode.Ignore; chip.Add(text);
+            void Show(bool on) => chip.EnableInClassList("custom__chip--on", on);
+            void Sync() => Show(shown());
+            Sync();
+            chip.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) Show(!shown()); }, TrickleDown.TrickleDown);
+            // Let go off the chip, dragged away or cancelled: no click comes, the chip shows the look as it is.
+            chip.RegisterCallback<PointerUpEvent>(_ => chip.schedule.Execute(Sync), TrickleDown.TrickleDown);
+            chip.RegisterCallback<PointerLeaveEvent>(_ => Sync());
+            chip.RegisterCallback<PointerCaptureOutEvent>(_ => chip.schedule.Execute(Sync));
+            chip.clicked += () => { set(!shown()); Sync(); };
+            chips.Add(chip);
+            lookUpdates.Add(Sync);
         }
 
         // Novabeast: its parts as chips (hidden ones stay hidden in VRChat, their toggle left out), its breasts and tail size as sliders.
@@ -227,24 +278,15 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var part in options.Parts)
                 {
                     var item = part;
-                    var chip = MyAvatarEditor.Button("", null);
-                    chip.AddToClassList("custom__chip");
-                    chip.tooltip = "Show the " + item.Label.ToLowerInvariant() + ", in the scene and in VRChat. Hidden here, it stays hidden: its “" + item.Parameter + "” menu toggle is left out of the upload.";
-                    var check = new VectorIcon(IconGlyph.Check); check.AddToClassList("custom__chip-check"); chip.Add(check);
-                    var text = new Label(item.Label); text.AddToClassList("custom__chip-text"); text.pickingMode = PickingMode.Ignore; chip.Add(text);
-                    void Show(bool on) => chip.EnableInClassList("custom__chip--on", on);
-                    Show(NovabeastOptions.Shown(options, item));
-                    // The chip turns at once; the menu default and the scene follow.
-                    chip.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) Show(!chip.ClassListContains("custom__chip--on")); }, TrickleDown.TrickleDown);
-                    chip.clicked += () => NovabeastOptions.SetShown(options, item, chip.ClassListContains("custom__chip--on"));
-                    chips.Add(chip);
+                    Chip(chips, item.Label, "Show the " + item.Label.ToLowerInvariant() + ", in the scene and in VRChat. Hidden here, it stays hidden: its “" + item.Parameter + "” menu toggle is left out of the upload.",
+                        () => NovabeastOptions.Shown(options, item), on => NovabeastOptions.SetShown(options, item, on));
                 }
             }
             if (options.Breasts != null) looks.Add(Amount(options, options.Breasts, "Breasts, from none to their biggest: what the avatar starts with in VRChat (its Breasts slider), shown in the scene too."));
             if (options.Tail != null) looks.Add(Amount(options, options.Tail, "Tail size, from its own to the smallest: what the avatar starts with in VRChat (its Tail Size slider), shown in the scene too."));
         }
 
-        private static VisualElement Amount(NovabeastOptions.Options options, NovabeastOptions.Amount amount, string tip)
+        private VisualElement Amount(NovabeastOptions.Options options, NovabeastOptions.Amount amount, string tip)
         {
             var row = new VisualElement(); row.AddToClassList("custom__slider-row"); row.tooltip = tip;
             var label = new Label(amount.Label); label.AddToClassList("custom__chips-label"); row.Add(label);
@@ -267,13 +309,15 @@ namespace Orbiters.MyAvatar.Editor
             slider.RegisterCallback<DetachFromPanelEvent>(_ => Flush());
             // Double-click back to none.
             slider.RegisterCallback<MouseDownEvent>(e => { if (e.clickCount == 2) { slider.value = 0f; Flush(); } }, TrickleDown.TrickleDown);
+            // Left alone while dragged or about to be written.
+            lookUpdates.Add(() => { if (write != null) return; float now = NovabeastOptions.Value(options, amount); slider.SetValueWithoutNotify(now); value.text = Percent(amount, now); });
             return row;
         }
 
         private static string Percent(NovabeastOptions.Amount amount, float value) =>
             amount.Timed && value <= .01f ? "Off" : Mathf.RoundToInt(value * 100f) + "%";
 
-        private static VisualElement Ears(RexouiumOptions.Options options)
+        private VisualElement Ears(RexouiumOptions.Options options)
         {
             var row = new VisualElement(); row.AddToClassList("custom__slider-row"); row.tooltip = "Ear size: smaller to the left, bigger to the right (EarsSmall and EarsBig).";
             var label = new Label("Ear size"); label.AddToClassList("custom__chips-label"); row.Add(label);
@@ -297,6 +341,11 @@ namespace Orbiters.MyAvatar.Editor
             slider.RegisterCallback<DetachFromPanelEvent>(_ => Flush());
             // Double-click back to the sculpted size.
             slider.RegisterCallback<MouseDownEvent>(e => { if (e.clickCount == 2) { slider.value = 0f; Flush(); } }, TrickleDown.TrickleDown);
+            lookUpdates.Add(() =>
+            {
+                if (write != null || options.Ears == null) return;
+                float now = RexouiumOptions.EarSize(options); slider.SetValueWithoutNotify(now); value.text = EarText(now);
+            });
             return row;
         }
 

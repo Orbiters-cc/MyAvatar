@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
 using Orbiters.Toolkit.Editor.VRChat.Optimization;
@@ -23,11 +24,19 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         internal sealed class Parts
         {
             public long Textures, Meshes, BlendShapes, Animations, Shaders, Audio, Other;
+            /// <summary>The bundle the SDK uploads, compressed: what VRChat's download limits apply to.</summary>
+            public long Bundle => Textures + Meshes + BlendShapes + Animations + Shaders + Audio + Other;
             /// <summary>The bundle's size as VRChat shows it (see <see cref="Shown"/>).</summary>
-            public long Total => (long)((Textures + Meshes + BlendShapes + Animations + Shaders + Audio + Other) * Shown);
-            /// <summary>The same once unpacked: what a player's game decompresses and loads after the download.</summary>
+            public long Total => (long)(Bundle * Shown);
+            /// <summary>
+            /// The same once unpacked: what a player's game decompresses and loads after the download (VRChat's uncompressed
+            /// limits apply to it).
+            /// </summary>
             public long Raw;
         }
+
+        /// <summary>VRChat's limits on an avatar's bundle, compressed (the download) and unpacked, on PC and on mobile.</summary>
+        internal const long PcLimit = 200L * 1048576, PcRawLimit = 500L * 1048576, MobileLimit = 10L * 1048576, MobileRawLimit = 40L * 1048576;
 
         // Loading the built MasculineCanine bundle in Unity 2022.3 (VRChat's version) on a desktop CPU (2026-10-12): opening it
         // (LZMA, 18.4 MB in, 84 MB out) took 830 ms, loading its assets 110 ms. A client then sets the avatar up (its
@@ -160,7 +169,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             long measured = Measured(texture, mobile, planned);
             if (measured >= 0)
             {
-                raw = TextureOptimization.FormatBytes(crunched ? format == TextureFormat.DXT5Crunched ? TextureFormat.DXT5 : TextureFormat.DXT1 : format, width, height, mips);
+                raw = TextureOptimization.FormatBytes(TextureOptimization.Decoded(format), width, height, mips);
                 return measured;
             }
             float entropy = Entropy(texture, width);
@@ -171,8 +180,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
             if (crunched)
             {
-                // Crunch stores a DXT image in 1-2 bits per pixel, more at higher quality; it doesn't compress any further.
-                var block = format == TextureFormat.DXT5Crunched ? TextureFormat.DXT5 : TextureFormat.DXT1;
+                // Crunch stores a DXT or ETC image in 1-2 bits per pixel, more at higher quality; it doesn't compress any further.
+                var block = TextureOptimization.Decoded(format);
                 raw = TextureOptimization.FormatBytes(block, width, height, mips);
                 return (long)(raw * Mathf.Min(.15f + .35f * Mathf.Clamp01(quality / 100f), Ratio(block, entropy)));
             }
@@ -220,21 +229,42 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         // Deflate's size of each texture's stored data, by its image and how it is stored: kept in Library, measured once.
         private const string MeasuredFile = "texture-downloads.json";
-        private const int MeasuredVersion = 1;
+        private const int MeasuredVersion = 2;
         private static Dictionary<string, long> measured;
+        // Textures made in memory (a build step's copies), by instance: those destroyed since leave it.
         private static readonly Dictionary<int, long> MeasuredInMemory = new Dictionary<int, long>();
+
+        /// <summary>Reads the measures from <see cref="LibraryStore"/> again (tests point it at a folder of their own).</summary>
+        internal static void ForgetCaches()
+        {
+            SaveMeasures();
+            measured = null;
+            MeasuredInMemory.Clear();
+        }
+
+        // Measures not written yet: written once a job's textures are all measured.
+        private static bool unsaved;
+
+        /// <summary>Writes the measures taken since the last write.</summary>
+        internal static void SaveMeasures()
+        {
+            if (!unsaved || measured == null) return;
+            unsaved = false;
+            LibraryStore.Write(MeasuredFile, measured.Skip(Math.Max(0, measured.Count - 4096)).ToDictionary(p => p.Key, p => p.Value));
+        }
 
         // What the bundle stores for a texture: the upload's copy, or the imported image in its build format and size.
         private static TextureOptimization.TexturePlan Stored(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
         {
             if (planned != null) return planned;
             if (!(texture is Texture2D image) || !(AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(image)) is TextureImporter importer)) return null;
-            var (format, _, quality) = TextureOptimization.BuildFormat(image, mobile);
+            var (format, crunched, quality) = TextureOptimization.BuildFormat(image, mobile);
             var size = TextureOptimization.BuildSize(image, importer, mobile);
+            bool normal = importer.textureType == TextureImporterType.NormalMap;
             return new TextureOptimization.TexturePlan
             {
-                texture = image, path = importer.assetPath, format = format, width = size.x, height = size.y, quality = quality,
-                linear = importer.textureType == TextureImporterType.NormalMap || !importer.sRGBTexture,
+                texture = image, path = importer.assetPath, format = format, width = size.x, height = size.y,
+                quality = crunched ? quality : TextureOptimization.EncodeQuality, linear = normal || !importer.sRGBTexture, normal = normal,
             };
         }
 
@@ -247,8 +277,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         {
             if (planned == null && texture is Texture2D own && !EditorUtility.IsPersistent(own))
             {
+                if (!own.isReadable) return -1;
                 if (!MeasuredInMemory.TryGetValue(own.GetInstanceID(), out long bytes))
+                {
+                    if (MeasuredInMemory.Count >= 256)
+                        foreach (int gone in MeasuredInMemory.Keys.Where(k => EditorUtility.InstanceIDToObject(k) == null).ToList()) MeasuredInMemory.Remove(gone);
                     MeasuredInMemory[own.GetInstanceID()] = bytes = Deflated(own.GetRawTextureData());
+                }
                 return Lzma(bytes, own.format, own.width, own.height);
             }
             var stored = Stored(texture, mobile, planned);
@@ -275,27 +310,33 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         }
 
         /// <summary>
-        /// Measures a texture's download as the bundle stores it: its imported data when the editor holds it in the build's
-        /// format and size, else a copy made as the upload makes them (kept in Library: the upload reuses it).
+        /// Starts measuring a texture's download as the bundle stores it: its imported data when the editor holds it in the
+        /// build's format and size, else a copy made as the upload makes them (read here, on the editor's thread). The
+        /// upload's own copies are kept in Library (the upload reuses them); a copy of a texture the upload keeps as it is
+        /// is only measured. Its compression runs on another thread: <see cref="Record"/> keeps the result. Null when there
+        /// is nothing to measure.
         /// </summary>
-        internal static void Measure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
+        internal static (string Key, System.Threading.Tasks.Task<long> Deflate)? StartMeasure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
         {
             var stored = Stored(texture, mobile, planned);
-            if (stored == null) return;
+            if (stored == null) return null;
             measured ??= LibraryStore.Read<Dictionary<string, long>>(MeasuredFile);
             string key = MeasuredKey(stored);
-            if (measured.ContainsKey(key)) return;
-            byte[] data;
+            if (measured.ContainsKey(key)) return null;
             var image = stored.texture;
-            if (image.format == stored.format && image.width == stored.width && image.height == stored.height) data = image.GetRawTextureData();
-            else
-            {
-                var copy = UploadTextures.Copy(stored);
-                try { data = copy.GetRawTextureData(); }
-                finally { Object.DestroyImmediate(copy); }
-            }
-            measured[key] = Deflated(data);
-            LibraryStore.Write(MeasuredFile, measured.Skip(Math.Max(0, measured.Count - 4096)).ToDictionary(p => p.Key, p => p.Value));
+            var data = image.format == stored.format && image.width == stored.width && image.height == stored.height ? image.GetRawTextureData()
+                : UploadTextures.Data(stored, cache: planned != null);
+            // The editor can't give the copy (it holds the texture smaller): estimated, not measured.
+            if (data == null) return null;
+            return (key, System.Threading.Tasks.Task.Run(() => Deflated(data)));
+        }
+
+        /// <summary>Keeps a measure <see cref="StartMeasure"/> took (on the editor's thread); written with <see cref="SaveMeasures"/>.</summary>
+        internal static void Record(string key, long deflated)
+        {
+            measured ??= LibraryStore.Read<Dictionary<string, long>>(MeasuredFile);
+            measured[key] = deflated;
+            unsaved = true;
         }
 
         private static long Deflated(byte[] data)
@@ -356,6 +397,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             if (mesh.blendShapeCount == 0) return result;
             int id = mesh.GetInstanceID();
             if (ShapeCache.TryGetValue(id, out var known) && known.Vertices == mesh.vertexCount && known.Shapes.Count == mesh.blendShapeCount) return known.Shapes;
+            // Meshes unloaded since leave it.
+            if (ShapeCache.Count >= 256)
+                foreach (int gone in ShapeCache.Keys.Where(k => EditorUtility.InstanceIDToObject(k) == null).ToList()) ShapeCache.Remove(gone);
             int n = mesh.vertexCount;
             var dv = new Vector3[n]; var dn = new Vector3[n]; var dt = new Vector3[n];
             for (int shape = 0; shape < mesh.blendShapeCount; shape++)
@@ -403,9 +447,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             return (long)(seconds * clip.channels * (64000 + 256000 * settings.quality) / 8f);
         }
 
-        internal static string Megabytes(long bytes) => (bytes / 1048576.0).ToString(bytes < 10 * 1048576L ? "0.0" : "0") + " MB";
+        // Written as VRChat writes sizes, whatever the system's language: "17.7 MB".
+        internal static string Megabytes(long bytes) => (bytes / 1048576.0).ToString(bytes < 10 * 1048576L ? "0.0" : "0", CultureInfo.InvariantCulture) + " MB";
 
         /// <summary>Megabytes, or kilobytes under a tenth of one (a small texture's saving).</summary>
-        internal static string Amount(long bytes) => Math.Abs(bytes) < 104858 ? Mathf.RoundToInt(bytes / 1024f) + " KB" : Megabytes(bytes);
+        internal static string Amount(long bytes) => Math.Abs(bytes) < 104858 ? Mathf.RoundToInt(bytes / 1024f).ToString(CultureInfo.InvariantCulture) + " KB" : Megabytes(bytes);
     }
 }

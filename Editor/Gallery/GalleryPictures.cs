@@ -15,6 +15,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private const string SheetPrefix = "refsheet-";
         private static readonly Dictionary<string, Texture2D> Loaded = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
         internal static string Folder => Path.Combine(LibraryStore.Folder, "Gallery", "Pictures");
+        /// <summary>Where the project's own pictures may be taken from: its Assets folder (another folder in tests).</summary>
+        internal static string ProjectPictures = "Assets";
 
         /// <summary>Saves <paramref name="image"/> as a new picture and returns its path. An image from the project is taken from its file.</summary>
         internal static string Save(Texture2D image, bool sheet)
@@ -135,11 +137,56 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return texture;
         }
 
-        /// <summary>Removes a picture this tool made (never a file chosen elsewhere).</summary>
+        /// <summary>Removes a picture this tool made (never a file chosen elsewhere). One that can't be removed now stays, said in the Console.</summary>
         internal static void Delete(string path)
         {
             Unload(path);
-            if (Owned(path) && File.Exists(path)) File.Delete(path);
+            if (!Owned(path) || !File.Exists(path)) return;
+            try { File.Delete(path); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            { Debug.LogWarning("[My Avatar] Could not remove the gallery picture " + path + ": " + ex.Message); }
+        }
+
+        /// <summary>
+        /// A picture for the listing from <paramref name="path"/>: one of this tool's pictures (checked to still be a PNG or
+        /// JPEG picture), or a PNG or JPEG in the project's Assets, taken in as a new picture (<see cref="Import"/>). Anything
+        /// else is refused: only pictures go to Orbiters.
+        /// </summary>
+        internal static string Adopt(string path, bool sheet = false)
+        {
+            string full = Check(path);
+            return full == null || Owned(full) ? full : Import(full, sheet);
+        }
+
+        /// <summary>
+        /// What <see cref="Adopt"/> would take, checked without changing anything: the full path of one of this tool's
+        /// pictures (a readable PNG or JPEG) or of a PNG or JPEG in the project's Assets folder. Throws for anything else.
+        /// </summary>
+        internal static string Check(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            string full;
+            try { full = Path.GetFullPath(path.Trim()); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { throw new ArgumentException("Not a picture path: " + path); }
+            if (!IsImageFile(full)) throw new ArgumentException("Not a PNG or JPEG picture: " + path + ".");
+            if (!File.Exists(full)) throw new ArgumentException("No picture at " + path + ".");
+            if (Owned(full))
+            {
+                if (!Readable(full)) throw new ArgumentException(path + " is not a readable PNG or JPEG picture.");
+                return full;
+            }
+            string assets = Path.GetFullPath(ProjectPictures) + Path.DirectorySeparatorChar;
+            if (!full.StartsWith(assets, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Pictures come from this tool's own (" + Folder + ") or from a PNG or JPEG in the project's Assets folder; " + path + " is neither.");
+            return full;
+        }
+
+        // The file holds a picture Unity can read, whatever its name says.
+        private static bool Readable(string path)
+        {
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            try { return texture.LoadImage(File.ReadAllBytes(path)); }
+            finally { UnityEngine.Object.DestroyImmediate(texture); }
         }
 
         /// <summary>Frees the textures shown; their files stay.</summary>
@@ -149,8 +196,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Loaded.Clear();
         }
 
-        internal static bool Owned(string path) =>
-            !string.IsNullOrEmpty(path) && Path.GetFullPath(path).StartsWith(Path.GetFullPath(Folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        internal static bool Owned(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            try { return Path.GetFullPath(path).StartsWith(Path.GetFullPath(Folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase); }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { return false; }
+        }
 
         private static void Unload(string path)
         {
