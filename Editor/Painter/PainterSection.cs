@@ -210,8 +210,10 @@ namespace Orbiters.MyAvatar.Editor.Painter
             foreach (string set in sets)
             {
                 var row = new VisualElement(); row.AddToClassList("vrm-row"); form.Add(row);
-                var name = new Label(set); name.AddToClassList("vrm-row__label"); name.AddToClassList("painter-map__set"); row.Add(name);
-                if (live.Contains(set)) { var dot = new VisualElement(); dot.AddToClassList("painter-map__live"); dot.tooltip = "Shown live"; name.Add(dot); }
+                // The name, then a dot when it shows live: side by side in the label column, the name cut short first.
+                var head = new VisualElement(); head.AddToClassList("vrm-row__label"); head.AddToClassList("painter-map__set"); row.Add(head);
+                var name = new Label(set) { tooltip = set }; name.AddToClassList("painter-map__name"); head.Add(name);
+                if (live.Contains(set)) { var dot = new VisualElement(); dot.AddToClassList("painter-map__live"); dot.tooltip = "Shown live"; head.Add(dot); }
                 var material = PainterMapping.Material(avatar, set);
                 int index = material ? choices.FindIndex(c => c.Material == material) + 1 : 0;
                 var field = new DropdownField(labels, Mathf.Max(0, index));
