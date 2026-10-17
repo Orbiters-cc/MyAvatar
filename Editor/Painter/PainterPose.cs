@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -10,7 +11,7 @@ using Object = UnityEngine.Object;
 namespace Orbiters.MyAvatar.Editor.Painter
 {
     /// <summary>
-    /// Poses for painting a (hidden, built) copy of an avatar: arms level as in a T-pose and legs well apart (the armpits and
+    /// Poses for painting a hidden copy of an avatar: arms level as in a T-pose and legs well apart (the armpits and
     /// the inner legs open), fingers spread and straight, chosen blendshapes (the mouth open by default); natural poses for
     /// the copies shown with the painted one. Limbs are turned toward directions in the avatar's own space, so they land the
     /// same whatever pose the avatar was made in, symmetrically: Painter's symmetry mirrors across the avatar's middle.
@@ -89,6 +90,19 @@ namespace Orbiters.MyAvatar.Editor.Painter
             public string Name;
             public float Weight = 100f;
             public bool Painted = true, Copies;
+
+            /// <summary>Its key among all of a copy's blendshapes (<see cref="Key(string, string)"/>).</summary>
+            public string Key => PainterPose.Key(Renderer, Name);
+        }
+
+        /// <summary>A blendshape's key: its renderer's path, then its name.</summary>
+        internal static string Key(string renderer, string name) => renderer + "\n" + name;
+
+        /// <summary>The blendshape a key names (<see cref="Key(string, string)"/>), at full weight on the painted copy.</summary>
+        internal static Shape FromKey(string key)
+        {
+            int split = key.IndexOf('\n');
+            return new Shape { Renderer = key.Substring(0, split), Name = key.Substring(split + 1) };
         }
 
         /// <summary>What the painted copy does. Blendshapes not listed keep the value they have on the avatar.</summary>
@@ -124,6 +138,23 @@ namespace Orbiters.MyAvatar.Editor.Painter
             }
             var clip = Clip(pose);
             if (clip) Orbiters.Toolkit.Editor.Photoshoot.PhotoshootService.SampleBodyPose(root, clip);
+        }
+
+        /// <summary>
+        /// How an unbuilt copy's clothing on armatures of its own follows its bones (a build merges them): noted at rest,
+        /// parents first, for <see cref="Follow"/>.
+        /// </summary>
+        internal static List<FollowLink> Links(GameObject root)
+        {
+            int Depth(Transform t) { int depth = 0; for (; t; t = t.parent) depth++; return depth; }
+            return AttachmentFollow.Links(root.transform).OrderBy(l => Depth(l.Follower)).ToList();
+        }
+
+        /// <summary>Puts the clothing back on the posed bones.</summary>
+        internal static void Follow(IEnumerable<FollowLink> links)
+        {
+            foreach (var link in links)
+                if (link.Follower && link.Target) link.Apply();
         }
 
         private static void Apply(GameObject root, IEnumerable<Shape> shapes)

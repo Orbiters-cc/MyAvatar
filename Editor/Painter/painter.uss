@@ -1,5 +1,7 @@
 /* Substance Painter card: the hero card's frame (face-tracking.uss), the VRM form rows (vrm.uss), and these. */
 .painter__stage { margin: 0 0 0 6px; }
+/* Painter's logo (a rounded square) in the badge, over the glow. */
+.painter-logo { position: absolute; left: 9px; top: 10px; width: 60px; height: 58px; }
 .ft-hero__eyebrow.painter-linked { color: #00DA6D; }
 .ft-hero__actions .mcb-button { margin-left: 8px; }
 .painter-map { margin-top: 12px; }
@@ -24,15 +26,15 @@
 .painter-window__chips { flex-wrap: wrap; margin-top: 6px; margin-bottom: 6px; }
 .painter-window__chips .vrm-choice { margin-bottom: 6px; }
 .painter-window .ft-primary { margin: 0; }
-.painter-shapes { margin-top: 6px; }
+.painter-picker { margin-top: 2px; }
+/* The count gives way to the buttons in the narrow side panel. */
+.painter-picker .orbiters-shape-toolbar { flex-wrap: nowrap; }
+.painter-picker .orbiters-shape-count { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.painter-picker .orbiters-shape-action { flex-shrink: 0; }
+.painter-shapes { margin-top: 2px; }
 .painter-shape { background-color: #262626; border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
 .painter-shape__name { -unity-font-style: bold; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .painter-shape__controls { flex-direction: row; align-items: center; margin-top: 6px; }
 .painter-shape__weight { width: 46px; margin: 0 8px 0 0; }
 .painter-shape__chip { margin: 0 6px 0 0; }
-.painter-shape__remove { width: 24px; height: 24px; margin: 0 0 0 auto; padding: 0; border-radius: 12px; align-items: center; justify-content: center; }
-.painter-shape__remove-icon { width: 12px; height: 12px; }
-.painter-shapes__add { margin-top: 2px; }
 .painter-shape__weight > .unity-base-field__input { background-color: #1c1c1c; border-width: 0; border-radius: 6px; padding: 2px 6px; }
-.painter-shape__remove { background-color: rgba(0, 0, 0, 0); }
-.painter-shape__remove:hover { background-color: #333333; }

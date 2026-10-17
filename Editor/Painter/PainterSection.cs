@@ -18,7 +18,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
         internal const string Feature = "myavatar.painter";
         private static readonly string[] StyleSheets =
             { "Packages/orbiters.myavatar/Editor/UI/optimization.uss", "Packages/orbiters.myavatar/Editor/UI/vrm.uss", "Packages/orbiters.myavatar/Editor/Painter/painter.uss" };
-        private static readonly Color Glow = new Color(.93f, .30f, .20f, .2f);
+        private const string LogoPath = "Packages/orbiters.myavatar/Editor/Painter/PainterLogo.svg.txt";
+        // Painter's own green, from its logo.
+        private static readonly Color Glow = new Color(.6f, .91f, .25f, .18f);
         private static readonly (int Size, string Label, string Tooltip)[] Sizes =
         {
             (512, "512", "Lightest: strokes show fastest, blurry up close."),
@@ -37,9 +39,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private readonly MyAvatar avatar;
         private readonly VisualElement hero;
         private bool queued;
-        // What the last Open the project did (until Painter links the project).
+        // What the last Open the project or Show Substance did, shown while the link is the one it was said for (an open
+        // project's note goes once Painter links it).
         private string note;
         private bool noteWarning;
+        private PainterLinkService.Session noteSession;
 
         internal PainterSection(MyAvatar avatar) : base("Substance Painter", card: false)
         {
@@ -81,12 +85,28 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 "Strokes show on the avatar here as you paint, and saving in Painter applies the textures, with Undo. Open in Substance makes a project " +
                 "from the avatar, posed for painting, with its textures.");
             frame.Frame.name = "painter-hero";
-            var ring = new VisualElement(); ring.AddToClassList("opt-badge"); frame.Badge.Add(ring);
-            var icon = new VectorIcon(IconGlyph.Brush); icon.AddToClassList("opt-badge__icon"); ring.Add(icon);
+            if (AssetDatabase.LoadAssetAtPath<TextAsset>(LogoPath) is TextAsset svg)
+            {
+                var logo = new OrbitersVectorLogo(svg.text); logo.AddToClassList("painter-logo"); frame.Badge.Add(logo);
+            }
 
-            // The avatar's project first when it has one (and isn't linked now); a new one otherwise.
+            // Painter in front while the avatar is open in it; else the avatar's project when it has one; a new one otherwise.
             bool project = session == null && !string.IsNullOrEmpty(avatar.painter.projectPath) && File.Exists(avatar.painter.projectPath);
-            if (project)
+            if (session != null)
+            {
+                var front = MyAvatarEditor.PressButton("Show Substance", () =>
+                {
+                    if (PainterApp.Show()) return;
+                    note = "Painter's window wasn't found: it may be closing.";
+                    noteWarning = true;
+                    noteSession = session;
+                    Show();
+                });
+                front.AddToClassList("ft-primary");
+                front.tooltip = "Brings Painter, where " + session.ProjectName + " is open, in front.";
+                frame.Actions.Add(front);
+            }
+            else if (project)
             {
                 var reopen = MyAvatarEditor.PressButton("Open the project", () =>
                 {
@@ -95,14 +115,15 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     (bool opening, string message) = PainterApp.OpenProject(avatar);
                     note = message;
                     noteWarning = !opening;
+                    noteSession = null;
                     Show();
                 });
                 reopen.AddToClassList("ft-primary");
                 reopen.tooltip = "Opens " + Path.GetFileName(avatar.painter.projectPath) + " in Painter: it links to this avatar on its own.";
                 frame.Actions.Add(reopen);
             }
-            var open = MyAvatarEditor.PressButton(project ? "New project…" : "Open in Substance", () => PainterProjectWindow.Open(avatar));
-            if (!project) open.AddToClassList("ft-primary");
+            var open = MyAvatarEditor.PressButton(project || session != null ? "New project…" : "Open in Substance", () => PainterProjectWindow.Open(avatar));
+            if (!project && session == null) open.AddToClassList("ft-primary");
             open.tooltip = "Choose a pose for painting, then Painter opens a new project made from the avatar and its textures.";
             frame.Actions.Add(open);
             if (!plugin)
@@ -116,7 +137,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             if (sets.Count > 0) Mapping(frame.Frame, session, sets);
 
             var footer = new VisualElement(); footer.AddToClassList("painter-footer"); frame.Frame.Add(footer);
-            if (session != null) note = null;
+            if (session != noteSession) note = null;
             var status = new Label(note ?? Status(session, plugin)); status.AddToClassList("ft-note"); footer.Add(status);
             if (session?.Error == true || note != null && noteWarning) status.AddToClassList("warning");
             if (session != null)

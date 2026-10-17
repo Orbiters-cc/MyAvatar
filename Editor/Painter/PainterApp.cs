@@ -83,6 +83,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
             return true;
         }
 
+        /// <summary>Brings Painter's window in front (restored when minimised); false when it isn't running.</summary>
+        internal static bool Show() => AppWindows.BringToFront(ExecutableName);
+
         // The plugin version that opens existing projects for Unity.
         private static readonly Version Opens = new Version(1, 1, 0);
 
