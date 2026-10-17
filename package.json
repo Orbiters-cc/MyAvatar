@@ -13,7 +13,7 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.3.22 <0.4.0",
+    "orbiters.toolkit": ">=0.3.23 <0.4.0",
     "orbiters.xraygizmos": ">=0.2.8 <0.3.0",
     "com.vrchat.avatars": ">=3.7.0 <4.0.0"
   },

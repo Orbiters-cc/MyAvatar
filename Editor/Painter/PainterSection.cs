@@ -79,7 +79,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
             PainterLinkService.EnsureRunning();
             var session = PainterLinkService.For(avatar);
             bool plugin = PainterApp.PluginCurrent;
-            string eyebrow = session != null ? "LINKED · " + session.ProjectName.ToUpperInvariant() : plugin ? "NOT LINKED" : "PAINTER PLUGIN NOT INSTALLED";
+            string eyebrow = session != null ? "LINKED · " + session.ProjectName.ToUpperInvariant() : plugin ? "NOT LINKED"
+                : File.Exists(PainterApp.PluginPath) ? "PAINTER PLUGIN OUT OF DATE" : "PAINTER PLUGIN NOT INSTALLED";
             var frame = new ToolHero(hero, Glow, eyebrow, session != null ? "painter-linked" : plugin ? "muted" : "warning",
                 "Paint in Substance 3D Painter",
                 "Strokes show on the avatar here as you paint, and saving in Painter applies the textures, with Undo. Open in Substance makes a project " +
@@ -123,12 +124,13 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 frame.Actions.Add(reopen);
             }
             var open = MyAvatarEditor.PressButton(project || session != null ? "New project…" : "Open in Substance", () => PainterProjectWindow.Open(avatar));
-            if (!project && session == null) open.AddToClassList("ft-primary");
+            open.AddToClassList(!project && session == null ? "ft-primary" : "ft-ghost");
             open.tooltip = "Choose a pose for painting, then Painter opens a new project made from the avatar and its textures.";
             frame.Actions.Add(open);
             if (!plugin)
             {
                 var install = MyAvatarEditor.PressButton(File.Exists(PainterApp.PluginPath) ? "Update the Painter plugin" : "Install the Painter plugin", InstallPlugin);
+                install.AddToClassList("ft-ghost");
                 install.tooltip = "Copies My Avatar's plugin into Painter's startup folder (" + PainterApp.PluginPath + "). Painter loads it when it starts.";
                 frame.Actions.Add(install);
             }
@@ -144,11 +146,21 @@ namespace Orbiters.MyAvatar.Editor.Painter
             {
                 var buttons = new VisualElement(); buttons.AddToClassList("painter-buttons"); footer.Add(buttons);
                 var apply = MyAvatarEditor.PressButton("Apply all now", session.RequestCommit);
+                apply.AddToClassList("ft-ghost");
                 apply.tooltip = "Painter exports every texture set's maps and Unity applies them, as when you save in Painter.";
                 buttons.Add(apply);
+                // A mesh update that failed or waits: sent again on demand.
+                if (avatar.painter.posed && avatar.painter.meshOutdated && !PainterMeshUpdate.Busy(avatar))
+                {
+                    var mesh = MyAvatarEditor.PressButton("Update Painter's mesh", () => PainterMeshUpdate.Start(session));
+                    mesh.AddToClassList("ft-ghost");
+                    mesh.tooltip = "Builds the avatar, poses it as the project was made, and Painter loads that mesh in the project (the strokes stay where they are on the surface).";
+                    buttons.Add(mesh);
+                }
                 if (session.LiveSets.Any())
                 {
                     var own = MyAvatarEditor.PressButton("Show the avatar's textures", session.ClearPreview);
+                    own.AddToClassList("ft-ghost");
                     own.tooltip = "Takes the live images off until the next stroke.";
                     buttons.Add(own);
                 }
@@ -173,8 +185,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private string Status(PainterLinkService.Session session, bool plugin)
         {
             if (session != null) return session.State;
-            if (!plugin) return "Install the plugin, then open the avatar in Painter, or link a project from Painter's My Avatar panel.";
             bool project = !string.IsNullOrEmpty(avatar.painter.projectPath) && File.Exists(avatar.painter.projectPath);
+            // Open the project installs the plugin too.
+            if (project && avatar.painter.posed && avatar.painter.meshOutdated)
+                return "The avatar's meshes changed: open " + Path.GetFileName(avatar.painter.projectPath) + " in Painter and it gets the new mesh.";
+            if (!plugin) return "Install the plugin, then open the avatar in Painter, or link a project from Painter's My Avatar panel.";
             if (project) return "Open " + Path.GetFileName(avatar.painter.projectPath) + " in Painter: it links to this avatar on its own.";
             if (PainterApp.Running) return "Painter is running: link a project to " + avatar.name + " from its My Avatar panel (Window menu), or open the avatar in Substance.";
             return "Open the avatar in Substance to paint it.";

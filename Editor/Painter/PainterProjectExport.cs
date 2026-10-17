@@ -28,45 +28,68 @@ namespace Orbiters.MyAvatar.Editor.Painter
             public PainterMapping.Choice Choice;
         }
 
-        /// <summary>Unique texture set names for the materials of the parts, each with the avatar's material it stands for.</summary>
+        /// <summary>
+        /// A texture set per material of the avatar the parts show, named after it, for each material of the parts. A build
+        /// hands its own copies of the materials (VRCFury's are "VRCFury M_Skin (Body)"): the avatar's material is the one
+        /// its renderer at the same place shows in the same slot, else the one of the same name. Copies of one material
+        /// paint one texture set.
+        /// </summary>
         internal static Dictionary<Material, Set> Sets(MyAvatar avatar, IEnumerable<PainterPose.Part> parts)
         {
             var choices = PainterMapping.Choices(avatar);
             var sets = new Dictionary<Material, Set>();
+            var byAvatarMaterial = new Dictionary<Material, Set>();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var material in parts.SelectMany(p => p.Materials).Where(m => m))
-            {
-                if (sets.ContainsKey(material)) continue;
-                // The build may hand its own copy of a material: the avatar's one of the same name stands for it.
-                var choice = choices.FirstOrDefault(c => c.Material == material) ?? choices.FirstOrDefault(c => c.Material.name == material.name);
-                string name = ObjWriter.Clean(material.name), unique = name;
-                for (int i = 2; !names.Add(unique); i++) unique = name + "_" + i;
-                sets[material] = new Set { Name = unique, Material = material, Choice = choice };
-            }
+            foreach (var part in parts)
+                for (int slot = 0; slot < part.Materials.Length; slot++)
+                {
+                    var material = part.Materials[slot];
+                    if (!material || sets.ContainsKey(material)) continue;
+                    var shown = SceneMaterial(avatar, part.Source, slot);
+                    var choice = choices.FirstOrDefault(c => c.Material == material) ?? choices.FirstOrDefault(c => shown && c.Material == shown)
+                                 ?? choices.FirstOrDefault(c => c.Material.name == material.name);
+                    var key = choice?.Material ?? material;
+                    if (!byAvatarMaterial.TryGetValue(key, out var set))
+                    {
+                        string name = ObjWriter.Clean(key.name), unique = name;
+                        for (int i = 2; !names.Add(unique); i++) unique = name + "_" + i;
+                        byAvatarMaterial[key] = set = new Set { Name = unique, Material = material, Choice = choice };
+                    }
+                    sets[material] = set;
+                }
             return sets;
         }
 
+        // What the avatar's renderer at the place of a copy's renderer shows in this slot: the copy is one of the avatar's root
+        // (the build leaves its My Avatar out), so the same path from the roots.
+        private static Material SceneMaterial(MyAvatar avatar, Renderer copied, int slot)
+        {
+            if (!copied) return null;
+            string path = AnimationUtility.CalculateTransformPath(copied.transform, copied.transform.root);
+            var root = TextureOptimization.AvatarRoot(avatar).transform;
+            var place = string.IsNullOrEmpty(path) ? root : root.Find(path);
+            var renderer = place ? place.GetComponent<Renderer>() : null;
+            var materials = renderer ? renderer.sharedMaterials : null;
+            return materials != null && slot < materials.Length ? materials[slot] : null;
+        }
+
         /// <summary>
-        /// Writes the project's files and its job, maps the texture sets on the avatar, and returns the job's file. The parts
-        /// are the painted copy's, then the other copies'.
+        /// Writes the project's files and its job, maps the texture sets on the avatar, keeps <paramref name="options"/> on it
+        /// (the mesh is posed the same when the avatar's meshes change), and returns the job's file. The parts are the painted
+        /// copy's, then the other copies'.
         /// </summary>
-        internal static string Write(MyAvatar avatar, List<PainterPose.Part> parts, int resolution)
+        internal static string Write(MyAvatar avatar, List<PainterPose.Part> parts, int resolution, PainterPoseOptions options)
         {
             string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
             string safe = ObjWriter.Clean(avatar.name);
             string folder = Path.Combine(PainterLinkService.LinkFolder, "projects", safe + "-" + stamp);
             Directory.CreateDirectory(folder);
-            var sets = Sets(avatar, parts);
-
-            var obj = new ObjWriter();
-            foreach (var part in parts)
-                obj.Add(part.Name, part.Mesh, part.ToWorld, part.Materials.Select(m => m && sets.TryGetValue(m, out var set) ? set.Name : null).ToList(), part.Mirrored);
             string mesh = Path.Combine(folder, safe + ".obj");
-            obj.Save(mesh);
+            var (obj, sets) = WriteMesh(avatar, parts, mesh);
 
             var slots = TextureMatching.Slots(avatar);
             var textureSets = new List<Dictionary<string, object>>();
-            foreach (var set in sets.Values.Where(s => obj.Materials.Contains(s.Name)))
+            foreach (var set in sets.Values.Distinct().Where(s => obj.Materials.Contains(s.Name)))
             {
                 var material = set.Choice?.Material ?? set.Material;
                 textureSets.Add(TextureSet(set.Name, material, PainterTargets.For(material, slots), folder, resolution));
@@ -74,7 +97,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
             // Mapped now: the project's texture sets paint these materials from its first stroke.
             Undo.RecordObject(avatar, "My Avatar: open in Substance Painter");
-            foreach (var set in sets.Values.Where(s => obj.Materials.Contains(s.Name)))
+            foreach (var set in sets.Values.Distinct().Where(s => obj.Materials.Contains(s.Name)))
             {
                 avatar.painter.sets.RemoveAll(s => string.Equals(s.textureSet, set.Name, StringComparison.OrdinalIgnoreCase));
                 avatar.painter.sets.Add(new PainterSet { textureSet = set.Name, renderer = set.Choice?.Renderer ?? "", slot = set.Choice?.Slot ?? 0 });
@@ -83,6 +106,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 ObjWriter.Clean(PlayerSettings.productName), safe + ".spp");
             if (File.Exists(project)) project = Path.Combine(Path.GetDirectoryName(project), safe + " " + stamp + ".spp");
             avatar.painter.projectPath = project;
+            avatar.painter.posed = true;
+            avatar.painter.pose = PainterPose.Copy(options);
+            avatar.painter.meshOutdated = false;
             EditorUtility.SetDirty(avatar);
             PrefabUtility.RecordPrefabInstancePropertyModifications(avatar);
 
@@ -101,6 +127,35 @@ namespace Orbiters.MyAvatar.Editor.Painter
             string jobPath = Path.Combine(PainterLinkService.LinkFolder, "jobs", safe + "-" + stamp + ".json");
             LiveLinkServer.WriteAtomically(jobPath, JsonConvert.SerializeObject(job));
             return jobPath;
+        }
+
+        /// <summary>The posed meshes as one OBJ, a texture set (material name) per material of the parts.</summary>
+        private static (ObjWriter Obj, Dictionary<Material, Set> Sets) WriteMesh(MyAvatar avatar, List<PainterPose.Part> parts, string path)
+        {
+            var sets = Sets(avatar, parts);
+            var obj = new ObjWriter();
+            foreach (var part in parts)
+                obj.Add(part.Name, part.Mesh, part.ToWorld, part.Materials.Select(m => m && sets.TryGetValue(m, out var set) ? set.Name : null).ToList(), part.Mirrored);
+            obj.Save(path);
+            return (obj, sets);
+        }
+
+        /// <summary>
+        /// Writes the avatar's mesh again for its project (the same texture sets, made the same way), in the link's meshes
+        /// folder, and returns its file. The avatar's earlier ones there go: Painter keeps the mesh it loads in the project.
+        /// </summary>
+        internal static string WriteMeshUpdate(MyAvatar avatar, List<PainterPose.Part> parts)
+        {
+            string safe = ObjWriter.Clean(avatar.name);
+            string folder = Path.Combine(PainterLinkService.LinkFolder, "meshes");
+            Directory.CreateDirectory(folder);
+            // This avatar's only (another one's name may start the same).
+            var earlier = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(safe) + @"-\d{8}-\d{6}\.(obj|mtl)$");
+            foreach (string file in Directory.GetFiles(folder).Where(f => earlier.IsMatch(Path.GetFileName(f))))
+                try { File.Delete(file); } catch (IOException) { }
+            string path = Path.Combine(folder, safe + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".obj");
+            WriteMesh(avatar, parts, path);
+            return path;
         }
 
         // One texture set of the job: the material's maps as images, its plain values as numbers.

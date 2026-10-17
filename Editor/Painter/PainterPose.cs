@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEngine;
@@ -81,54 +82,37 @@ namespace Orbiters.MyAvatar.Editor.Painter
             }
         }
 
-        /// <summary>A blendshape set for the bake, on the painted copy, the copies in natural poses, or both.</summary>
-        [Serializable]
-        internal sealed class Shape
-        {
-            /// <summary>The renderer's path from the avatar.</summary>
-            public string Renderer;
-            public string Name;
-            public float Weight = 100f;
-            public bool Painted = true, Copies;
-
-            /// <summary>Its key among all of a copy's blendshapes (<see cref="Key(string, string)"/>).</summary>
-            public string Key => PainterPose.Key(Renderer, Name);
-        }
-
-        /// <summary>A blendshape's key: its renderer's path, then its name.</summary>
+        /// <summary>A blendshape's key among all of a copy's: its renderer's path, then its name.</summary>
         internal static string Key(string renderer, string name) => renderer + "\n" + name;
 
-        /// <summary>The blendshape a key names (<see cref="Key(string, string)"/>), at full weight on the painted copy.</summary>
-        internal static Shape FromKey(string key)
+        internal static string Key(PainterShape shape) => Key(shape.renderer, shape.name);
+
+        /// <summary>The blendshape a key names (<see cref="Key(string, string)"/>), at full weight on the painted avatar.</summary>
+        internal static PainterShape FromKey(string key)
         {
             int split = key.IndexOf('\n');
-            return new Shape { Renderer = key.Substring(0, split), Name = key.Substring(split + 1) };
+            return new PainterShape { renderer = key.Substring(0, split), name = key.Substring(split + 1) };
         }
 
-        /// <summary>What the painted copy does. Blendshapes not listed keep the value they have on the avatar.</summary>
-        [Serializable]
-        internal sealed class Options
-        {
-            public bool Pose = true, Fingers = true;
-            public List<Shape> Shapes = new List<Shape>();
-        }
+        /// <summary>A copy of the choices (the avatar keeps its own).</summary>
+        internal static PainterPoseOptions Copy(PainterPoseOptions options) => JsonUtility.FromJson<PainterPoseOptions>(JsonUtility.ToJson(options));
 
         /// <summary>Poses the painted copy.</summary>
-        internal static void Paint(GameObject root, Options options)
+        internal static void Paint(GameObject root, PainterPoseOptions options)
         {
             var animator = root.GetComponent<Animator>();
             if (animator && animator.isHuman)
             {
-                if (options.Pose) Open(animator);
-                if (options.Fingers) Fingers(animator);
+                if (options.paintingPose) Open(animator);
+                if (options.spreadFingers) Fingers(animator);
             }
-            Apply(root, options.Shapes.Where(s => s.Painted));
+            Apply(root, options.shapes.Where(s => s.painted));
         }
 
         /// <summary>Poses a copy naturally: arms down, or one of the Photoshoot's body poses.</summary>
-        internal static void Natural(GameObject root, string pose, Options options)
+        internal static void Natural(GameObject root, string pose, PainterPoseOptions options)
         {
-            Apply(root, options.Shapes.Where(s => s.Copies));
+            Apply(root, options.shapes.Where(s => s.copies));
             var animator = root.GetComponent<Animator>();
             if (!animator || !animator.isHuman) return;
             if (pose == Relaxed)
@@ -157,13 +141,13 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 if (link.Follower && link.Target) link.Apply();
         }
 
-        private static void Apply(GameObject root, IEnumerable<Shape> shapes)
+        private static void Apply(GameObject root, IEnumerable<PainterShape> shapes)
         {
             foreach (var shape in shapes)
             {
-                var renderer = Find(root, shape.Renderer);
-                int index = renderer && renderer.sharedMesh ? renderer.sharedMesh.GetBlendShapeIndex(shape.Name) : -1;
-                if (index >= 0) renderer.SetBlendShapeWeight(index, shape.Weight);
+                var renderer = Find(root, shape.renderer);
+                int index = renderer && renderer.sharedMesh ? renderer.sharedMesh.GetBlendShapeIndex(shape.name) : -1;
+                if (index >= 0) renderer.SetBlendShapeWeight(index, shape.weight);
             }
         }
 
@@ -324,9 +308,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// The blendshapes set by default: the viseme "aa" and a grin (or smile) at full weight on the painted copy, the lips
         /// apart and the teeth and inside of the mouth in view.
         /// </summary>
-        internal static List<Shape> MouthOpen(GameObject root)
+        internal static List<PainterShape> MouthOpen(GameObject root)
         {
-            var shapes = new List<Shape>();
+            var shapes = new List<PainterShape>();
             var face = FaceTracking.FaceTrackingDetection.Face(root.transform);
             if (!face || !face.sharedMesh) return shapes;
             var mesh = face.sharedMesh;
@@ -344,9 +328,52 @@ namespace Orbiters.MyAvatar.Editor.Painter
             if (open < 0) open = Find(@"^v(isemes?)?[_ .-]?aa$", @"(^|[_ .-])aa$", @"^(mouth[_ .-]?)?a$", "jaw.?open", "mouth.?open");
             int grin = Find("grin", "smile");
             foreach (int index in new[] { open, grin }.Where(i => i >= 0).Distinct())
-                shapes.Add(new Shape { Renderer = PathOf(root, face), Name = mesh.GetBlendShapeName(index) });
+                shapes.Add(new PainterShape { renderer = PathOf(root, face), name = mesh.GetBlendShapeName(index) });
             return shapes;
         }
+
+        /// <summary>
+        /// The painted avatar, then each copy in a natural pose, baked where it shows in the project (the parts, and how many
+        /// are the painted one's). Clothing on armatures of its own (an unbuilt copy) follows the bones through
+        /// <paramref name="follow"/>. The copy is back at rest after.
+        /// </summary>
+        internal static (List<Part> Parts, int Main) Posed(GameObject copy, Rest rest, IEnumerable<FollowLink> follow, PainterPoseOptions options)
+        {
+            var links = follow.ToList();
+            var baked = new List<Part>();
+            rest.Restore();
+            // Centered from the avatar at rest: the pose turns limbs only, the middle stays where it is.
+            var frame = Frame(copy);
+            Paint(copy, options);
+            Follow(links);
+            baked.AddRange(Bake(copy, frame));
+            int main = baked.Count;
+            var bounds = Bounds(baked);
+            for (int i = 0; i < options.copies.Count; i++)
+            {
+                rest.Restore();
+                Natural(copy, options.copies[i], options);
+                Follow(links);
+                float step = i + 1;
+                // Above and below stay on the symmetry plane; beside, they alternate right and left.
+                var offset = options.placement == 0 ? new Vector3(0f, bounds.size.y * 1.08f * step, 0f)
+                    : options.placement == 1 ? new Vector3(0f, -bounds.size.y * 1.08f * step, 0f)
+                    : Vector3.right * (bounds.size.x * .6f + bounds.size.x * .9f * (i / 2 + 1)) * (i % 2 == 0 ? 1f : -1f);
+                baked.AddRange(Bake(copy, Matrix4x4.Translate(offset) * frame));
+            }
+            rest.Restore();
+            return (baked, main);
+        }
+
+        /// <summary>
+        /// Starts building the avatar as it uploads (clothing merged onto the armature), without the upload's optimization (the
+        /// meshes stay whole): the copy a project's mesh is posed from.
+        /// </summary>
+        internal static HiddenAvatarBuild Build(MyAvatar avatar) =>
+            HiddenAvatarBuild.Start(TextureOptimization.AvatarRoot(avatar), type => type.Name == "ParameterCompressorHook", copy =>
+            {
+                foreach (var own in copy.GetComponentsInChildren<MyAvatar>(true)) own.uploadOptimization.level = OptimizationLevel.Off;
+            });
 
         /// <summary>A mesh of the posed copy, as it shows now.</summary>
         internal sealed class Part

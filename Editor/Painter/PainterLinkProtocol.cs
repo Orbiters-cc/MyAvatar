@@ -30,7 +30,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
     /// <item>Committing (Painter): the project is being saved and its maps exported. Commit (Painter):
     /// <see cref="Commit"/>, the exported maps: Unity applies them to the materials, as a texture drop does.</item>
     /// <item>Status (Unity): <see cref="Status"/>, what Painter's panel shows. Request (Unity): <see cref="Request"/>, render
-    /// again ("refresh") or export now ("commit").</item>
+    /// again ("refresh"), export now ("commit"), or put a new mesh of the avatar in the project ("reloadMesh", with its OBJ:
+    /// the avatar's meshes changed). MeshReloaded (Painter): <see cref="MeshReloaded"/>, how that went.</item>
     /// <item>Bye (either way): the connection closes.</item>
     /// </list>
     /// </summary>
@@ -57,6 +58,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             Status = 8,
             Request = 9,
             Bye = 10,
+            MeshReloaded = 11,
         }
 
         public static readonly LiveLinkFormat Format = new LiveLinkFormat(Magic, Version, MaxPayloadBytes, type => Enum.IsDefined(typeof(FrameType), type));
@@ -173,6 +175,14 @@ namespace Orbiters.MyAvatar.Editor.Painter
         public sealed class Request
         {
             public string kind;
+            /// <summary>The OBJ of a "reloadMesh".</summary>
+            public string path;
+        }
+
+        public sealed class MeshReloaded
+        {
+            /// <summary>Why Painter could not load the mesh, or null when the project has it.</summary>
+            public string error;
         }
     }
 }

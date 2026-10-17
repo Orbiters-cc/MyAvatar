@@ -42,11 +42,12 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private string copyError;
         // The upload's build, from the click that asks for the project until the project is written.
         private HiddenAvatarBuild build;
-        private readonly PainterPose.Options options = new PainterPose.Options();
-        // The blendshapes chosen in the picker (PainterPose.Key), in the order of options.Shapes.
+        // The choices: the avatar's last ones (the project keeps them on the avatar), the defaults for a first project.
+        private PainterPoseOptions options = new PainterPoseOptions();
+        private MyAvatar optionsFor;
+        // The blendshapes chosen in the picker (PainterPose.Key), in the order of options.shapes.
         private readonly List<string> chosen = new List<string>();
-        private readonly List<string> copies = new List<string>();
-        private int placement, resolution;
+        private int resolution;
         private List<PainterPose.Part> parts = new List<PainterPose.Part>();
         private int mainCount;
         private Bounds framed;
@@ -115,6 +116,12 @@ namespace Orbiters.MyAvatar.Editor.Painter
             if (!avatar && GlobalObjectId.TryParse(SessionState.GetString(AvatarKey, ""), out var id))
                 avatar = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(id) as MyAvatar;
             if (!avatar) { root.Add(new Label("The avatar is gone.")); return; }
+            if (optionsFor != avatar)
+            {
+                options = avatar.painter.posed ? PainterPose.Copy(avatar.painter.pose) : new PainterPoseOptions();
+                shapesChosen = avatar.painter.posed;
+                optionsFor = avatar;
+            }
 
             view = new Image { scaleMode = ScaleMode.StretchToFill };
             view.AddToClassList("painter-window__view");
@@ -138,8 +145,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
             Heading("Pose");
             Switch("Painting pose", "Arms level as in a T-pose, legs well apart: the armpits and the inner legs open. Centered for Painter's symmetry.",
-                options.Pose, on => { options.Pose = on; RequestRepose(); });
-            Switch("Spread fingers", "Straight fingers apart from each other, the thumb away from the hand.", options.Fingers, on => { options.Fingers = on; RequestRepose(); });
+                options.paintingPose, on => { options.paintingPose = on; RequestRepose(); });
+            Switch("Spread fingers", "Straight fingers apart from each other, the thumb away from the hand.", options.spreadFingers, on => { options.spreadFingers = on; RequestRepose(); });
 
             Heading("Blendshapes");
             var shapesHint = new Label("Every blendshape keeps its value on the avatar, except those chosen here: set on the painted avatar, on the copies, or both.");
@@ -156,16 +163,16 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 string named = pose;
                 var chip = MyAvatarEditor.PressButton(pose, null);
                 chip.AddToClassList("vrm-choice");
-                chip.EnableInClassList("vrm-choice--on", copies.Contains(pose));
+                chip.EnableInClassList("vrm-choice--on", options.copies.Contains(pose));
                 chip.clicked += () =>
                 {
-                    if (!copies.Remove(named)) copies.Add(named);
-                    chip.EnableInClassList("vrm-choice--on", copies.Contains(named));
+                    if (!options.copies.Remove(named)) options.copies.Add(named);
+                    chip.EnableInClassList("vrm-choice--on", options.copies.Contains(named));
                     RequestRepose();
                 };
                 chips.Add(chip);
             }
-            Choices("Place them", Placements.Select((p, i) => (i, p, (string)null)).ToArray(), () => placement, value => { placement = value; RequestRepose(); });
+            Choices("Place them", Placements.Select((p, i) => (i, p, (string)null)).ToArray(), () => options.placement, value => { options.placement = value; RequestRepose(); });
 
             Heading("Texture size");
             Choices(null, Resolutions, () => resolution, value => resolution = value);
@@ -215,22 +222,22 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 if (!labels.ContainsKey(key)) labels[key] = name + "  ·  " + rendererName;
             }
             chosen.Clear();
-            chosen.AddRange(options.Shapes.Select(s => s.Key));
+            chosen.AddRange(options.shapes.Select(PainterPose.Key));
             var picker = new BlendshapePicker(labels.Keys, chosen, ShapesChosen, labelOf: key => labels.TryGetValue(key, out var label) ? label : key,
                 searchTooltip: "Search the avatar's blendshapes; the chosen ones stay chosen across searches");
             picker.AddToClassList("orbiters-shape-picker--flat");
             picker.AddToClassList("painter-picker");
             shapesHost.Add(picker);
             // The picker drops what the copy doesn't have.
-            options.Shapes = options.Shapes.Where(s => chosen.Contains(s.Key)).ToList();
+            options.shapes = options.shapes.Where(s => chosen.Contains(PainterPose.Key(s))).ToList();
             weightsHost = new VisualElement(); weightsHost.AddToClassList("painter-shapes"); shapesHost.Add(weightsHost);
             ShowWeights();
         }
 
         private void ShapesChosen()
         {
-            var listed = options.Shapes.GroupBy(s => s.Key).ToDictionary(g => g.Key, g => g.First());
-            options.Shapes = chosen.Select(key => listed.TryGetValue(key, out var shape) ? shape : PainterPose.FromKey(key)).ToList();
+            var listed = options.shapes.GroupBy(PainterPose.Key).ToDictionary(g => g.Key, g => g.First());
+            options.shapes = chosen.Select(key => listed.TryGetValue(key, out var shape) ? shape : PainterPose.FromKey(key)).ToList();
             shapesChosen = true;
             ShowWeights();
             RequestRepose();
@@ -240,23 +247,23 @@ namespace Orbiters.MyAvatar.Editor.Painter
         {
             if (weightsHost == null) return;
             weightsHost.Clear();
-            foreach (var shape in options.Shapes)
+            foreach (var shape in options.shapes)
             {
                 var row = new VisualElement(); row.AddToClassList("painter-shape"); weightsHost.Add(row);
-                var name = new Label(shape.Name); name.AddToClassList("painter-shape__name"); name.tooltip = shape.Renderer; row.Add(name);
+                var name = new Label(shape.name); name.AddToClassList("painter-shape__name"); name.tooltip = shape.renderer; row.Add(name);
                 var controls = new VisualElement(); controls.AddToClassList("painter-shape__controls"); row.Add(controls);
-                var weight = new IntegerField { value = Mathf.RoundToInt(shape.Weight), isDelayed = true, tooltip = "Weight, 0 to 100" };
+                var weight = new IntegerField { value = Mathf.RoundToInt(shape.weight), isDelayed = true, tooltip = "Weight, 0 to 100" };
                 weight.AddToClassList("painter-shape__weight");
                 weight.RegisterValueChangedCallback(evt =>
                 {
-                    shape.Weight = Mathf.Clamp(evt.newValue, 0, 100);
-                    weight.SetValueWithoutNotify(Mathf.RoundToInt(shape.Weight));
+                    shape.weight = Mathf.Clamp(evt.newValue, 0, 100);
+                    weight.SetValueWithoutNotify(Mathf.RoundToInt(shape.weight));
                     shapesChosen = true;
                     RequestRepose();
                 });
                 controls.Add(weight);
-                Chip(controls, "Painted", "On the avatar you paint.", () => shape.Painted, on => shape.Painted = on);
-                Chip(controls, "Copies", "On the copies in natural poses.", () => shape.Copies, on => shape.Copies = on);
+                Chip(controls, "Painted", "On the avatar you paint.", () => shape.painted, on => shape.painted = on);
+                Chip(controls, "Copies", "On the copies in natural poses.", () => shape.copies, on => shape.copies = on);
             }
         }
 
@@ -317,7 +324,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             rest = new PainterPose.Rest(copy);
             links = PainterPose.Links(copy);
             // The mouth open on the painted avatar, until the list is changed.
-            if (!shapesChosen) options.Shapes = PainterPose.MouthOpen(copy);
+            if (!shapesChosen) options.shapes = PainterPose.MouthOpen(copy);
             ShowShapes();
             Repose();
             framed = PainterPose.Bounds(parts.Take(mainCount));
@@ -337,37 +344,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
             reposing = false;
             if (shown?.Copy == null || rest == null) return;
             PainterPose.Release(parts);
-            (parts, mainCount) = Pose(shown.Copy, rest, links);
+            (parts, mainCount) = PainterPose.Posed(shown.Copy, rest, links, options);
             dirty = true;
-        }
-
-        // The painted avatar, then each copy in a natural pose, baked where it shows (the parts, and how many are the painted
-        // one's). Clothing on armatures of its own (the copy isn't built) follows the bones through the links.
-        private (List<PainterPose.Part>, int) Pose(GameObject copy, PainterPose.Rest atRest, List<FollowLink> follow)
-        {
-            var baked = new List<PainterPose.Part>();
-            atRest.Restore();
-            // Centered from the avatar at rest: the pose turns limbs only, the middle stays where it is.
-            var frame = PainterPose.Frame(copy);
-            PainterPose.Paint(copy, options);
-            PainterPose.Follow(follow);
-            baked.AddRange(PainterPose.Bake(copy, frame));
-            int main = baked.Count;
-            var bounds = PainterPose.Bounds(baked);
-            for (int i = 0; i < copies.Count; i++)
-            {
-                atRest.Restore();
-                PainterPose.Natural(copy, copies[i], options);
-                PainterPose.Follow(follow);
-                float step = i + 1;
-                // Above and below stay on the symmetry plane; beside, they alternate right and left.
-                var offset = placement == 0 ? new Vector3(0f, bounds.size.y * 1.08f * step, 0f)
-                    : placement == 1 ? new Vector3(0f, -bounds.size.y * 1.08f * step, 0f)
-                    : Vector3.right * (bounds.size.x * .6f + bounds.size.x * .9f * (i / 2 + 1)) * (i % 2 == 0 ? 1f : -1f);
-                baked.AddRange(PainterPose.Bake(copy, Matrix4x4.Translate(offset) * frame));
-            }
-            atRest.Restore();
-            return (baked, main);
         }
 
         private void UpdateStatus()
@@ -467,12 +445,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private void Send()
         {
             if (build != null || shown?.Copy == null || parts.Count == 0) return;
-            var root = TextureOptimization.AvatarRoot(avatar);
-            // Built as it uploads (clothing merged onto the armature), without the upload's optimization: the meshes stay whole.
-            build = HiddenAvatarBuild.Start(root, type => type.Name == "ParameterCompressorHook", copy =>
-            {
-                foreach (var own in copy.GetComponentsInChildren<MyAvatar>(true)) own.uploadOptimization.level = OptimizationLevel.Off;
-            });
+            build = PainterPose.Build(avatar);
             build.Completed += Built;
             UpdateStatus();
             if (build != null && build.Finished) Built();
@@ -495,12 +468,12 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     return;
                 }
                 // The built copy in the pose the preview shows; its clothing is merged onto the body.
-                (made, _) = Pose(done.Copy, new PainterPose.Rest(done.Copy), new List<FollowLink>());
+                (made, _) = PainterPose.Posed(done.Copy, new PainterPose.Rest(done.Copy), Array.Empty<FollowLink>(), options);
                 bool plugin = PainterApp.PluginCurrent;
                 if (!plugin) PainterApp.InstallPlugin();
                 PainterLinkService.EnsureRunning();
                 bool running = PainterApp.Running;
-                PainterProjectExport.Write(avatar, made, resolution);
+                PainterProjectExport.Write(avatar, made, resolution, options);
                 if (!running && !PainterApp.Launch()) throw new InvalidOperationException("Substance 3D Painter wasn't found.");
                 Debug.Log("[My Avatar] Sent " + avatar.name + " to Substance 3D Painter.");
                 // A Painter started before its plugin was installed or updated runs the old one (or none) until it restarts.

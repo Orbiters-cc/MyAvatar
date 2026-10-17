@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using Orbiters.MyAvatar.Editor.Painter;
+using Orbiters.Toolkit.Editor.Meshes;
 using Orbiters.Toolkit.Editor.Textures;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -221,6 +222,95 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(outfit.sharedMaterial.GetInstanceID(), Is.EqualTo(clothes.GetInstanceID()), "The undone clothes texture stays undone.");
             Assert.That(body.sharedMaterial.GetInstanceID(), Is.Not.EqualTo(skin.GetInstanceID()), "The skin gets the saved map.");
             Assert.That(avatar.textures.Count, Is.EqualTo(1));
+        }
+
+        // A change of the avatar's meshes (MCB applying a Blender export) outdates the mesh of a project made from the avatar;
+        // a project linked from Painter keeps its own mesh. Without the project open, nothing is built until it links.
+        [Test]
+        public void AMeshChangeOutdatesOnlyAProjectMadeFromTheAvatar()
+        {
+            var made = Avatar();
+            made.painter.posed = true;
+            var linked = Avatar();
+            AvatarMeshEdits.NotifyApplied(made.transform);
+            AvatarMeshEdits.NotifyApplied(linked.transform);
+            Assert.That(made.painter.meshOutdated, Is.True);
+            Assert.That(linked.painter.meshOutdated, Is.False);
+            Assert.That(PainterMeshUpdate.Busy(made), Is.False);
+        }
+
+        // The mesh sent again is written as the project's was (a texture set per material), and only the avatar's own earlier
+        // ones are cleared: another avatar's name may start the same.
+        [Test]
+        public void MeshUpdatesReplaceOnlyTheAvatarsEarlierOnes()
+        {
+            var cube = Own(Object.Instantiate(Resources.GetBuiltinResource<Mesh>("Cube.fbx")));
+            var skin = Standard("Skin");
+            var body = Avatar(); body.gameObject.name = "OrbitersPainterTestBody";
+            var suit = Avatar(); suit.gameObject.name = "OrbitersPainterTestBody-Suit";
+            List<PainterPose.Part> Parts() => new List<PainterPose.Part>
+                { new PainterPose.Part { Name = "Body", Mesh = cube, ToWorld = Matrix4x4.identity, Materials = new[] { skin } } };
+            var written = new List<string>();
+            try
+            {
+                written.Add(PainterProjectExport.WriteMeshUpdate(suit, Parts()));
+                written.Add(PainterProjectExport.WriteMeshUpdate(body, Parts()));
+                // A later second: another file name.
+                System.Threading.Thread.Sleep(1100);
+                written.Add(PainterProjectExport.WriteMeshUpdate(body, Parts()));
+                Assert.That(File.Exists(written[0]), Is.True, "The other avatar's mesh stays.");
+                Assert.That(File.Exists(written[1]), Is.False, "The avatar's earlier mesh goes.");
+                Assert.That(File.Exists(written[2]), Is.True);
+                Assert.That(File.ReadAllText(written[2]), Does.Contain("usemtl Skin"));
+            }
+            finally
+            {
+                foreach (string path in written)
+                    foreach (string file in new[] { path, Path.ChangeExtension(path, ".mtl") })
+                        if (File.Exists(file)) File.Delete(file);
+            }
+        }
+
+        // A built copy shows its own copies of the materials (VRCFury names them "VRCFury M_Skin (Body)"): the texture set is
+        // the avatar's material, found through the renderer and slot that show it, and named after it; copies of one
+        // material paint one texture set.
+        [Test]
+        public void BuiltMaterialCopiesPaintTheAvatarsMaterials()
+        {
+            var avatar = Avatar();
+            var skin = Standard("M_Skin");
+            Part(avatar, "Body", skin);
+            var copy = Avatar();
+            var clone = Standard("VRCFury M_Skin (Body)");
+            var other = Standard("VRCFury M_Skin (Body) 2");
+            var copied = Part(copy, "Body", clone);
+            var mesh = Own(Object.Instantiate(Resources.GetBuiltinResource<Mesh>("Cube.fbx")));
+            var parts = new List<PainterPose.Part>
+            {
+                new PainterPose.Part { Name = "Body", Mesh = mesh, ToWorld = Matrix4x4.identity, Materials = new[] { clone }, Source = copied },
+                new PainterPose.Part { Name = "Body", Mesh = mesh, ToWorld = Matrix4x4.identity, Materials = new[] { other }, Source = copied },
+            };
+            var sets = PainterProjectExport.Sets(avatar, parts);
+            Assert.That(sets[clone].Name, Is.EqualTo("M_Skin"));
+            Assert.That(sets[clone].Choice?.Material, Is.SameAs(skin));
+            Assert.That(sets[other], Is.SameAs(sets[clone]), "Both copies paint the avatar's one material.");
+        }
+
+        // The window edits its own copy of the choices; the avatar keeps the ones its project was made with.
+        [Test]
+        public void PoseChoicesAreCopiedNotShared()
+        {
+            var options = new PainterPoseOptions { placement = 2 };
+            options.shapes.Add(PainterPose.FromKey(PainterPose.Key("Body", "vrc.v_aa")));
+            options.copies.Add(PainterPose.Relaxed);
+            var copy = PainterPose.Copy(options);
+            copy.shapes[0].weight = 40f;
+            copy.copies.Clear();
+            Assert.That(options.shapes[0].weight, Is.EqualTo(100f));
+            Assert.That(options.copies, Is.EqualTo(new[] { PainterPose.Relaxed }));
+            Assert.That(copy.placement, Is.EqualTo(2));
+            Assert.That(copy.shapes[0].renderer, Is.EqualTo("Body"));
+            Assert.That(copy.shapes[0].name, Is.EqualTo("vrc.v_aa"));
         }
     }
 }

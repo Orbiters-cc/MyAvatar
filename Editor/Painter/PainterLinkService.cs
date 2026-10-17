@@ -33,6 +33,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// <summary>Something the Painter card shows changed (a project linked or gone, a state, a commit).</summary>
         internal static event Action Changed;
 
+        /// <summary>Tells the Painter cards something they show changed.</summary>
+        internal static void NotifyChanged() => Changed?.Invoke();
+
         static PainterLinkService()
         {
             // Listening again after a script reload: Painter reconnects on its own.
@@ -100,6 +103,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     case PainterLinkProtocol.FrameType.Structure: frame.Decoded = PainterLinkProtocol.Read<PainterLinkProtocol.Structure>(frame.Payload); break;
                     case PainterLinkProtocol.FrameType.Texture: frame.Decoded = PainterLinkProtocol.Read<PainterLinkProtocol.Texture>(frame.Payload); break;
                     case PainterLinkProtocol.FrameType.Commit: frame.Decoded = PainterLinkProtocol.Read<PainterLinkProtocol.Commit>(frame.Payload); break;
+                    case PainterLinkProtocol.FrameType.MeshReloaded: frame.Decoded = PainterLinkProtocol.Read<PainterLinkProtocol.MeshReloaded>(frame.Payload); break;
                 }
                 return true;
             }
@@ -227,6 +231,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     }
                     sessions[frame.Connection] = new Session(frame.Connection, avatar, hello);
                     sessions[frame.Connection].Welcome();
+                    PainterMeshUpdate.Linked(sessions[frame.Connection]);
                     Changed?.Invoke();
                     break;
                 }
@@ -241,6 +246,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     break;
                 case PainterLinkProtocol.FrameType.Commit:
                     session?.OnCommit((PainterLinkProtocol.Commit)frame.Decoded);
+                    break;
+                case PainterLinkProtocol.FrameType.MeshReloaded:
+                    if (session != null) PainterMeshUpdate.Reloaded(session, (PainterLinkProtocol.MeshReloaded)frame.Decoded);
                     break;
             }
         }
@@ -404,6 +412,10 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
             /// <summary>Asks Painter to export and apply every mapped texture now.</summary>
             public void RequestCommit() => Send(PainterLinkProtocol.FrameType.Request, new PainterLinkProtocol.Request { kind = "commit" });
+
+            /// <summary>Asks Painter to put this mesh (an OBJ of the avatar posed as the project's) in the project.</summary>
+            public void RequestMeshReload(string path) =>
+                Send(PainterLinkProtocol.FrameType.Request, new PainterLinkProtocol.Request { kind = "reloadMesh", path = path.Replace('\\', '/') });
 
             /// <summary>Asks Painter to render every live channel again.</summary>
             public void RequestRefresh() => Send(PainterLinkProtocol.FrameType.Request, new PainterLinkProtocol.Request { kind = "refresh" });

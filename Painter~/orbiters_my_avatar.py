@@ -34,10 +34,10 @@ import substance_painter.textureset
 import substance_painter.ui
 import substance_painter_plugins
 
-PLUGIN_VERSION = "1.2.1"
+PLUGIN_VERSION = "1.3.0"
 MAGIC = 0x4C50524F  # "ORPL"
 VERSION = 1
-HELLO, WELCOME, STRUCTURE, MAPPING, TEXTURE, COMMITTING, COMMIT, STATUS, REQUEST, BYE = range(1, 11)
+HELLO, WELCOME, STRUCTURE, MAPPING, TEXTURE, COMMITTING, COMMIT, STATUS, REQUEST, BYE, MESH_RELOADED = range(1, 12)
 HEADER = struct.Struct("<IBBHI")
 ENDPOINT_KIND = "orbiters.myavatar.painterLink"
 PRESENCE_KIND = "orbiters.myavatar.painter"
@@ -339,6 +339,8 @@ class Link(QtCore.QObject):
                 self.schedule_render(0)
             elif data.get("kind") == "commit":
                 self.commit_later(everything=True)
+            elif data.get("kind") == "reloadMesh":
+                self.reload_mesh(data.get("path"))
         elif frame_type == BYE:
             self.on_disconnected()
 
@@ -483,6 +485,48 @@ class Link(QtCore.QObject):
         module = sys.modules.get(__name__)
         if module is not None:
             QtCore.QTimer.singleShot(0, lambda: substance_painter_plugins.reload_plugin(module))
+
+    # ---- The avatar's mesh ----
+
+    def reload_mesh(self, path, attempts=240):
+        """
+        Puts the avatar's new mesh (an OBJ Unity wrote, posed as the project's) in the project, the strokes kept where they
+        are on the surface. Waits for Painter to be free and for a stroke under way to end, half a second at a time.
+        """
+        if not path or not os.path.isfile(path):
+            self.mesh_reloaded("the mesh file is missing: %s" % path)
+            return
+
+        def attempt():
+            if self.pressed or not self.project_ready():
+                if attempts > 0:
+                    QtCore.QTimer.singleShot(500, lambda: self.reload_mesh(path, attempts - 1))
+                else:
+                    self.mesh_reloaded("Painter stayed busy")
+                return
+            self.set_message("Loading the avatar's new mesh from Unity…")
+            settings = substance_painter.project.MeshReloadingSettings(import_cameras=False, preserve_strokes=True)
+            try:
+                substance_painter.project.reload_mesh(path, settings, self.on_mesh_reloaded)
+            except Exception as exception:
+                log("Mesh reload failed: " + traceback.format_exc())
+                self.mesh_reloaded(str(exception))
+
+        substance_painter.project.execute_when_not_busy(attempt)
+
+    def on_mesh_reloaded(self, status):
+        self.mesh_reloaded(None if status == substance_painter.project.ReloadMeshStatus.SUCCESS else "Painter could not load it")
+
+    def mesh_reloaded(self, error):
+        if error:
+            log("The avatar's new mesh was not loaded: " + error)
+            self.set_message("The avatar's new mesh could not be loaded: %s" % error, True)
+        else:
+            log("The avatar's new mesh is in the project.")
+            self.set_message("The avatar's new mesh is in the project.")
+            # The texture sets as the new mesh has them, on the next tick.
+            self.structure_sent = False
+        self.send(MESH_RELOADED, {"error": error})
 
     # ---- Commits ----
 

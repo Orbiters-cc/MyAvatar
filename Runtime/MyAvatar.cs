@@ -251,6 +251,41 @@ namespace Orbiters.MyAvatar
         public string textureFolder;
         /// <summary>The long side of the images shown live, in pixels.</summary>
         public int previewSize = 1024;
+        /// <summary>
+        /// The project's mesh was made by Open in Substance, posed with <see cref="pose"/>: it is made again when the avatar's
+        /// meshes change (a project linked from Painter keeps its own mesh).
+        /// </summary>
+        public bool posed;
+        /// <summary>The choices of Open in Substance, the last ones made (they open the window again).</summary>
+        public PainterPoseOptions pose = new PainterPoseOptions();
+        /// <summary>The avatar's meshes changed since the project's mesh was made: Painter gets the new one once it links.</summary>
+        public bool meshOutdated;
+    }
+
+    /// <summary>How the avatar is posed for a Painter project: the painted avatar, then copies in natural poses.</summary>
+    [Serializable]
+    public sealed class PainterPoseOptions
+    {
+        /// <summary>Arms level as in a T-pose, legs well apart.</summary>
+        public bool paintingPose = true;
+        public bool spreadFingers = true;
+        /// <summary>Blendshapes set apart from the avatar's values, on the painted avatar, the copies, or both.</summary>
+        public List<PainterShape> shapes = new List<PainterShape>();
+        /// <summary>The copies' poses: "Relaxed", or a Photoshoot body pose by its label.</summary>
+        public List<string> copies = new List<string>();
+        /// <summary>Where the copies stand: 0 above, 1 below, 2 beside.</summary>
+        public int placement;
+    }
+
+    [Serializable]
+    public sealed class PainterShape
+    {
+        /// <summary>The renderer's path from the avatar.</summary>
+        public string renderer;
+        public string name;
+        public float weight = 100f;
+        public bool painted = true;
+        public bool copies;
     }
 
     [Serializable]
