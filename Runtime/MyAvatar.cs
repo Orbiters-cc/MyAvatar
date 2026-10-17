@@ -40,6 +40,8 @@ namespace Orbiters.MyAvatar
         [HideInInspector] public UploadOptimization uploadOptimization = new UploadOptimization();
         /// <summary>The Export to VRM section's choices: the VRM version and what the file says about the model.</summary>
         [HideInInspector] public VrmExportSettings vrmExport = new VrmExportSettings();
+        /// <summary>The Substance 3D Painter link: which texture set paints which material, and the project made for it.</summary>
+        [HideInInspector] public PainterLink painter = new PainterLink();
 
         // One line under the accessory drop field: something done, or a manual step with the object to look at.
         [Serializable]
@@ -233,6 +235,31 @@ namespace Orbiters.MyAvatar
         public bool violentUse, sexualUse, commercialUse, redistribution, modification;
         /// <summary>The exporter confirmed the model's license allows converting it to VRM.</summary>
         public bool licenseAllows;
+    }
+
+    /// <summary>
+    /// The Substance 3D Painter link of an avatar: each texture set of the Painter project and the material slot it paints
+    /// (by renderer path and slot, so it follows the copies My Avatar makes of a material), the project Unity created, and
+    /// the folder its saved textures go to.
+    /// </summary>
+    [Serializable]
+    public sealed class PainterLink
+    {
+        public List<PainterSet> sets = new List<PainterSet>();
+        public string projectPath;
+        /// <summary>Where the textures saved in Painter are imported (Assets/...), kept from one save to the next.</summary>
+        public string textureFolder;
+        /// <summary>The long side of the images shown live, in pixels.</summary>
+        public int previewSize = 1024;
+    }
+
+    [Serializable]
+    public sealed class PainterSet
+    {
+        public string textureSet;
+        /// <summary>The renderer's path from the avatar and the material slot; empty when the texture set paints nothing here.</summary>
+        public string renderer;
+        public int slot;
     }
 
     [Serializable]
