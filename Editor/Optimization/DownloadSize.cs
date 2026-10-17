@@ -70,10 +70,11 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// <summary>
         /// The download of <paramref name="root"/> as it stands, for PC or for Quest (Android). <paramref name="planned"/>
         /// replaces a texture's size and format (textures an optimization will resize); <paramref name="kept"/> gives the
-        /// blendshapes a skinned mesh keeps when a build step removes the rest (null: all of them).
+        /// blendshapes a skinned mesh keeps when a build step removes the rest (null: all of them). <paramref name="sizes"/> keeps
+        /// the blendshape sizes of meshes that are not saved assets (an estimate's copies) between measures: see <see cref="ShapeBytes"/>.
         /// </summary>
         internal static Parts Of(GameObject root, bool mobile = false, Func<Texture, TextureOptimization.TexturePlan> planned = null,
-            Func<SkinnedMeshRenderer, ICollection<string>> kept = null)
+            Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null)
         {
             var parts = new Parts();
             var meshes = new Dictionary<Mesh, ICollection<string>>();
@@ -97,7 +98,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             foreach (var pair in meshes)
             {
                 long vertices = VertexBytes(pair.Key);
-                long shapes = ShapeBytes(pair.Key).Where(s => pair.Value == null || pair.Value.Contains(s.Key)).Sum(s => s.Value);
+                long shapes = ShapeBytes(pair.Key, sizes).Where(s => pair.Value == null || pair.Value.Contains(s.Key)).Sum(s => s.Value);
                 parts.Meshes += (long)(vertices * Vertices);
                 parts.BlendShapes += (long)(shapes * Shapes);
                 parts.Raw += vertices + shapes;
@@ -391,10 +392,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         }
 
         /// <summary>Each blendshape's stored offsets: only the vertices a frame moves are kept.</summary>
-        internal static Dictionary<string, long> ShapeBytes(Mesh mesh)
+        /// <param name="sizes">Where the sizes of a mesh that is not a saved asset are kept, by whoever knows it won't change
+        /// meanwhile (an estimate's copy, measured for each platform): every frame of every blendshape is read to size it.</param>
+        internal static Dictionary<string, long> ShapeBytes(Mesh mesh, Dictionary<Mesh, Dictionary<string, long>> sizes = null)
         {
             var result = new Dictionary<string, long>();
             if (mesh.blendShapeCount == 0) return result;
+            if (sizes != null && sizes.TryGetValue(mesh, out var sized)) return sized;
             int id = mesh.GetInstanceID();
             if (ShapeCache.TryGetValue(id, out var known) && known.Vertices == mesh.vertexCount && known.Shapes.Count == mesh.blendShapeCount) return known.Shapes;
             // Meshes unloaded since leave it.
@@ -416,6 +420,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 result[mesh.GetBlendShapeName(shape)] = bytes;
             }
             if (EditorUtility.IsPersistent(mesh)) ShapeCache[id] = (mesh.vertexCount, result);
+            else if (sizes != null) sizes[mesh] = result;
             return result;
         }
 

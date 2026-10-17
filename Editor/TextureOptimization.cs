@@ -349,11 +349,27 @@ namespace Orbiters.MyAvatar.Editor
 
         // ---- Changes ------------------------------------------------------------------------------------------
 
-        private static int imports;
+        // Imports that may change what an avatar shows. Code, style sheets and documents never do: counting them made every
+        // script save (and the script reload after it) measure every avatar again. Kept across script reloads, like the
+        // estimates keyed by it.
+        private const string ImportsKey = "Orbiters.MyAvatar.TextureOptimization.Imports";
+        private static int? imports;
+        private static int Imports => imports ??= SessionState.GetInt(ImportsKey, 0);
+
+        private static readonly HashSet<string> Inert = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".cs", ".asmdef", ".asmref", ".dll", ".rsp", ".uss", ".uxml", ".tss", ".txt", ".md", ".json", ".xml", ".meta", ".pdb", ".so", ".dylib", ".bytes",
+        };
 
         internal sealed class ImportWatcher : AssetPostprocessor
         {
-            private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom) => imports++;
+            private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom)
+            {
+                bool Matters(string[] paths) => paths.Any(path => !Inert.Contains(System.IO.Path.GetExtension(path)));
+                if (!Matters(imported) && !Matters(deleted) && !Matters(moved)) return;
+                imports = Imports + 1;
+                SessionState.SetInt(ImportsKey, imports.Value);
+            }
         }
 
         /// <summary>The distance textures stay sharp from at upload, in meters: the level's, or the slider's under Custom.</summary>
@@ -365,7 +381,7 @@ namespace Orbiters.MyAvatar.Editor
         /// </summary>
         internal static string ChangeKey(MyAvatar avatar)
         {
-            var key = new System.Text.StringBuilder().Append(imports);
+            var key = new System.Text.StringBuilder().Append(Imports);
             void Scale(Transform transform)
             {
                 if (!transform) return;

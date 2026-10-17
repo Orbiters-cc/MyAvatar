@@ -432,6 +432,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 }
                 var surfaces = poses.Select(pose => (Pose: pose, Points: Points(pose), Normals: Shaded(pose) ? Turned(free, restNormals, pose) : null))
                     .Where(s => s.Points != null).ToList();
+                // The broad shapes' source, read once for every try; matching a try's vertices to it runs on another thread
+                // in the background (seconds on a body, on the editor's thread it stalled the Inspector).
+                var shapes = new MeshParts.ShapeSource(free);
                 await Pause();
 
                 async Task<Mesh> Try(float keep)
@@ -443,9 +446,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                         if (background) await MeshSimplifier.SimplifyAsync(plain, target, options, result, token);
                         else MeshSimplifier.Simplify(plain, target, options, result);
                         token.ThrowIfCancellationRequested();
-                        MeshParts.TransferShapes(free, result, _ => true);
-                        // The simplified surface in the same poses, read here; measured anywhere.
                         var vertices = result.vertices;
+                        var targetNormals = result.normals;
+                        var matches = background ? await Task.Run(() => shapes.Match(vertices, targetNormals), token) : shapes.Match(vertices, targetNormals);
+                        token.ThrowIfCancellationRequested();
+                        shapes.Apply(result, matches, _ => true);
+                        // The simplified surface in the same poses, read here; measured anywhere.
                         var triangles = result.triangles;
                         var resultNormals = result.normals;
                         var shaped = new List<(Vector3[] Points, Vector3[] Normals, Vector3[] Vertices, Vector3[] VertexNormals)>();

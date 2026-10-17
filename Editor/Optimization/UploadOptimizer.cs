@@ -143,114 +143,138 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         internal static void RunStructure(GameObject root, OptimizationPasses passes, Report report, bool unbuilt = false, float polygonQuality = 1f,
             List<Object> temporary = null, Func<SkinnedMeshRenderer, ICollection<string>> shapes = null, int owner = 0)
         {
+            using (var steps = StructureSteps(root, passes, report, unbuilt, polygonQuality, temporary, shapes, owner).GetEnumerator())
+                while (steps.MoveNext()) { }
+        }
+
+        /// <summary>
+        /// <see cref="RunStructure"/> one step at a time: each step that ran is yielded once done, so an estimate can spread them
+        /// over editor frames. Abandoned part-way (disposed), the meshes the steps made and no renderer shows are destroyed.
+        /// </summary>
+        internal static IEnumerable<OptimizationPasses> StructureSteps(GameObject root, OptimizationPasses passes, Report report, bool unbuilt = false,
+            float polygonQuality = 1f, List<Object> temporary = null, Func<SkinnedMeshRenderer, ICollection<string>> shapes = null, int owner = 0)
+        {
             var made = new HashSet<Mesh>();
             AvatarUsage usage = null;
             // The build's own copies of the animations, made the first time a step changes them.
             AttachmentAnimationBuild build = null;
             AttachmentAnimationBuild Animations() => unbuilt ? null : build ?? (build = AttachmentAnimationBuild.Prepare(root));
             PassFailed failed = null;
-            void Step(OptimizationPasses pass, Action action)
-            {
-                if ((passes & pass) == 0 || failed != null) return;
-                try { action(); }
-                catch (Exception ex) { failed = new PassFailed(pass, ex); }
-            }
             try { usage = new AvatarUsage(root, unbuilt ? (Func<Component, bool>)(c => !(c is MyAvatar) && !(c is MyAvatarFaceTracking)) : null); }
-            catch (Exception ex) { Debug.LogException(ex); Debug.LogWarning("[My Avatar] Optimization: the upload keeps the avatar as it is (" + ex.Message + ")."); return; }
+            catch (Exception ex) { Debug.LogException(ex); Debug.LogWarning("[My Avatar] Optimization: the upload keeps the avatar as it is (" + ex.Message + ")."); yield break; }
 
-            Step(OptimizationPasses.HiddenObjects, () => report.HiddenObjects += ComponentCleanup.RemoveHiddenObjects(usage));
-            Step(OptimizationPasses.DisabledComponents, () => report.DisabledComponents += ComponentCleanup.RemoveDisabledComponents(usage));
-            Step(OptimizationPasses.IdlePhysBones, () => report.IdlePhysBones += ComponentCleanup.RemoveIdlePhysBones(usage));
-            Step(OptimizationPasses.UnusedColliders, () => report.Colliders += ComponentCleanup.RemoveUnusedColliders(usage));
-            Step(OptimizationPasses.StillPhysBones, () => report.StillPhysBones += ComponentCleanup.SettleStillPhysBones(usage));
-            Step(OptimizationPasses.BlendShapes, () =>
+            var steps = new List<(OptimizationPasses Pass, Action Run)>
             {
-                foreach (var renderer in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                (OptimizationPasses.HiddenObjects, () => report.HiddenObjects += ComponentCleanup.RemoveHiddenObjects(usage)),
+                (OptimizationPasses.DisabledComponents, () => report.DisabledComponents += ComponentCleanup.RemoveDisabledComponents(usage)),
+                (OptimizationPasses.IdlePhysBones, () => report.IdlePhysBones += ComponentCleanup.RemoveIdlePhysBones(usage)),
+                (OptimizationPasses.UnusedColliders, () => report.Colliders += ComponentCleanup.RemoveUnusedColliders(usage)),
+                (OptimizationPasses.StillPhysBones, () => report.StillPhysBones += ComponentCleanup.SettleStillPhysBones(usage)),
+                (OptimizationPasses.BlendShapes, () =>
                 {
-                    int before = renderer.sharedMesh != null ? renderer.sharedMesh.blendShapeCount : 0;
-                    var copy = BlendShapePruning.Prune(root, renderer, (passes & OptimizationPasses.ConstantBlendShapes) != 0);
-                    if (copy == null) continue;
-                    made.Add(copy);
-                    report.BlendShapes += before - copy.blendShapeCount;
-                }
-            });
-            Step(OptimizationPasses.BodyUnderClothing, () =>
-            {
-                var body = Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(root.transform);
-                var source = body != null ? MeshOptimization.MeshOf(body) : null;
-                var hidden = BodyCover.HideCovered(usage, body);
-                if (hidden == null) return;
-                made.Add(hidden.Mesh);
-                report.HiddenTriangles += hidden.Triangles;
-                // The body with fewer triangles: the simplifier knows it by the body's mesh and the triangles left, without
-                // reading every blendshape of a new body at each estimate.
-                if (source != null) PolygonReduction.FewerTriangles(hidden.Mesh, source);
-            });
-            // An estimate doesn't wait for the simplifier: it measures again once the meshes are ready. A mesh the simplifier
-            // fails on keeps its polygons (said in the console), whole.
-            Step(OptimizationPasses.FewerPolygons, () => report.Polygons += PolygonReduction.Reduce(usage, polygonQuality, made, shapes, background: unbuilt, owner: owner));
-            Step(OptimizationPasses.MergeMeshes, () =>
-            {
-                var merged = MeshMerge.MergeStill(usage);
-                made.UnionWith(merged.Meshes);
-                report.MergedMeshes += merged.Merged;
-            });
-            Step(OptimizationPasses.MergeToggledMeshes, () =>
-            {
-                var merged = MeshMerge.MergeTogether(usage, Animations());
-                made.UnionWith(merged.Meshes);
-                report.ToggledMeshes += merged.Merged;
-            });
-            Step(OptimizationPasses.StaticBones, () =>
-            {
-                var folded = StaticBones.Fold(usage);
-                made.UnionWith(folded.Meshes);
-                report.StaticBones += folded.Bones;
-            });
-            Step(OptimizationPasses.BoneReferences, () =>
-            {
-                foreach (var renderer in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    foreach (var renderer in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    {
+                        int before = renderer.sharedMesh != null ? renderer.sharedMesh.blendShapeCount : 0;
+                        var copy = BlendShapePruning.Prune(root, renderer, (passes & OptimizationPasses.ConstantBlendShapes) != 0);
+                        if (copy == null) continue;
+                        made.Add(copy);
+                        report.BlendShapes += before - copy.blendShapeCount;
+                    }
+                }),
+                (OptimizationPasses.BodyUnderClothing, () =>
                 {
-                    int before = renderer.bones.Length;
-                    var copy = MeshOptimization.PruneBones(renderer);
-                    if (copy == null) continue;
-                    made.Add(copy);
-                    report.BoneReferences += before - renderer.bones.Length;
-                }
-            });
-            Step(OptimizationPasses.EndBones, () => report.EndBones += ComponentCleanup.TrimEndBones(usage));
-            Step(OptimizationPasses.MaterialSlots, () =>
-            {
-                foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+                    var body = Toolkit.Editor.VRChat.Attachments.AttachmentPlanner.Body(root.transform);
+                    var source = body != null ? MeshOptimization.MeshOf(body) : null;
+                    var hidden = BodyCover.HideCovered(usage, body);
+                    if (hidden == null) return;
+                    made.Add(hidden.Mesh);
+                    report.HiddenTriangles += hidden.Triangles;
+                    // The body with fewer triangles: the simplifier knows it by the body's mesh and the triangles left, without
+                    // reading every blendshape of a new body at each estimate.
+                    if (source != null) PolygonReduction.FewerTriangles(hidden.Mesh, source);
+                }),
+                // An estimate doesn't wait for the simplifier: it measures again once the meshes are ready. A mesh the simplifier
+                // fails on keeps its polygons (said in the console), whole.
+                (OptimizationPasses.FewerPolygons, () => report.Polygons += PolygonReduction.Reduce(usage, polygonQuality, made, shapes, background: unbuilt, owner: owner)),
+                (OptimizationPasses.MergeMeshes, () =>
                 {
-                    int before = renderer.sharedMaterials.Length;
-                    var copy = MeshOptimization.MergeSlots(renderer, usage);
-                    if (copy == null) continue;
-                    made.Add(copy);
-                    report.MaterialSlots += before - renderer.sharedMaterials.Length;
-                }
-            });
-            Step(OptimizationPasses.MenuIcons, () =>
-            {
-                var icons = MenuIcons.Shrink(root);
-                report.Icons += icons.Icons;
-                if (unbuilt) temporary?.AddRange(icons.Made);
-                else AttachmentAnimationBuild.Keep(root, icons.Made);
-            });
-            // Measured on the meshes as the steps before left them.
-            Step(OptimizationPasses.Bounds, () => report.Bounds += AvatarBounds.Unify(root));
+                    var merged = MeshMerge.MergeStill(usage);
+                    made.UnionWith(merged.Meshes);
+                    report.MergedMeshes += merged.Merged;
+                }),
+                (OptimizationPasses.MergeToggledMeshes, () =>
+                {
+                    var merged = MeshMerge.MergeTogether(usage, Animations());
+                    made.UnionWith(merged.Meshes);
+                    report.ToggledMeshes += merged.Merged;
+                }),
+                (OptimizationPasses.StaticBones, () =>
+                {
+                    var folded = StaticBones.Fold(usage);
+                    made.UnionWith(folded.Meshes);
+                    report.StaticBones += folded.Bones;
+                }),
+                (OptimizationPasses.BoneReferences, () =>
+                {
+                    foreach (var renderer in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                    {
+                        int before = renderer.bones.Length;
+                        var copy = MeshOptimization.PruneBones(renderer);
+                        if (copy == null) continue;
+                        made.Add(copy);
+                        report.BoneReferences += before - renderer.bones.Length;
+                    }
+                }),
+                (OptimizationPasses.EndBones, () => report.EndBones += ComponentCleanup.TrimEndBones(usage)),
+                (OptimizationPasses.MaterialSlots, () =>
+                {
+                    foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+                    {
+                        int before = renderer.sharedMaterials.Length;
+                        var copy = MeshOptimization.MergeSlots(renderer, usage);
+                        if (copy == null) continue;
+                        made.Add(copy);
+                        report.MaterialSlots += before - renderer.sharedMaterials.Length;
+                    }
+                }),
+                (OptimizationPasses.MenuIcons, () =>
+                {
+                    var icons = MenuIcons.Shrink(root);
+                    report.Icons += icons.Icons;
+                    if (unbuilt) temporary?.AddRange(icons.Made);
+                    else AttachmentAnimationBuild.Keep(root, icons.Made);
+                }),
+                // Measured on the meshes as the steps before left them.
+                (OptimizationPasses.Bounds, () => report.Bounds += AvatarBounds.Unify(root)),
+            };
             // Last: every step before finds objects and parameters by the names they had.
             if (!unbuilt)
-                Step(OptimizationPasses.ShortNames, () =>
+                steps.Add((OptimizationPasses.ShortNames, () =>
                 {
                     var renamed = ShortNames.Rename(usage, Animations());
                     report.ShortObjects += renamed.Objects;
                     report.ShortParameters += renamed.Parameters;
-                });
+                }));
 
-            // Copies a later step copied again are no one's any more.
-            var used = new HashSet<Mesh>(root.GetComponentsInChildren<Renderer>(true).Select(MeshOptimization.MeshOf).Where(m => m != null));
-            foreach (var mesh in made) if (mesh != null && !used.Contains(mesh)) Object.DestroyImmediate(mesh);
+            try
+            {
+                foreach (var (pass, run) in steps)
+                {
+                    if ((passes & pass) == 0) continue;
+                    try { run(); }
+                    catch (Exception ex) { failed = new PassFailed(pass, ex); break; }
+                    yield return pass;
+                }
+            }
+            finally
+            {
+                // Copies a later step copied again are no one's any more.
+                if (root)
+                {
+                    var used = new HashSet<Mesh>(root.GetComponentsInChildren<Renderer>(true).Select(MeshOptimization.MeshOf).Where(m => m != null));
+                    foreach (var mesh in made) if (mesh != null && !used.Contains(mesh)) Object.DestroyImmediate(mesh);
+                }
+            }
             if (failed != null) throw failed;
         }
 
