@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor.Refit;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Posing;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.VRChat;
@@ -303,12 +304,22 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
-        // Clothing made for the original base sits on its hips: when the accessory's hips are a little off the original's,
-        // it is moved there (a larger gap is a different rig, left to the user).
+        // A refit carries the clothing from the original base, so it starts on the original's armature, not the custom base's:
+        // a custom base may move its bones on the same body (the Ultipaw's hips, spine and legs stand 8 cm above the Masculine
+        // Canine's, its shoulders 1 cm), and clothing aligned with them would be refitted from that high. Its armature is fitted
+        // onto the original's as onto an avatar's. Without key bones in common, clothing made for the original base sits on its
+        // hips: when the accessory's hips are a little off the original's, it is moved there (a larger gap is a different rig,
+        // left to the user).
         private static void LineUp(OrbitersAttachment attachment, RefitGhost ghost)
         {
-            if (ghost.Hips == null) return;
             var root = RefitRecords.AvatarRoot(attachment.transform);
+            using (AccessoryPoseSync.Pause(root))
+                if (ghost.Root != null && AttachmentFit.Compare(attachment.gameObject, ghost.Root) != null)
+                {
+                    AttachmentFit.Fit(attachment, ghost.Root);
+                    return;
+                }
+            if (ghost.Hips == null) return;
             var animator = root.GetComponent<Animator>();
             if (animator == null) animator = root.GetComponentsInChildren<Animator>(true).FirstOrDefault(a => !a.transform.IsChildOf(attachment.transform));
             var hips = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;

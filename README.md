@@ -1,5 +1,14 @@
 # My Avatar
 
+## 0.9.10 — 2026-10-18
+
+- Clothing refitted from the original base is first fitted onto the original base's armature, bone by bone, as onto an
+  avatar's, while the original is shown over the body. A custom base can move its bones on the same body (the Ultipaw's
+  hips, spine and legs stand 8 cm above the Masculine Canine's, its shoulders 1 cm): clothing left on them was refitted
+  8 cm too high (the Rexouium FishingOutfit on the Ultipaw: collar at the chin, shorts over the belly). Before, only the
+  hips were lined up, and not at all with an original base imported without a humanoid avatar.
+- Needs Orbiters Toolkit 0.3.24.
+
 ## 0.9.9 — 2026-10-13
 
 - **Optimization**: a new section, framed like face tracking, gathers everything that makes the avatar lighter. It shows
