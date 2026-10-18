@@ -237,6 +237,12 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(made.painter.meshOutdated, Is.True);
             Assert.That(linked.painter.meshOutdated, Is.False);
             Assert.That(PainterMeshUpdate.Busy(made), Is.False);
+            // A project made before mesh updates: flagged for the card's note, never posed again.
+            var older = Avatar();
+            older.painter.projectPath = "C:/Painter/Older.spp";
+            AvatarMeshEdits.NotifyApplied(older.transform);
+            Assert.That(older.painter.meshOutdated, Is.True);
+            Assert.That(PainterMeshUpdate.Busy(older), Is.False);
         }
 
         // The mesh sent again is written as the project's was (a texture set per material), and only the avatar's own earlier

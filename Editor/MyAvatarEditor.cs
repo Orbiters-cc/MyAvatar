@@ -126,7 +126,6 @@ namespace Orbiters.MyAvatar.Editor
                 ClaimZone = () => { accessoryDrop = true; zone.SetActionsShown(false); },
             });
             content.Add(accessories);
-            content.Add(new Painter.PainterSection(avatar));
             content.Add(new ThumbnailSection(avatar, photoshoot));
             content.Add(new PosingSection(avatar));
             content.Add(new AvatarCustomizationSection(avatar));
@@ -136,6 +135,7 @@ namespace Orbiters.MyAvatar.Editor
             content.Add(new OptimizationSection(avatar));
             content.Add(new ChecksSection(avatar));
             content.Add(new VrmSection(avatar));
+            content.Add(new Painter.PainterSection(avatar));
 #if MYAVATAR_UNITGIT
             content.Add(new VersioningSection());
 #endif

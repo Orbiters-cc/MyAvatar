@@ -359,6 +359,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 var targets = material ? PainterTargets.For(material, TextureMatching.Slots(Avatar)) : null;
                 if (targets == null) return;
                 preview.Show(Avatar.transform, texture.textureSet, texture.channel, texture.revision, image, material, targets);
+                foreach (var (renderer, slot) in PainterLivePreview.Parts(Avatar.transform, material))
+                    AvatarTextureEdits.Notify(new AvatarTextureEdits.Painted { Renderer = renderer, Slot = slot, Channel = texture.channel, Path = texture.path });
                 LiveImages++;
                 if (!Committing && !Error) State = "Live: what you paint shows on the avatar. Save in Painter to apply it.";
                 Changed?.Invoke();

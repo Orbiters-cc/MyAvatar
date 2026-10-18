@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Orbiters.Toolkit.Editor.Meshes;
+using Orbiters.Toolkit.Editor.Textures;
 using UnityEditor;
 using UnityEngine;
 
@@ -25,6 +26,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             string images = folder + "/Painter";
             TextureImport.EnsureFolder(images);
             var entries = new List<TextureEntry>();
+            var painted = new List<AvatarTextureEdits.Painted>();
             foreach (var map in maps)
             {
                 if (string.IsNullOrEmpty(map.path) || !File.Exists(map.path)) continue;
@@ -36,6 +38,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 File.Copy(map.path, asset, true);
                 var texture = Import(asset, map.map);
                 if (!texture) continue;
+                // The slots it paints, found before the apply gives them material copies.
+                foreach (var (renderer, slot) in PainterLivePreview.Parts(avatar.transform, material))
+                    painted.Add(new AvatarTextureEdits.Painted { Renderer = renderer, Slot = slot, Channel = map.map, Path = Path.GetFullPath(asset), Final = true });
                 entries.Add(new TextureEntry
                 {
                     texture = texture, fileName = Path.GetFileName(asset), role = role, material = material, property = property,
@@ -53,6 +58,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             // Where the next save goes (bookkeeping, outside the apply's Undo step).
             avatar.painter.textureFolder = folder;
             TextureChanges.Dirty(avatar);
+            if (applied > 0) painted.ForEach(AvatarTextureEdits.Notify);
             return applied;
         }
 

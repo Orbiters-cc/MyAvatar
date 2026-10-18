@@ -34,8 +34,10 @@ import substance_painter.textureset
 import substance_painter.ui
 import substance_painter_plugins
 
-PLUGIN_VERSION = "1.3.0"
+PLUGIN_VERSION = "1.3.1"
 MAGIC = 0x4C50524F  # "ORPL"
+# How long a connection attempt may wait for Unity before it is tried again.
+CONNECT_SECONDS = 5.0
 VERSION = 1
 HELLO, WELCOME, STRUCTURE, MAPPING, TEXTURE, COMMITTING, COMMIT, STATUS, REQUEST, BYE, MESH_RELOADED = range(1, 12)
 HEADER = struct.Struct("<IBBHI")
@@ -160,6 +162,7 @@ class Link(QtCore.QObject):
         self.saving_ourselves = False
         self.pending_job = None
         self.structure_sent = False
+        self.connect_started = 0.0
         # The converted map that is the exported normal (looked up once), and when this code was loaded.
         self.normal_map = None
         try:
@@ -183,18 +186,25 @@ class Link(QtCore.QObject):
             return False
 
     def load_link(self):
-        """The avatar the open project is linked to (its metadata)."""
-        self.avatar_id = None
-        self.avatar_name = None
+        """
+        The avatar the open project is linked to (its metadata). A project Painter keeps locked a moment (a save, an
+        export) keeps the avatar it had: forgetting it would stop linking again for good.
+        """
         if not substance_painter.project.is_open():
+            self.avatar_id = None
+            self.avatar_name = None
             return
         try:
             link = substance_painter.project.Metadata(METADATA).get("link")
-        except Exception:
-            link = None
+        except Exception as exception:
+            log("The project's link could not be read now (%s): keeping %s." % (exception, self.avatar_name or "none"))
+            return
         if isinstance(link, dict):
             self.avatar_id = link.get("avatarId")
             self.avatar_name = link.get("avatarName")
+        else:
+            self.avatar_id = None
+            self.avatar_name = None
 
     def link_to(self, endpoint, avatar):
         """Links the open project to an avatar of a Unity editor (kept in the project's metadata)."""
@@ -229,6 +239,10 @@ class Link(QtCore.QObject):
             # The texture sets once Painter is free again (it was busy when Unity answered).
             if self.connected and not self.structure_sent:
                 self.send_structure()
+            # An attempt Unity never answered (it was restarting its scripts): tried again from its endpoint file.
+            if self.socket is not None and not self.connected and time.time() - self.connect_started > CONNECT_SECONDS:
+                log("Unity didn't answer on port %s: trying again." % (self.endpoint or {}).get("port"))
+                self.disconnect()
             if self.socket is None and self.avatar_id and self.project_ready():
                 for endpoint in read_endpoints():
                     if any(a.get("id") == self.avatar_id for a in endpoint.get("avatars", [])):
@@ -244,12 +258,16 @@ class Link(QtCore.QObject):
     def connect_to(self, endpoint):
         self.endpoint = endpoint
         self.buffer = bytearray()
-        self.socket = QtNetwork.QTcpSocket(self)
-        self.socket.connected.connect(self.on_connected)
-        self.socket.readyRead.connect(self.on_ready_read)
-        self.socket.disconnected.connect(self.on_disconnected)
-        self.socket.errorOccurred.connect(lambda _: self.on_disconnected())
-        self.socket.connectToHost(endpoint.get("host", "127.0.0.1"), int(endpoint["port"]))
+        self.connect_started = time.time()
+        socket = QtNetwork.QTcpSocket(self)
+        self.socket = socket
+        # Each socket's signals act only while it is the link's: a closed one's late "disconnected" must not end the
+        # connection made after it.
+        socket.connected.connect(lambda: self.on_connected() if self.socket is socket else None)
+        socket.readyRead.connect(lambda: self.on_ready_read() if self.socket is socket else None)
+        socket.disconnected.connect(lambda: self.on_disconnected() if self.socket is socket else None)
+        socket.errorOccurred.connect(lambda _: self.on_disconnected() if self.socket is socket else None)
+        socket.connectToHost(endpoint.get("host", "127.0.0.1"), int(endpoint["port"]))
 
     def disconnect(self):
         socket = self.socket
@@ -278,6 +296,7 @@ class Link(QtCore.QObject):
 
     def on_connected(self):
         self.connected = True
+        log("Linked to Unity on port %s." % (self.endpoint or {}).get("port"))
         self.send(HELLO, {
             "protocolVersion": VERSION, "painter": substance_painter.application.version(), "plugin": PLUGIN_VERSION,
             "avatarId": self.avatar_id, "projectName": substance_painter.project.name(),
@@ -293,6 +312,7 @@ class Link(QtCore.QObject):
         self.connected = False
         self.mapping = {}
         socket.deleteLater()
+        log("Unity went away: linking again once it is back.")
         self.set_message("Unity went away: linking again once it is back.")
 
     def on_ready_read(self):

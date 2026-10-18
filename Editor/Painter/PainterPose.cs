@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.Meshes;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
@@ -366,14 +367,18 @@ namespace Orbiters.MyAvatar.Editor.Painter
         }
 
         /// <summary>
-        /// Starts building the avatar as it uploads (clothing merged onto the armature), without the upload's optimization (the
-        /// meshes stay whole): the copy a project's mesh is posed from.
+        /// Runs <paramref name="use"/> on the avatar as it is in the scene (an applied version's meshes included), posed with
+        /// <paramref name="options"/> on a hidden copy whose clothing follows its bones; the copy and the parts go after.
         /// </summary>
-        internal static HiddenAvatarBuild Build(MyAvatar avatar) =>
-            HiddenAvatarBuild.Start(TextureOptimization.AvatarRoot(avatar), type => type.Name == "ParameterCompressorHook", copy =>
+        internal static T WithPosed<T>(MyAvatar avatar, PainterPoseOptions options, Func<List<Part>, T> use)
+        {
+            using (var copy = new HiddenAvatarCopy(TextureOptimization.AvatarRoot(avatar)))
             {
-                foreach (var own in copy.GetComponentsInChildren<MyAvatar>(true)) own.uploadOptimization.level = OptimizationLevel.Off;
-            });
+                var (parts, _) = Posed(copy.Copy, new Rest(copy.Copy), Links(copy.Copy), options);
+                try { return use(parts); }
+                finally { Release(parts); }
+            }
+        }
 
         /// <summary>A mesh of the posed copy, as it shows now.</summary>
         internal sealed class Part
@@ -402,6 +407,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     if (!skinned.sharedMesh) continue;
                     var mesh = new Mesh { name = skinned.sharedMesh.name, hideFlags = HideFlags.HideAndDontSave };
                     skinned.BakeMesh(mesh);
+                    // What the blendshapes move gets its normals from this pose's faces: a blendshape's own normals can be wrong
+                    // where it presses surfaces together at rest (the inner thighs against the crotch), dark in Painter.
+                    MeshNormals.Recalculate(mesh, MeshNormals.MovedByBlendShapes(skinned));
                     var basis = skinned.rootBone ? skinned.rootBone : skinned.transform;
                     parts.Add(new Part
                     {

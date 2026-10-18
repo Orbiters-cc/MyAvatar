@@ -13,10 +13,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
     /// <summary>
     /// Open in Substance: the avatar posed for painting (arms level as in a T-pose, legs apart, fingers spread, the mouth open
     /// by default) and centered on Painter's symmetry plane, with copies in natural poses above, below or beside it. The pose
-    /// shows at once on a hidden copy of the avatar as it is in the scene, its clothing following the bones; the upload's
-    /// build (clothing merged onto the body) runs only once the project is asked for, and the project is made from the built
-    /// copy in the same pose. Blendshapes keep the avatar's values but those chosen, on the painted copy, the copies or both.
-    /// The user's avatar is never posed.
+    /// shows at once on a hidden copy of the avatar as it is in the scene (an applied version's meshes included), its
+    /// clothing following the bones, and the project is made from what the preview shows. Blendshapes keep the avatar's
+    /// values but those chosen, on the painted copy, the copies or both. The user's avatar is never posed.
     /// </summary>
     internal sealed class PainterProjectWindow : EditorWindow
     {
@@ -40,8 +39,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private PainterPose.Rest rest;
         private List<FollowLink> links = new List<FollowLink>();
         private string copyError;
-        // The upload's build, from the click that asks for the project until the project is written.
-        private HiddenAvatarBuild build;
+        // From the click that asks for the project until it is written.
+        private bool sending;
         // The choices: the avatar's last ones (the project keeps them on the avatar), the defaults for a first project.
         private PainterPoseOptions options = new PainterPoseOptions();
         private MyAvatar optionsFor;
@@ -88,12 +87,6 @@ namespace Orbiters.MyAvatar.Editor.Painter
         {
             PainterPose.Release(parts);
             parts.Clear();
-            if (build != null)
-            {
-                build.Completed -= Built;
-                build.Release();
-                build = null;
-            }
             shown?.Dispose();
             shown = null;
             rest = null;
@@ -139,8 +132,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
             side.Add(scroll);
             panel = scroll;
             var title = new Label("Open " + avatar.name + " in Substance"); title.AddToClassList("ft-hero__title"); panel.Add(title);
-            var intro = new Label("The avatar posed so every part is easy to reach. It is built as it uploads (clothing merged onto the body) once you " +
-                                  "open it in Substance. Your avatar in the scene stays as it is.");
+            var intro = new Label("The avatar posed so every part is easy to reach: Painter gets it as this preview shows it. Your avatar in the " +
+                                  "scene stays as it is.");
             intro.AddToClassList("ft-hero__subtitle"); panel.Add(intro);
 
             Heading("Pose");
@@ -351,18 +344,15 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private void UpdateStatus()
         {
             if (status == null) return;
-            bool building = build != null;
-            create?.SetEnabled(!building && shown?.Copy != null && parts.Count > 0);
-            panel?.SetEnabled(!building);
+            create?.SetEnabled(!sending && shown?.Copy != null && parts.Count > 0);
+            panel?.SetEnabled(!sending);
             status.RemoveFromClassList("warning");
             if (copyError != null) { status.text = "The avatar could not be copied: " + copyError; status.AddToClassList("warning"); }
             else if (shown == null) status.text = "Posing a copy of the avatar…";
-            else if (building)
-                status.text = (build.Building != null ? build.Building + " builds" : "Building") + " the avatar as it uploads… " + build.Done + " of " + build.Total +
-                              ". VRCFury freezes the editor for a few seconds.";
+            else if (sending) status.text = "Writing the avatar for Painter…";
             else status.text = PainterApp.Running
-                ? "The avatar is built as it uploads, then Painter makes the project (it asks before closing the project it has open)."
-                : "The avatar is built as it uploads, then Painter opens and makes the project: the avatar, a texture set per material, its textures in a “From Unity” layer.";
+                ? "Painter makes the project as this preview shows the avatar (it asks before closing the project it has open)."
+                : "Painter opens and makes the project as this preview shows the avatar: a texture set per material, its textures in a “From Unity” layer.";
         }
 
         // ---- Preview ----
@@ -370,7 +360,6 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private void Tick()
         {
             if (reposing) Repose();
-            if (build != null) UpdateStatus();
             double now = EditorApplication.timeSinceStartup;
             float dt = lastTick > 0 ? (float)(now - lastTick) : 0f;
             lastTick = now;
@@ -441,39 +430,26 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
         // ---- Making the project ----
 
-        // The upload's build starts on the next editor frame (the press shows first); the project is written once it is done.
+        // The project is written from what the preview shows, on the next editor frame (the press shows first).
         private void Send()
         {
-            if (build != null || shown?.Copy == null || parts.Count == 0) return;
-            build = PainterPose.Build(avatar);
-            build.Completed += Built;
+            if (sending || shown?.Copy == null || parts.Count == 0) return;
+            sending = true;
             UpdateStatus();
-            if (build != null && build.Finished) Built();
+            rootVisualElement.schedule.Execute(Make);
         }
 
-        private void Built()
+        private void Make()
         {
-            var done = build;
-            if (done == null) return;
-            build = null;
-            done.Completed -= Built;
-            List<PainterPose.Part> made = null;
             try
             {
-                if (done.Error != null || !done.Copy)
-                {
-                    UpdateStatus();
-                    if (!done.Cancelled) { status.text = "The avatar could not be built: " + done.Error; status.AddToClassList("warning"); }
-                    else status.text = "The build was cancelled.";
-                    return;
-                }
-                // The built copy in the pose the preview shows; its clothing is merged onto the body.
-                (made, _) = PainterPose.Posed(done.Copy, new PainterPose.Rest(done.Copy), Array.Empty<FollowLink>(), options);
+                // A change still waiting to show is the one asked for.
+                if (reposing) Repose();
                 bool plugin = PainterApp.PluginCurrent;
                 if (!plugin) PainterApp.InstallPlugin();
                 PainterLinkService.EnsureRunning();
                 bool running = PainterApp.Running;
-                PainterProjectExport.Write(avatar, made, resolution, options);
+                PainterProjectExport.Write(avatar, parts, resolution, options);
                 if (!running && !PainterApp.Launch()) throw new InvalidOperationException("Substance 3D Painter wasn't found.");
                 Debug.Log("[My Avatar] Sent " + avatar.name + " to Substance 3D Painter.");
                 // A Painter started before its plugin was installed or updated runs the old one (or none) until it restarts.
@@ -485,14 +461,10 @@ namespace Orbiters.MyAvatar.Editor.Painter
             catch (Exception ex)
             {
                 Debug.LogException(ex);
+                sending = false;
                 UpdateStatus();
                 status.text = "The project could not be prepared: " + ex.Message;
                 status.AddToClassList("warning");
-            }
-            finally
-            {
-                if (made != null) PainterPose.Release(made);
-                done.Release();
             }
         }
     }

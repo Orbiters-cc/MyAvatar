@@ -11,9 +11,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
 {
     /// <summary>
     /// Painter's mesh follows the avatar's. When another tool changes the avatar's meshes for good (MCB applying an export
-    /// from Blender: <see cref="AvatarMeshEdits"/>), a project made by Open in Substance gets the avatar built and posed again
+    /// from Blender: <see cref="AvatarMeshEdits"/>), a project made by Open in Substance gets the avatar posed again
     /// as the project was made (<see cref="PainterLink.pose"/>), and Painter's plugin puts that mesh in the project, the
-    /// strokes kept where they are on the surface. A project that isn't open in Painter gets it once it links again.
+    /// strokes kept where they are on the surface. A project that isn't open in Painter gets it once it links again. With
+    /// <see cref="PainterLink.followLive"/>, Painter also follows the edits MCB shows live from Blender (temporary meshes),
+    /// a moment after they pause, without waiting for Blender's export.
     /// </summary>
     internal static class PainterMeshUpdate
     {
@@ -21,20 +23,57 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private static readonly Version Reloads = new Version(1, 3, 0);
         // Painter loads the mesh, then computes the project again: a big one takes a while.
         private const double AnswerSeconds = 600;
+        // How long Blender's live edits stay still before Painter gets them (Blender sends one about 200 ms after an edit).
+        private const double QuietSeconds = 1.0;
 
         private sealed class Update
         {
-            public HiddenAvatarBuild Build;
             public PainterLinkService.Session Session;
             public double SentAt = -1;
             // The meshes changed again meanwhile: once this one is in Painter, the next one is made.
             public bool Again;
+            // A live edit (temporary meshes): it doesn't settle the avatar's change, the export does.
+            public bool Live, AgainLive = true;
         }
 
         private static readonly Dictionary<MyAvatar, Update> Running = new Dictionary<MyAvatar, Update>();
 
         [InitializeOnLoadMethod]
-        private static void Register() => AvatarMeshEdits.Applied += Applied;
+        private static void Register()
+        {
+            AvatarMeshEdits.Applied += Applied;
+            AvatarMeshEdits.Previewed += Previewed;
+        }
+
+        // Live edits waiting to be still for QuietSeconds, by session.
+        private static readonly Dictionary<PainterLinkService.Session, double> Quiet = new Dictionary<PainterLinkService.Session, double>();
+
+        private static void Previewed(Transform avatarRoot)
+        {
+            var root = BrokenMaterials.AvatarRoot(avatarRoot.gameObject);
+            foreach (var avatar in root.GetComponentsInChildren<MyAvatar>(true))
+            {
+                if (EditorUtility.IsPersistent(avatar) || !avatar.painter.posed || !avatar.painter.followLive) continue;
+                var session = PainterLinkService.For(avatar);
+                if (session == null) continue;
+                Quiet[session] = EditorApplication.timeSinceStartup + QuietSeconds;
+                EditorApplication.update -= SendQuiet;
+                EditorApplication.update += SendQuiet;
+            }
+        }
+
+        private static void SendQuiet()
+        {
+            double now = EditorApplication.timeSinceStartup;
+            foreach (var pair in Quiet.ToList())
+            {
+                if (pair.Value > now) continue;
+                Quiet.Remove(pair.Key);
+                var session = pair.Key;
+                if (session.Avatar && session.Avatar.painter.followLive && PainterLinkService.For(session.Avatar) == session) Start(session, live: true);
+            }
+            if (Quiet.Count == 0) EditorApplication.update -= SendQuiet;
+        }
 
         /// <summary>Whether the avatar's new mesh is being made or loaded in Painter now.</summary>
         internal static bool Busy(MyAvatar avatar) => avatar && Running.ContainsKey(avatar);
@@ -44,7 +83,15 @@ namespace Orbiters.MyAvatar.Editor.Painter
             var root = BrokenMaterials.AvatarRoot(avatarRoot.gameObject);
             foreach (var avatar in root.GetComponentsInChildren<MyAvatar>(true))
             {
-                if (!avatar.painter.posed || EditorUtility.IsPersistent(avatar)) continue;
+                if (EditorUtility.IsPersistent(avatar)) continue;
+                // A project not made by Open in Substance (linked from Painter, or made before mesh updates) has no pose
+                // to make its mesh again: the card says so.
+                bool linked = PainterLinkService.For(avatar) != null || !string.IsNullOrEmpty(avatar.painter.projectPath);
+                if (!avatar.painter.posed)
+                {
+                    if (linked) MarkOutdated(avatar, true);
+                    continue;
+                }
                 MarkOutdated(avatar, true);
                 // After the tool that changed the meshes is done with this frame.
                 var session = PainterLinkService.For(avatar);
@@ -82,14 +129,18 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 if (session.Avatar && PainterLinkService.For(session.Avatar) == session) Start(session);
         }
 
-        /// <summary>Builds and poses the avatar as its project was made, then sends the mesh to Painter.</summary>
-        internal static void Start(PainterLinkService.Session session)
+        /// <summary>
+        /// Poses the avatar as its project was made (a hidden copy, as the scene shows it: Blender's live edit included),
+        /// then sends the mesh to Painter. One at a time: what changes meanwhile is sent once Painter has this one.
+        /// </summary>
+        internal static void Start(PainterLinkService.Session session, bool live = false)
         {
             var avatar = session.Avatar;
             if (!avatar || !avatar.painter.posed) return;
             if (Running.TryGetValue(avatar, out var running))
             {
                 running.Again = true;
+                running.AgainLive &= live;
                 return;
             }
             // Painter runs a plugin that doesn't load meshes: the new one reloads itself once installed and links again,
@@ -108,52 +159,25 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 PainterLinkService.NotifyChanged();
                 return;
             }
-            var update = new Update { Session = session };
+            var update = new Update { Session = session, Live = live };
             Running[avatar] = update;
             if (Running.Count == 1) EditorApplication.update += Tick;
             session.Error = false;
-            session.State = "The avatar's meshes changed: building it to update Painter's mesh…";
-            PainterLinkService.NotifyChanged();
-            update.Build = PainterPose.Build(avatar);
-            update.Build.Completed += () => Built(avatar, update);
-            if (update.Build.Finished) Built(avatar, update);
-        }
-
-        private static void Built(MyAvatar avatar, Update update)
-        {
-            var build = update.Build;
-            if (build == null) return;
-            update.Build = null;
-            List<PainterPose.Part> parts = null;
             try
             {
-                if (!avatar) { Forget(avatar); return; }
-                if (build.Error != null || !build.Copy)
-                {
-                    Fail(avatar, build.Cancelled ? "the build was cancelled" : "the avatar could not be built: " + build.Error);
-                    return;
-                }
-                // Unlinked meanwhile: the project gets the mesh when it links again.
-                var session = PainterLinkService.For(avatar);
-                if (session == null) { Forget(avatar); return; }
-                (parts, _) = PainterPose.Posed(build.Copy, new PainterPose.Rest(build.Copy), Array.Empty<FollowLink>(), avatar.painter.pose);
-                string path = PainterProjectExport.WriteMeshUpdate(avatar, parts);
-                update.Session = session;
+                // The avatar as the scene shows it, posed as the project was made: a hidden copy, no build.
+                string path = PainterPose.WithPosed(avatar, avatar.painter.pose, parts => PainterProjectExport.WriteMeshUpdate(avatar, parts));
                 update.SentAt = EditorApplication.timeSinceStartup;
                 session.RequestMeshReload(path);
-                session.State = "Painter is loading the avatar's new mesh (the strokes stay where they are on the surface)…";
+                session.State = live ? "Painter is loading Blender's edit…"
+                    : "Painter is loading the avatar's new mesh (the strokes stay where they are on the surface)…";
             }
             catch (Exception ex)
             {
                 Debug.LogException(ex);
                 Fail(avatar, ex.Message);
             }
-            finally
-            {
-                if (parts != null) PainterPose.Release(parts);
-                build.Release();
-                PainterLinkService.NotifyChanged();
-            }
+            PainterLinkService.NotifyChanged();
         }
 
         /// <summary>Painter's answer: the project has the new mesh, or why not.</summary>
@@ -167,7 +191,12 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 session.Error = true;
                 session.State = "Painter could not load the avatar's new mesh: " + answer.error;
             }
-            else if (update.Again) Start(session);
+            else if (update.Again) Start(session, update.AgainLive);
+            else if (update.Live)
+            {
+                session.Error = false;
+                session.State = "Painter shows Blender's edit. Saving in Blender applies it to the avatar.";
+            }
             else
             {
                 MarkOutdated(avatar, false);

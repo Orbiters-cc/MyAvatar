@@ -142,6 +142,14 @@ namespace Orbiters.MyAvatar.Editor.Painter
             if (session != noteSession) note = null;
             var status = new Label(note ?? Status(session, plugin)); status.AddToClassList("ft-note"); footer.Add(status);
             if (session?.Error == true || note != null && noteWarning) status.AddToClassList("warning");
+            if (avatar.painter.meshOutdated && !avatar.painter.posed)
+            {
+                var stale = new Label("The avatar's meshes changed, but this project's mesh can't follow: it wasn't made by Open in Substance (or was " +
+                                      "made before mesh updates). New project… makes one that gets the avatar's new meshes.");
+                stale.AddToClassList("ft-note");
+                stale.AddToClassList("warning");
+                footer.Add(stale);
+            }
             if (session != null)
             {
                 var buttons = new VisualElement(); buttons.AddToClassList("painter-buttons"); footer.Add(buttons);
@@ -154,7 +162,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 {
                     var mesh = MyAvatarEditor.PressButton("Update Painter's mesh", () => PainterMeshUpdate.Start(session));
                     mesh.AddToClassList("ft-ghost");
-                    mesh.tooltip = "Builds the avatar, poses it as the project was made, and Painter loads that mesh in the project (the strokes stay where they are on the surface).";
+                    mesh.tooltip = "Poses the avatar as the project was made, and Painter loads that mesh in the project (the strokes stay where they are on the surface).";
                     buttons.Add(mesh);
                 }
                 if (session.LiveSets.Any())
@@ -246,6 +254,32 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 choice.EnableInClassList("vrm-choice--on", avatar.painter.previewSize == size);
                 choice.tooltip = tip;
                 options.Add(choice);
+            }
+
+            // When Blender's edits reach Painter: as MCB shows them live, or once saved in Blender (a project made here).
+            if (!avatar.painter.posed) return;
+            var blender = new VisualElement(); blender.AddToClassList("vrm-row"); form.Add(blender);
+            var blenderLabel = new Label("Blender edits"); blenderLabel.AddToClassList("vrm-row__label"); blender.Add(blenderLabel);
+            var follow = new VisualElement(); follow.AddToClassList("vrm-choices"); blender.Add(follow);
+            foreach (var (onLive, text, tip) in new[]
+                     {
+                         (true, "Live", "Painter gets Blender's edits a moment after they pause, as they show live on the avatar."),
+                         (false, "When saved", "Painter gets Blender's edits once they are saved in Blender and applied to the avatar."),
+                     })
+            {
+                bool chosen = onLive;
+                var choice = MyAvatarEditor.PressButton(text, () =>
+                {
+                    Undo.RecordObject(avatar, "My Avatar: Painter follows Blender");
+                    avatar.painter.followLive = chosen;
+                    EditorUtility.SetDirty(avatar);
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(avatar);
+                    Show();
+                });
+                choice.AddToClassList("vrm-choice");
+                choice.EnableInClassList("vrm-choice--on", avatar.painter.followLive == onLive);
+                choice.tooltip = tip;
+                follow.Add(choice);
             }
         }
     }

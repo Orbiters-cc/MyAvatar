@@ -260,6 +260,8 @@ namespace Orbiters.MyAvatar
         public PainterPoseOptions pose = new PainterPoseOptions();
         /// <summary>The avatar's meshes changed since the project's mesh was made: Painter gets the new one once it links.</summary>
         public bool meshOutdated;
+        /// <summary>Blender's edits reach Painter as they show live in Unity (a moment after they pause), not only once saved.</summary>
+        public bool followLive = true;
     }
 
     /// <summary>How the avatar is posed for a Painter project: the painted avatar, then copies in natural poses.</summary>
