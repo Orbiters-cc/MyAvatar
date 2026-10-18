@@ -419,7 +419,8 @@ namespace Orbiters.MyAvatar.Editor
             // A copy taken over counts as placed by My Avatar: dropping the item again handed it over, and Remove takes it off.
             var attachment = AttachmentInstaller.Install(plan, new AttachmentOptions { Created = true, Source = guid, Variant = candidate.path });
             // Clothing made for another body (its hips at the avatar's chest, another height): resized and moved onto this
-            // avatar's armature, said in its entry with a way back. One put on by hand stays where its owner placed it.
+            // avatar's armature (its original base's, over the body, on a custom base that moved its bones), said in its
+            // entry with a way back. One put on by hand stays where its owner placed it.
             if (worn == null && (plan.Kind == AttachmentKind.Clothing || plan.Kind == AttachmentKind.Configured) &&
                 AttachmentFit.Fit(attachment, avatar.transform) is AttachmentFit.Measure fit)
                 notes.Add(new MyAvatar.AccessoryNote { accessory = attachment, armatureFit = true, text = FitText(candidate.name, fit) });

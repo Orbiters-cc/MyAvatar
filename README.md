@@ -7,6 +7,11 @@
   hips, spine and legs stand 8 cm above the Masculine Canine's, its shoulders 1 cm): clothing left on them was refitted
   8 cm too high (the Rexouium FishingOutfit on the Ultipaw: collar at the chin, shorts over the belly). Before, only the
   hips were lined up, and not at all with an original base imported without a humanoid avatar.
+- Clothing dropped on an avatar on a custom base is placed on the original base's armature over the body, as it would be
+  worn on the original, before any refit: the Rexouium FishingOutfit sat 8 cm high on the Ultipaw, aligned with the
+  custom base's bones. Clothing made for the original stays where it is and keeps that place once uploaded; clothing
+  made for the custom base itself is left as it is. The first drop on a custom base version reads its original (MCB may
+  import it, which can take half a minute); later drops reuse it.
 - Needs Orbiters Toolkit 0.3.24.
 
 ## 0.9.9 — 2026-10-13
