@@ -1,5 +1,9 @@
 # My Avatar
 
+## 0.9.11 — 2026-10-19
+
+- Requires Orbiters Toolkit 0.4.0, which now holds the XRay gizmos the Posing section uses; the XRay Gizmos package is no longer needed.
+
 ## 0.9.10 — 2026-10-18
 
 - Clothing refitted from the original base is first fitted onto the original base's armature, bone by bone, as onto an
