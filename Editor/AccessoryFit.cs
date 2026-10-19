@@ -128,6 +128,8 @@ namespace Orbiters.MyAvatar.Editor
             {
                 Avatar = root, Body = state.Info.Body, Renderers = meshes, Mode = mode, Original = original,
                 BaseKey = state.Info.Key, BaseName = state.Info.Name, Tool = Tool, Tightness = RefitPreferences.Tightness,
+                // Resized from another body ("made for another body: shrunk to 91 %"), not made for the original base.
+                MadeForAnotherBody = !suggestion.MadeForOriginal && ClothingCoverage.Resized(attachment),
             };
             foreach (var mesh in meshes)
             {

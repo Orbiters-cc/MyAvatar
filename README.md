@@ -12,6 +12,9 @@
   custom base's bones. Clothing made for the original stays where it is and keeps that place once uploaded; clothing
   made for the custom base itself is left as it is. The first drop on a custom base version reads its original (MCB may
   import it, which can take half a minute); later drops reuse it.
+- Clothing resized from another body ("made for another body: shrunk to 91 %") is refitted as such: what of it lay in
+  the body as put on is covered after the fit, however little. The FashionSuit (made for the Vulper) on the Ultipaw no
+  longer shows the arms through its jacket nor the calves through its trousers, and keeps its belt over the waistband.
 - Needs Orbiters Toolkit 0.3.24.
 
 ## 0.9.9 — 2026-10-13
