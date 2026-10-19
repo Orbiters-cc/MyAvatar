@@ -10,7 +10,7 @@ using UnityEngine.UIElements;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Posing in the Scene view: see and pick the avatar's bones (XRay Gizmos), mirror edits across left and right, and
+    // Posing in the Scene view: see and pick the avatar's bones (the Toolkit's avatar gizmos), mirror edits across left and right, and
     // keep clothing that is not merged yet in the avatar's pose.
     internal sealed class PosingSection : AvatarSection
     {

@@ -14,7 +14,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 {
     /// <summary>
     /// The synced parameters an upload frees by leaving menu items out (<see cref="MenuUploadBuild"/>), worked out on the
-    /// avatar in the scene with the menu the editor shows, so every parameter budget (XRay Gizmos, My Avatar's) counts the
+    /// avatar in the scene with the menu the editor shows, so every parameter budget (the Toolkit's avatar budget, My Avatar's) counts the
     /// avatar as it will upload. A parameter is freed as the upload frees it: every menu item setting it goes, and nothing
     /// else sets it (no parameter driver setting another value, animation, contact or PhysBone).
     /// </summary>

@@ -2,7 +2,7 @@
 
 ## 0.9.11 — 2026-10-19
 
-- Requires Orbiters Toolkit 0.4.0, which now holds the XRay gizmos the Posing section uses; the XRay Gizmos package is no longer needed.
+- Requires Orbiters Toolkit 0.4.0, which now draws the bones the Posing section uses; the separate gizmos package is no longer needed.
 
 ## 0.9.10 — 2026-10-18
 
@@ -384,8 +384,8 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing,
 
 ## Get started
 
-1. Install **My Avatar** from the Orbiters VPM repository. Toolkit and XRay Gizmos
-   are required dependencies; Unit Git 0.1.3 or newer is optional. The VRChat avatar SDK removes this editor-only
+1. Install **My Avatar** from the Orbiters VPM repository. Orbiters Toolkit
+   is a required dependency; Unit Git 0.1.3 or newer is optional. The VRChat avatar SDK removes this editor-only
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
@@ -795,7 +795,7 @@ once, the thumbnail is taken out of the upload and the next click uploads the av
 Three switches for posing the avatar in the Scene view (hover one for a short
 explanation):
 
-- **Bones** draws the avatar's bones with XRay Gizmos; click one to select it, then
+- **Bones** draws the avatar's bones over the Scene view; click one to select it, then
   rotate it with the Rotate tool.
 - **Symmetry** mirrors each rotation or move of a left or right bone onto its partner.
   It is a mode: it stays on while nothing can be mirrored and starts mirroring as soon
@@ -841,7 +841,7 @@ another prefab of its package such as its other variants, or they sit in a packa
 
 ## Avatar budget
 
-XRay Gizmos shows where the avatar stands against VRChat's limits in a panel over the Scene view: synced
+Orbiters Toolkit shows where the avatar stands against VRChat's limits in a panel over the Scene view: synced
 parameters as built (after VRCFury's compression), bones, PhysBones and contacts, with a custom base's share.
 
 ## Tools
@@ -931,7 +931,7 @@ and items on its **More** pages are found; only VRCFury's own pages are followed
 what only they switched. Each parameter only they set keeps its default, freeing its synced bits, unless an item still
 in the menu sets it; conditions on it are decided, states and blend tree branches that can no longer play are removed,
 a layer left playing one constant pose is written into the avatar and removed, objects left hidden for good are deleted,
-and materials, textures and animations nothing uses any more stay out of the upload; the parameter budgets (XRay Gizmos,
+and materials, textures and animations nothing uses any more stay out of the upload; the parameter budgets (Avatar budget,
 My Avatar) count those bits as free already (not those a submenu another folder still opens keeps, nor those of a
 toggle another of its exclusive tag switches off). Parameters apps set over OSC (heart rate, chatbox and text displays,
 OSCmooth, VRCOSC, by the names those apps use) are never fixed. What the menu didn't switch keeps
@@ -1125,6 +1125,6 @@ controls, animated glow rendering, SVG logo drawing, the photoshoot panel, the
 shared controls (segmented control, scrub dial, icons, switch, stage badge, support footer),
 feature flags, VPM dependency prompts, bone matching, accessory attachment and its build step,
 symmetry and accessory posing, the parameter estimate and hair/tail/toe PhysBone
-editing. XRay Gizmos draws and picks bones. Unit Git, when installed, owns Git
+editing. Orbiters Toolkit draws and picks bones. Unit Git, when installed, owns Git
 execution and scoped index handling; the `MYAVATAR_UNITGIT` version define enables
 the commit step. My Avatar does not depend on MCB.
