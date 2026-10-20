@@ -36,6 +36,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             var entries = new List<TextureEntry>();
             var painted = new List<AvatarTextureEdits.Painted>();
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var stems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             string exports = Exports;
             foreach (var map in maps)
             {
@@ -53,7 +54,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 File.Copy(map.path, asset, false);
                 var texture = Import(asset, map.map);
                 if (!texture) continue;
-                Prune(images, stem, written);
+                stems.Add(stem);
                 // The slots it paints, found before the apply gives them material copies.
                 foreach (var (renderer, slot) in PainterLivePreview.Parts(avatar.transform, material))
                     painted.Add(new AvatarTextureEdits.Painted { Renderer = renderer, Slot = slot, Channel = map.map, Path = Path.GetFullPath(asset), Final = true });
@@ -74,7 +75,12 @@ namespace Orbiters.MyAvatar.Editor.Painter
             // Where the next save goes (bookkeeping, outside the apply's Undo step).
             avatar.painter.textureFolder = folder;
             TextureChanges.Dirty(avatar);
-            if (applied > 0) painted.ForEach(AvatarTextureEdits.Notify);
+            if (applied > 0)
+            {
+                painted.ForEach(AvatarTextureEdits.Notify);
+                // The older saves go once the new ones are on the materials.
+                Prune(images, stems, written);
+            }
             return applied;
         }
 
@@ -116,11 +122,14 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 .OrderByDescending(p => p.Number).ToList();
         }
 
-        // Older saves of a map than the newest few go (Undo past them shows the slot empty).
-        private static void Prune(string folder, string stem, HashSet<string> written)
+        // Older saves of each map than the newest few go to the Recycle Bin (Undo past them shows the slot empty; a material
+        // pointed at one by hand can get it back from there).
+        private static void Prune(string folder, IEnumerable<string> stems, HashSet<string> written)
         {
-            foreach (var (path, _) in Saves(folder, stem).Skip(KeptSaves))
-                if (!written.Contains(path)) AssetDatabase.DeleteAsset(path);
+            var older = stems.SelectMany(stem => Saves(folder, stem).Skip(KeptSaves)).Select(s => s.Path).Where(p => !written.Contains(p)).ToArray();
+            var failed = new List<string>();
+            if (older.Length > 0 && !AssetDatabase.MoveAssetsToTrash(older, failed))
+                Debug.LogWarning("[My Avatar] Substance Painter link: " + failed.Count + " older save(s) could not be moved to the Recycle Bin.");
         }
 
         // The link's batch folder while it is the avatar's current one and not undone; a new batch otherwise (another texture

@@ -174,10 +174,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// </summary>
         internal static string WriteMeshUpdate(MyAvatar avatar, List<PainterPose.Part> parts)
         {
-            string safe = ObjWriter.Clean(avatar.name);
+            // Named for this avatar only: another one's name may be the same (a copy, the same prefab in two scenes) or start
+            // the same.
+            string safe = ObjWriter.Clean(avatar.name) + "-" + Tag(avatar);
             string folder = Path.Combine(PainterLinkService.LinkFolder, "meshes");
             Directory.CreateDirectory(folder);
-            // This avatar's only (another one's name may start the same).
             var earlier = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(safe) + @"-\d{8}-\d{6}\.(obj|mtl)$");
             foreach (string file in Directory.GetFiles(folder).Where(f => earlier.IsMatch(Path.GetFileName(f))))
                 try { File.Delete(file); } catch (IOException) { }
@@ -197,6 +198,16 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 PrefabUtility.RecordPrefabInstancePropertyModifications(avatar);
             }
             return path;
+        }
+
+        // Eight hex digits of the avatar's identity, the same in every session; with its instance while it was never saved
+        // (it has no identity of its own yet).
+        private static string Tag(MyAvatar avatar)
+        {
+            var global = GlobalObjectId.GetGlobalObjectIdSlow(avatar);
+            string id = global.ToString() + (global.targetObjectId == 0 ? "#" + avatar.GetInstanceID() : "");
+            using (var sha = System.Security.Cryptography.SHA1.Create())
+                return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(id)), 0, 4).Replace("-", "").ToLowerInvariant();
         }
 
         // One texture set of the job: the material's maps as images, its plain values as numbers.

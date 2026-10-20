@@ -19,6 +19,7 @@ import json
 import os
 import struct
 import sys
+import tempfile
 import time
 import traceback
 import zlib
@@ -52,6 +53,10 @@ SAVE_SECONDS = 120.0
 VERSION = 1
 HELLO, WELCOME, STRUCTURE, MAPPING, TEXTURE, COMMITTING, COMMIT, STATUS, REQUEST, BYE, MESH_RELOADED = range(1, 12)
 HEADER = struct.Struct("<IBBHI")
+# The largest token and payload a frame may carry, as Unity's (LiveLinkFormat.MaxTokenBytes, PainterLinkProtocol.MaxPayloadBytes):
+# a frame announcing more is never buffered.
+MAX_TOKEN_BYTES = 256
+MAX_PAYLOAD_BYTES = 4 * 1024 * 1024
 # Frame type 0 is the Toolkit's live link proof, the same on every link: before sending the token, Painter sends a nonce
 # without a token, and Unity answers without a token with HMAC-SHA256 (keyed with the token) of this label, the magic
 # (u32), the port connected to (u16) and the nonce (LiveLinkFormat.Proof).
@@ -273,6 +278,14 @@ def exportable(maps, has_channel):
     return [m for m in maps if m == "normal" or (m in CHANNEL_OF_MAP and has_channel(CHANNEL_OF_MAP[m]))]
 
 
+def new_export_folder(folder):
+    """A folder of its own for a save's export, in commit/<pid>/ of the link's folder: dated, with a unique end (two saves
+    within a second each get theirs: Unity deletes each one once it applied it)."""
+    parent = os.path.join(folder, "commit", str(os.getpid()))
+    os.makedirs(parent, exist_ok=True)
+    return tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=parent)
+
+
 class Link(QtCore.QObject):
     """The connection to Unity, the live renders and the commits."""
 
@@ -459,6 +472,8 @@ class Link(QtCore.QObject):
         self.connected = False
         self.mapping = {}
         self.awaiting_proof = None
+        # Nothing read from that connection is kept.
+        self.buffer = bytearray()
         if socket is not None:
             try:
                 # A goodbye carries the token: only to a Unity that proved it holds it.
@@ -559,6 +574,9 @@ class Link(QtCore.QObject):
             if magic != MAGIC or version != VERSION:
                 self.set_message("Unity speaks another version of the link: update My Avatar and its Painter plugin.", True)
                 self.disconnect()
+                return
+            if token_length > MAX_TOKEN_BYTES or payload_length > MAX_PAYLOAD_BYTES:
+                self.refuse("Unity sent a frame larger than the link allows: not linked.")
                 return
             size = HEADER.size + token_length + payload_length
             if len(self.buffer) < size:
@@ -881,8 +899,7 @@ class Link(QtCore.QObject):
             return
         self.send(COMMITTING, {})
         self.set_message("Sending the textures to Unity…")
-        folder = os.path.join(link_folder(), "commit", str(os.getpid()), time.strftime("%Y%m%d-%H%M%S"))
-        os.makedirs(folder, exist_ok=True)
+        folder = new_export_folder(link_folder())
         presets, export_list = [], []
         for name, maps in wanted.items():
             stack = stacks[name]

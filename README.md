@@ -57,6 +57,11 @@
   - The link's folder is cleared once per Unity session of what nobody needs (see the section).
   - The plugin is in the release package again: the package's file list left `Painter~` out, so **Install the Painter
     plugin** failed with "missing from the package".
+  - Two avatars of one name keep their own mesh updates for Painter. Two saves within a second export to folders of
+    their own (Unity's clean-up of the first deleted the second). Older saves of a map go to the Recycle Bin, and only
+    once the new one is applied. Taking live images off keeps what other tools put in the renderer's slot meanwhile. A
+    live image that can't be shown says why on the card. The plugin closes a connection announcing a frame larger than
+    the link allows instead of reading it.
 - Clothing lined up with the original base has its hips put on the original's again when they are a few centimetres off
   and the armature fit leaves it as it is (0.9.10 left them 1 to 6 cm off). Cancelling or dismissing a line-up puts the
   clothing back as it was before it, with Undo. Clothing made for the avatar's original base says so instead of "made for

@@ -4,6 +4,7 @@ using System.Linq;
 using Orbiters.Toolkit.Editor.Textures;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.Painter
@@ -188,32 +189,82 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// <summary>Takes a texture set off (every set without one), its images released.</summary>
         public void Clear(string textureSet = null)
         {
-            var slots = new HashSet<(Renderer, int)>();
-            foreach (var key in sets.Keys.Where(k => textureSet == null || k == textureSet).ToList())
+            // What the sets taken off put in each slot.
+            var taken = new Dictionary<(Renderer, int), Dictionary<string, Texture>>();
+            var removed = sets.Where(p => textureSet == null || p.Key == textureSet).ToList();
+            foreach (var pair in removed)
             {
-                var set = sets[key];
-                slots.UnionWith(set.Parts.Keys);
-                foreach (var image in set.Images.Values.Concat(set.Packed.Values))
-                    if (image) { image.Release(); Object.DestroyImmediate(image); }
-                sets.Remove(key);
+                foreach (var part in pair.Value.Parts)
+                {
+                    if (!taken.TryGetValue(part.Key, out var properties)) taken[part.Key] = properties = new Dictionary<string, Texture>(StringComparer.Ordinal);
+                    foreach (var property in part.Value) properties[property.Key] = property.Value;
+                }
+                sets.Remove(pair.Key);
             }
-            var block = new MaterialPropertyBlock();
-            foreach (var slot in slots)
+            var current = new MaterialPropertyBlock();
+            foreach (var pair in taken)
             {
+                var slot = pair.Key;
                 var (renderer, index) = slot;
                 before.TryGetValue(slot, out var kept);
                 var still = sets.Values.Where(s => s.Parts.ContainsKey(slot)).ToList();
                 if (still.Count == 0) before.Remove(slot);
                 if (!renderer) continue;
-                // The block as other tools left it, then what the sets still shown put in.
-                renderer.SetPropertyBlock(kept ?? new MaterialPropertyBlock(), index);
-                if (still.Count == 0) continue;
-                renderer.GetPropertyBlock(block, index);
-                foreach (var pair in still.SelectMany(s => s.Parts[slot]))
-                    if (pair.Value) block.SetTexture(pair.Key, pair.Value);
+                // The block as it is now, what other tools set since included, without what the live images put in (a
+                // property another tool set since keeps its value). A property they replaced gets back what it held before,
+                // then the sets still shown put theirs in again.
+                renderer.GetPropertyBlock(current, index);
+                var ours = pair.Value.Where(p => current.HasTexture(p.Key) && current.GetTexture(p.Key) == p.Value).Select(p => p.Key).ToList();
+                var materials = renderer.sharedMaterials;
+                var block = Without(current, index < materials.Length && materials[index] ? materials[index].shader : null, ours);
+                if (kept != null)
+                    foreach (string property in ours)
+                        if (kept.HasTexture(property) && kept.GetTexture(property) is Texture held && held) block.SetTexture(property, held);
+                foreach (var shown in still.SelectMany(s => s.Parts[slot]))
+                    if (shown.Value) block.SetTexture(shown.Key, shown.Value);
                 renderer.SetPropertyBlock(block, index);
             }
+            foreach (var pair in removed)
+                foreach (var image in pair.Value.Images.Values.Concat(pair.Value.Packed.Values))
+                    if (image) { image.Release(); Object.DestroyImmediate(image); }
             SceneView.RepaintAll();
+        }
+
+        // A copy of the block without these texture properties (a block can't drop one): every other property the slot's
+        // shader declares is carried over, with its textures' tiling, size and HDR values.
+        private static MaterialPropertyBlock Without(MaterialPropertyBlock block, Shader shader, ICollection<string> dropped)
+        {
+            var copy = new MaterialPropertyBlock();
+            if (!shader) return copy;
+            void Vector(string name)
+            {
+                if (block.HasVector(name) || block.HasColor(name)) copy.SetVector(name, block.GetVector(name));
+            }
+            for (int i = 0; i < shader.GetPropertyCount(); i++)
+            {
+                string name = shader.GetPropertyName(i);
+                switch (shader.GetPropertyType(i))
+                {
+                    case ShaderPropertyType.Texture:
+                        if (!dropped.Contains(name) && block.HasTexture(name) && block.GetTexture(name) is Texture texture && texture) copy.SetTexture(name, texture);
+                        Vector(name + "_ST");
+                        Vector(name + "_TexelSize");
+                        Vector(name + "_HDR");
+                        break;
+                    case ShaderPropertyType.Color:
+                    case ShaderPropertyType.Vector:
+                        Vector(name);
+                        break;
+                    case ShaderPropertyType.Int:
+                        if (block.HasInteger(name)) copy.SetInteger(name, block.GetInteger(name));
+                        else if (block.HasFloat(name)) copy.SetFloat(name, block.GetFloat(name));
+                        break;
+                    default:
+                        if (block.HasFloat(name)) copy.SetFloat(name, block.GetFloat(name));
+                        break;
+                }
+            }
+            return copy;
         }
 
         public void Dispose()

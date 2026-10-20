@@ -251,6 +251,37 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
+        // What another tool puts in the slot while it shows live images stays once they go, and a texture they replaced comes
+        // back (0.9.12 put back the block as it was before the first image).
+        [Test]
+        public void ClearingKeepsWhatOthersPutInTheSlotMeanwhile()
+        {
+            var avatar = Avatar();
+            var material = Standard("Skin");
+            var renderer = Part(avatar, "Body", material);
+            var own = Own(new Texture2D(2, 2));
+            var block = new MaterialPropertyBlock();
+            block.SetTexture("_MainTex", own);
+            renderer.SetPropertyBlock(block, 0);
+            var targets = PainterTargets.For(material, TextureMatching.Slots(avatar));
+            using (var preview = new PainterLivePreview())
+            {
+                preview.Show(avatar.transform, "Skin", "basecolor", 1, Tga(255, 0, 0), material, targets);
+                preview.Show(avatar.transform, "Skin", "normal", 1, Tga(128, 128, 255), material, targets);
+                // Another tool, meanwhile: a tint and an overlay texture.
+                renderer.GetPropertyBlock(block, 0);
+                block.SetColor("_Color", Color.red);
+                block.SetTexture("_EmissionMap", own);
+                renderer.SetPropertyBlock(block, 0);
+                preview.Clear("Skin");
+                renderer.GetPropertyBlock(block, 0);
+                Assert.That(block.GetVector("_Color"), Is.EqualTo((Vector4)Color.red), "The tint set meanwhile stays.");
+                Assert.That(block.GetTexture("_EmissionMap"), Is.SameAs(own), "So does the texture.");
+                Assert.That(block.GetTexture("_MainTex"), Is.SameAs(own), "The texture the live image replaced is back.");
+                Assert.That(block.HasTexture("_BumpMap"), Is.False, "The live normal map is gone.");
+            }
+        }
+
         // Mapped to another material, a texture set's live images leave the first one.
         [Test]
         public void ATextureSetPaintingAnotherMaterialLeavesTheFirstAsItWas()
@@ -540,6 +571,23 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(File.Exists(written[1]), Is.False, "The avatar's earlier mesh goes.");
             Assert.That(File.Exists(written[2]), Is.True);
             Assert.That(File.ReadAllText(written[2]), Does.Contain("usemtl Skin"));
+        }
+
+        // Two avatars of one name (a copy, the same prefab in two scenes) updated at once keep their own meshes.
+        [Test]
+        public void MeshUpdatesOfAvatarsOfOneNameKeepBoth()
+        {
+            var cube = Own(Object.Instantiate(Resources.GetBuiltinResource<Mesh>("Cube.fbx")));
+            var skin = Standard("Skin");
+            var first = Avatar(); first.gameObject.name = "OrbitersPainterTestTwin";
+            var second = Avatar(); second.gameObject.name = "OrbitersPainterTestTwin";
+            List<PainterPose.Part> Parts() => new List<PainterPose.Part>
+                { new PainterPose.Part { Name = "Body", Mesh = cube, ToWorld = Matrix4x4.identity, Materials = new[] { skin } } };
+            string a = PainterProjectExport.WriteMeshUpdate(first, Parts());
+            string b = PainterProjectExport.WriteMeshUpdate(second, Parts());
+            Assert.That(a, Is.Not.EqualTo(b));
+            Assert.That(File.Exists(a), Is.True, "The first avatar's mesh stays.");
+            Assert.That(File.Exists(b), Is.True);
         }
 
         // A mesh made again for a project keeps the names its texture sets have: two materials of one name ("Body" and

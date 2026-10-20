@@ -236,6 +236,19 @@ class MappingTests(unittest.TestCase):
         more = {"Skin": {"material": "Body#0", "channels": ["basecolor", "roughness", "normal"]}}
         self.assertEqual(plugin.mapping_changes(old, more, 1024, 1024), [("Skin", "normal")], "A channel live for the first time.")
 
+    def test_saves_within_a_second_export_to_folders_of_their_own(self):
+        folder = tempfile.mkdtemp(prefix="OrbitersPainterExports-")
+        try:
+            first, second = plugin.new_export_folder(folder), plugin.new_export_folder(folder)
+            self.assertNotEqual(first, second)
+            for made in (first, second):
+                self.assertTrue(os.path.isdir(made))
+                # commit/<pid>/<folder>: where Unity looks for the save and what it deletes once applied.
+                self.assertEqual(os.path.dirname(os.path.dirname(made)), os.path.join(folder, "commit"))
+                self.assertEqual(os.path.basename(os.path.dirname(made)), str(os.getpid()))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
     def test_saved_maps_need_their_channel(self):
         has = {"BaseColor", "Roughness"}.__contains__
         self.assertEqual(plugin.exportable(["basecolor", "normal", "roughness", "metallic", "emissive", "ambientocclusion"], has),
@@ -380,6 +393,18 @@ class ProofTests(unittest.TestCase):
         self.socket.written.clear()
         self.answer(plugin.proof(self.TOKEN, 4123, bytes(32)))
         self.assertIsNone(self.link.socket, "No proof was asked for.")
+
+    def test_a_frame_larger_than_the_link_allows_is_never_buffered(self):
+        self.connect()
+        sent = len(self.socket.written)
+        # Whatever listens on the port announces a 4 GB payload and streams junk.
+        self.socket.readAll = lambda: plugin.HEADER.pack(plugin.MAGIC, plugin.VERSION, plugin.PROOF, 0, 0xFFFFFFFF) + b"junk" * 64
+        self.link.on_ready_read()
+        self.assertIsNone(self.link.socket)
+        self.assertTrue(self.socket.aborted)
+        self.assertEqual(len(self.link.buffer), 0, "Nothing of it is kept.")
+        self.assertEqual(len(self.socket.written), sent, "Nothing more was sent, the token least of all.")
+        self.assertTrue(self.link.error)
 
     def test_a_proof_never_answered_drops_the_connection(self):
         self.connect()
