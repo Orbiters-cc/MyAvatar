@@ -8,7 +8,9 @@
   "Drop anything" field on the avatar's row, and what is dropped there goes to My Avatar's drop field (clothing,
   accessories or textures, exactly as there); an accessory whose fit is in question shows "ReFit ?" on its row, which
   answers like the fit card's ReFit tile. Both are done by the avatar's Inspector: the one showing it, else the avatar
-  is selected (or opens in an Inspector of its own when every Inspector is locked).
+  is selected (or opens in an Inspector of its own when every Inspector is locked). Each drop waits for that Inspector on
+  its own, the row saying "Adding…" meanwhile, for 10 seconds at most: one no Inspector took by then is given up with a
+  warning instead of running later (a second drop no longer replaces the first).
 - **Share My Avatar diagnostics** (Orbiters settings › My Avatar · Diagnostics, off by default) sends My Avatar's own
   warnings and errors, with their stack traces, to Orbiters through Orbiters Toolkit's shared reporter. The card says it
   covers every Unity project on the computer and that reports are linked to your Orbiters account while you are signed
