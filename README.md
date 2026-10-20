@@ -2,6 +2,8 @@
 
 ## 0.9.12 — 2026-10-20
 
+- The optimization estimate waits while a tool edits the avatar's meshes live (Mixer sculpting or painting): it took
+  ~30 ms of every frame and sometimes 2.6 s at once, which made strokes stutter, and measured a temporary copy anyway.
 - My Avatar works from other views of the avatar (Orbiters Toolkit's `AvatarObjectTools`): Mixer's Hierarchy shows a
   "Drop anything" field on the avatar's row, and what is dropped there goes to My Avatar's drop field (clothing,
   accessories or textures, exactly as there); an accessory whose fit is in question shows "ReFit ?" on its row, which

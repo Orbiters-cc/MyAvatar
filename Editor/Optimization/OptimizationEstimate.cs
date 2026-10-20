@@ -222,6 +222,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 if (!job.Avatar || EditorApplication.isPlayingOrWillChangePlaymode) { job.Abandon(); running.Remove(id); return; }
                 if (FailWith != null) throw new InvalidOperationException(FailWith);
                 var root = TextureOptimization.AvatarRoot(job.Avatar);
+                // A tool edits the avatar's meshes live (Mixer sculpting): its frames come first, and what it shows is a
+                // temporary copy. The estimate goes on once it is done.
+                if (Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.IsLiveEditing(root.transform)) return;
                 // First the textures' downloads for the platform the project builds for, as they stand and as the upload's
                 // copies (made now, the upload reuses them).
                 bool mobile = TextureOptimization.Mobile;
