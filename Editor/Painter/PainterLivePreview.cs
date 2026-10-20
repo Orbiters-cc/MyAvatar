@@ -248,6 +248,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     case ShaderPropertyType.Texture:
                         if (!dropped.Contains(name) && block.HasTexture(name) && block.GetTexture(name) is Texture texture && texture) copy.SetTexture(name, texture);
                         Vector(name + "_ST");
+                        // Unity adds a texture's size and HDR decoding to the block with it: they leave with a dropped one.
+                        if (dropped.Contains(name)) break;
                         Vector(name + "_TexelSize");
                         Vector(name + "_HDR");
                         break;
