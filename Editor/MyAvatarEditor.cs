@@ -147,8 +147,20 @@ namespace Orbiters.MyAvatar.Editor
             var credit = new Orbiters.Toolkit.Editor.SupportCredit(); credit.AddToClassList("myavatar-credit"); root.Add(credit);
             var toolbar = new IMGUIContainer(DrawToolbar); toolbar.AddToClassList("myavatar-toolbar"); root.Add(toolbar);
             if (AccessoriesSection.Enabled && content.enabledSelf && SessionState.GetBool(PageKey, false)) ShowPage(GalleryPage(), instant: true);
+            // A drop or a ReFit asked from another view (Mixer's Hierarchy) before this Inspector showed the avatar.
+            root.schedule.Execute(() => MyAvatarObjectTool.RunWaiting(this)).StartingIn(100);
             return root;
         }
+
+        // ---- Asked from other views (MyAvatarObjectTool) ----
+
+        internal MyAvatar Avatar => avatar;
+        internal AccessoriesSection Accessories => accessories;
+        /// <summary>Shown in an Inspector now: its drop field and sections can answer.</summary>
+        internal bool Live => active && avatar && root?.panel != null && content != null && content.enabledSelf;
+
+        /// <summary>A drop made on the avatar elsewhere: the same as a drop on this field.</summary>
+        internal void DropFromElsewhere(string[] paths) => Drop(paths);
 
         // ---- Pages: the main page and the asset gallery slide into each other ----
 

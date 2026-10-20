@@ -296,6 +296,15 @@ namespace Orbiters.MyAvatar.Editor
 
         // ---- Answers --------------------------------------------------------------------------------------------------
 
+        /// <summary>The ReFit answer to an accessory's fit question, asked from another view: as the card's ReFit tile.</summary>
+        internal bool RefitFromElsewhere(OrbitersAttachment attachment)
+        {
+            var note = attachment ? FitNote(attachment) : null;
+            if (!AccessoryFit.IsQuestion(note)) return false;
+            Act(note, AccessoryFit.Place);
+            return true;
+        }
+
         private void Act(MyAvatar.AccessoryNote note, string action)
         {
             var attachment = note.accessory as OrbitersAttachment;
