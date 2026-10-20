@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Orbiters.Toolkit.Editor.Meshes;
 using Orbiters.Toolkit.Editor.Textures;
 using UnityEditor;
@@ -12,32 +13,47 @@ namespace Orbiters.MyAvatar.Editor.Painter
     /// <summary>
     /// The maps Substance 3D Painter exported when its project was saved, applied to the avatar as a texture drop applies
     /// textures (<see cref="TextureChanges.Apply"/>: material copies, packed maps, one Undo step, Save and checkpoint). Each
-    /// map is imported into the link's folder under a stable name: the next save replaces the same files, and the same
-    /// material copies are edited again while no other texture set was dropped meanwhile.
+    /// save's maps are imported into the link's folder as new files (<c>Skin_BaseColor.png</c>, then <c>Skin_BaseColor 2.png</c>...):
+    /// Undo of a save shows the one before it again. The newest <see cref="KeptSaves"/> of each map stay; the same material
+    /// copies are edited again while no other texture set was dropped meanwhile. Only maps Painter exported in the link's
+    /// <c>commit/</c> folder are read.
     /// </summary>
     internal static class PainterCommit
     {
         private const string Root = "Assets/Orbiters/MyAvatar/";
+        /// <summary>How many saves of a map stay in the batch (so Undo can go back that far).</summary>
+        internal const int KeptSaves = 4;
+
+        /// <summary>Where Painter exports the maps of a save (<c>commit/&lt;pid&gt;/&lt;time&gt;/</c>).</summary>
+        internal static string Exports => Path.Combine(PainterLinkService.LinkFolder, "commit");
 
         /// <summary>Applies the maps; how many were applied. <paramref name="resolve"/> gives a texture set's material.</summary>
         internal static int Apply(MyAvatar avatar, IEnumerable<PainterLinkProtocol.CommitMap> maps, Func<string, (Material material, PainterTargets targets)> resolve)
         {
             string folder = BatchFolder(avatar);
             string images = folder + "/Painter";
-            TextureImport.EnsureFolder(images);
+            bool made = false;
             var entries = new List<TextureEntry>();
             var painted = new List<AvatarTextureEdits.Painted>();
+            var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string exports = Exports;
             foreach (var map in maps)
             {
-                if (string.IsNullOrEmpty(map.path) || !File.Exists(map.path)) continue;
+                if (string.IsNullOrEmpty(map.path) || !PainterLinkService.Inside(map.path, exports) || !File.Exists(map.path)) continue;
                 var (material, targets) = resolve(map.textureSet);
                 if (!material || targets == null) continue;
                 var (role, property) = targets.Slot(map.map);
                 if (property == null) continue;
-                string asset = images + "/" + ObjWriter.Clean(map.textureSet) + "_" + Label(map.map) + ".png";
-                File.Copy(map.path, asset, true);
+                // Two texture sets on one material (or one map twice): the first one's goes in that slot.
+                if (entries.Any(e => e.material == material && e.property == property && e.role == role)) continue;
+                // The batch's folder once there is something to put in it.
+                if (!made) { TextureImport.EnsureFolder(images); made = true; }
+                string stem = ObjWriter.Clean(map.textureSet) + "_" + Label(map.map);
+                string asset = NextFile(images, stem, written);
+                File.Copy(map.path, asset, false);
                 var texture = Import(asset, map.map);
                 if (!texture) continue;
+                Prune(images, stem, written);
                 // The slots it paints, found before the apply gives them material copies.
                 foreach (var (renderer, slot) in PainterLivePreview.Parts(avatar.transform, material))
                     painted.Add(new AvatarTextureEdits.Painted { Renderer = renderer, Slot = slot, Channel = map.map, Path = Path.GetFullPath(asset), Final = true });
@@ -60,6 +76,51 @@ namespace Orbiters.MyAvatar.Editor.Painter
             TextureChanges.Dirty(avatar);
             if (applied > 0) painted.ForEach(AvatarTextureEdits.Notify);
             return applied;
+        }
+
+        /// <summary>Deletes the folders Painter exported these maps to (once applied, or not: the next save exports again).</summary>
+        internal static void Discard(IEnumerable<PainterLinkProtocol.CommitMap> maps)
+        {
+            string exports = Exports;
+            foreach (string folder in maps.Where(m => m != null && !string.IsNullOrEmpty(m.path)).Select(m => Path.GetDirectoryName(m.path)).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
+            {
+                // commit/<pid>/<time> only.
+                string pid = Path.GetDirectoryName(folder);
+                if (!PainterLinkService.Inside(folder, exports) || !PainterLinkService.SamePath(Path.GetDirectoryName(pid), exports)) continue;
+                try { Directory.Delete(folder, true); }
+                catch (Exception) { }
+            }
+        }
+
+        // "Skin_BaseColor.png", then "Skin_BaseColor 2.png", "… 3.png": one past the newest, never a name used in this save.
+        private static string NextFile(string folder, string stem, HashSet<string> written)
+        {
+            int next = Saves(folder, stem).Select(s => s.Number).DefaultIfEmpty(0).Max() + 1;
+            string path;
+            for (; ; next++)
+            {
+                path = folder + "/" + stem + (next == 1 ? "" : " " + next) + ".png";
+                if (!File.Exists(path) && written.Add(path)) return path;
+            }
+        }
+
+        // The saves of one map in the folder, newest first.
+        private static List<(string Path, int Number)> Saves(string folder, string stem)
+        {
+            var pattern = new Regex("^" + Regex.Escape(stem) + @"(?: (\d+))?\.png$", RegexOptions.IgnoreCase);
+            if (!Directory.Exists(folder)) return new List<(string, int)>();
+            return Directory.GetFiles(folder, "*.png")
+                .Select(f => (Path: f.Replace('\\', '/'), Match: pattern.Match(Path.GetFileName(f))))
+                .Where(p => p.Match.Success)
+                .Select(p => (p.Path, Number: p.Match.Groups[1].Success && int.TryParse(p.Match.Groups[1].Value, out int n) ? n : 1))
+                .OrderByDescending(p => p.Number).ToList();
+        }
+
+        // Older saves of a map than the newest few go (Undo past them shows the slot empty).
+        private static void Prune(string folder, string stem, HashSet<string> written)
+        {
+            foreach (var (path, _) in Saves(folder, stem).Skip(KeptSaves))
+                if (!written.Contains(path)) AssetDatabase.DeleteAsset(path);
         }
 
         // The link's batch folder while it is the avatar's current one and not undone; a new batch otherwise (another texture

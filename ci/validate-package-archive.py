@@ -4,7 +4,8 @@ import zipfile
 from pathlib import PurePosixPath
 
 
-PACKAGE_ROOTS = ("Editor", "Runtime")
+# Painter~ holds the Substance 3D Painter plugin My Avatar installs (Unity skips folders ending in "~").
+PACKAGE_ROOTS = ("Editor", "Runtime", "Painter~")
 ROOT_FILES = ("README.md", "package.json")
 FORBIDDEN_ROOTS = (".git", ".github", ".idea", ".agents", ".codex")
 
@@ -71,6 +72,8 @@ def main():
         "Editor/UI/DropZone.cs", "Editor/UI/AccessoriesSection.cs", "Editor/AccessoryService.cs", "Editor/TextureOptimization.cs", "Editor/UI/MyAvatarLogo.svg.txt",
         "Editor/UI/myavatar.uss", "Editor/AvatarThumbnail.cs", "Editor/VrcSdkThumbnail.cs",
         "Editor/UI/ThumbnailSection.cs", "Editor/UI/VrcAvatarCard.cs",
+        # Installed into Substance 3D Painter by the Painter card (left out of the allowlist until 0.9.12).
+        "Painter~/orbiters_my_avatar.py", "Editor/Painter/PainterPack.shader",
     )
     for required_file in ROOT_FILES + required_myavatar_files:
         if required_file not in names:

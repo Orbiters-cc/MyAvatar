@@ -350,22 +350,27 @@ namespace Orbiters.MyAvatar.Editor
         // ---- Changes ------------------------------------------------------------------------------------------
 
         // Imports that may change what an avatar shows. Code, style sheets and documents never do: counting them made every
-        // script save (and the script reload after it) measure every avatar again. Kept across script reloads, like the
-        // estimates keyed by it.
+        // script save (and the script reload after it) measure every avatar again. A package or SDK update does (its
+        // package.json, its assemblies and their definitions: the build and the SDK's ratings may change). Kept across script
+        // reloads, like the estimates keyed by it.
         private const string ImportsKey = "Orbiters.MyAvatar.TextureOptimization.Imports";
         private static int? imports;
         private static int Imports => imports ??= SessionState.GetInt(ImportsKey, 0);
 
         private static readonly HashSet<string> Inert = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            ".cs", ".asmdef", ".asmref", ".dll", ".rsp", ".uss", ".uxml", ".tss", ".txt", ".md", ".json", ".xml", ".meta", ".pdb", ".so", ".dylib", ".bytes",
+            ".cs", ".rsp", ".uss", ".uxml", ".tss", ".txt", ".md", ".json", ".xml", ".meta", ".pdb", ".so", ".dylib", ".bytes",
         };
+
+        /// <summary>Whether importing this asset may change what an avatar shows or uploads.</summary>
+        internal static bool ImportMatters(string path) =>
+            !Inert.Contains(System.IO.Path.GetExtension(path)) || string.Equals(System.IO.Path.GetFileName(path), "package.json", StringComparison.OrdinalIgnoreCase);
 
         internal sealed class ImportWatcher : AssetPostprocessor
         {
             private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom)
             {
-                bool Matters(string[] paths) => paths.Any(path => !Inert.Contains(System.IO.Path.GetExtension(path)));
+                bool Matters(string[] paths) => paths.Any(ImportMatters);
                 if (!Matters(imported) && !Matters(deleted) && !Matters(moved)) return;
                 imports = Imports + 1;
                 SessionState.SetInt(ImportsKey, imports.Value);
@@ -391,6 +396,8 @@ namespace Orbiters.MyAvatar.Editor
             }
             foreach (var renderer in AvatarRoot(avatar).GetComponentsInChildren<Renderer>(true))
             {
+                // What editor tools show on the avatar (the bones' X-ray, weight paint) comes and goes: never the avatar's.
+                if (EditorHelper(renderer)) continue;
                 key.Append('|').Append(renderer.GetInstanceID());
                 var mesh = MeshOptimization.MeshOf(renderer);
                 if (mesh) key.Append('#').Append(mesh.GetInstanceID());
@@ -410,6 +417,10 @@ namespace Orbiters.MyAvatar.Editor
             }
             return key.ToString();
         }
+
+        /// <summary>A component of an object an editor tool made for display on the avatar (hidden, never saved).</summary>
+        internal static bool EditorHelper(Component component) =>
+            ((component.gameObject.hideFlags | component.hideFlags) & HideFlags.DontSave) != 0;
 
         // ---- Formats and memory in a build ----------------------------------------------------------------------
 

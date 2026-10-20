@@ -348,7 +348,8 @@ namespace Orbiters.MyAvatar.Editor
 
         private void CancelPlacement(MyAvatar.AccessoryNote note)
         {
-            AccessoryFit.Placement.For(note.accessory as OrbitersAttachment)?.Dispose();
+            // Back as it was before the line-up: nothing was refitted.
+            AccessoryFit.Placement.For(note.accessory as OrbitersAttachment)?.Cancel();
             UpdateFit(note, n => n.fit = string.IsNullOrEmpty(n.fitNext) || n.fitNext == AccessoryFit.Place ? AccessoryFit.Ask : n.fitNext);
         }
 
@@ -415,7 +416,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Dismiss(MyAvatar.AccessoryNote note)
         {
             var attachment = note.accessory as OrbitersAttachment;
-            AccessoryFit.Placement.For(attachment)?.Dispose();
+            AccessoryFit.Placement.For(attachment)?.Cancel();
             if (attachment && !string.IsNullOrEmpty(note.fitKey))
             {
                 string key = AccessoryFit.DismissKey(attachment, note.fitKey);

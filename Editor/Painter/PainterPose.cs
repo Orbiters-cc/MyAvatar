@@ -6,6 +6,7 @@ using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.Meshes;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Refit;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -342,41 +343,70 @@ namespace Orbiters.MyAvatar.Editor.Painter
         {
             var links = follow.ToList();
             var baked = new List<Part>();
-            rest.Restore();
-            // Centered from the avatar at rest: the pose turns limbs only, the middle stays where it is.
-            var frame = Frame(copy);
-            Paint(copy, options);
-            Follow(links);
-            baked.AddRange(Bake(copy, frame));
-            int main = baked.Count;
-            var bounds = Bounds(baked);
-            for (int i = 0; i < options.copies.Count; i++)
+            try
             {
                 rest.Restore();
-                Natural(copy, options.copies[i], options);
+                // Centered from the avatar at rest: the pose turns limbs only, the middle stays where it is.
+                var frame = Frame(copy);
+                Paint(copy, options);
                 Follow(links);
-                float step = i + 1;
-                // Above and below stay on the symmetry plane; beside, they alternate right and left.
-                var offset = options.placement == 0 ? new Vector3(0f, bounds.size.y * 1.08f * step, 0f)
-                    : options.placement == 1 ? new Vector3(0f, -bounds.size.y * 1.08f * step, 0f)
-                    : Vector3.right * (bounds.size.x * .6f + bounds.size.x * .9f * (i / 2 + 1)) * (i % 2 == 0 ? 1f : -1f);
-                baked.AddRange(Bake(copy, Matrix4x4.Translate(offset) * frame));
+                baked.AddRange(Bake(copy, frame));
+                int main = baked.Count;
+                var bounds = Bounds(baked);
+                for (int i = 0; i < options.copies.Count; i++)
+                {
+                    rest.Restore();
+                    Natural(copy, options.copies[i], options);
+                    Follow(links);
+                    float step = i + 1;
+                    // Above and below stay on the symmetry plane; beside, they alternate right and left.
+                    var offset = options.placement == 0 ? new Vector3(0f, bounds.size.y * 1.08f * step, 0f)
+                        : options.placement == 1 ? new Vector3(0f, -bounds.size.y * 1.08f * step, 0f)
+                        : Vector3.right * (bounds.size.x * .6f + bounds.size.x * .9f * (i / 2 + 1)) * (i % 2 == 0 ? 1f : -1f);
+                    baked.AddRange(Bake(copy, Matrix4x4.Translate(offset) * frame));
+                }
+                rest.Restore();
+                return (baked, main);
             }
-            rest.Restore();
-            return (baked, main);
+            catch
+            {
+                // What was baked before the failure goes with it.
+                Release(baked);
+                throw;
+            }
         }
 
         /// <summary>
         /// Runs <paramref name="use"/> on the avatar as it is in the scene (an applied version's meshes included), posed with
         /// <paramref name="options"/> on a hidden copy whose clothing follows its bones; the copy and the parts go after.
+        /// The renderers at <paramref name="include"/> (paths from the avatar's My Avatar, "." for its own object) are shown
+        /// on the copy even when hidden in the scene.
         /// </summary>
-        internal static T WithPosed<T>(MyAvatar avatar, PainterPoseOptions options, Func<List<Part>, T> use)
+        internal static T WithPosed<T>(MyAvatar avatar, PainterPoseOptions options, Func<List<Part>, T> use, IEnumerable<string> include = null)
         {
-            using (var copy = new HiddenAvatarCopy(TextureOptimization.AvatarRoot(avatar)))
+            var root = TextureOptimization.AvatarRoot(avatar);
+            using (var copy = new HiddenAvatarCopy(root))
             {
+                if (include != null) Show(copy.Copy, AnimationUtility.CalculateTransformPath(avatar.transform, root.transform), include);
                 var (parts, _) = Posed(copy.Copy, new Rest(copy.Copy), Links(copy.Copy), options);
                 try { return use(parts); }
                 finally { Release(parts); }
+            }
+        }
+
+        // The renderers at these paths on the copy, on and in active objects (the copy is never saved).
+        private static void Show(GameObject copy, string avatarPath, IEnumerable<string> paths)
+        {
+            var avatar = string.IsNullOrEmpty(avatarPath) ? copy.transform : copy.transform.Find(avatarPath);
+            if (!avatar) return;
+            foreach (string path in paths)
+            {
+                var place = path == "." ? avatar : avatar.Find(path);
+                var renderer = place ? place.GetComponent<Renderer>() : null;
+                if (!renderer) continue;
+                renderer.enabled = true;
+                for (var t = place; t && t != copy.transform.parent; t = t.parent)
+                    if (!t.gameObject.activeSelf) t.gameObject.SetActive(true);
             }
         }
 
@@ -393,7 +423,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
         /// <summary>
         /// The meshes the copy shows now (renderers on and in active objects, skinned meshes with their blendshapes), from the
-        /// scene into <paramref name="space"/> (see <see cref="Frame"/>). The meshes are new: <see cref="Release"/> them.
+        /// scene into <paramref name="space"/> (see <see cref="Frame"/>); never what editor tools show on it (the bones'
+        /// X-ray, weight paint). The meshes are new: <see cref="Release"/> them.
         /// </summary>
         internal static List<Part> Bake(GameObject root, Matrix4x4 space)
         {
@@ -401,7 +432,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             var move = space;
             foreach (var renderer in root.GetComponentsInChildren<Renderer>(false))
             {
-                if (!renderer.enabled || renderer.CompareTag("EditorOnly")) continue;
+                if (!renderer.enabled || renderer.CompareTag("EditorOnly") || EditorHelper(renderer)) continue;
                 if (renderer is SkinnedMeshRenderer skinned)
                 {
                     if (!skinned.sharedMesh) continue;
@@ -428,6 +459,15 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 }
             }
             return parts;
+        }
+
+        // A renderer an editor tool made for display (hidden, never saved): it isn't the avatar's.
+        private static bool EditorHelper(Renderer renderer)
+        {
+            if (renderer is SkinnedMeshRenderer skinned && RefitCandidates.IsEditorHelper(skinned)) return true;
+            for (var t = renderer.transform; t; t = t.parent)
+                if ((t.gameObject.hideFlags & HideFlags.DontSave) != 0) return true;
+            return (renderer.hideFlags & HideFlags.DontSave) != 0;
         }
 
         internal static void Release(IEnumerable<Part> parts)

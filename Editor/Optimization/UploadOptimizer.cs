@@ -88,8 +88,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 try { if ((passes & TextureOptimization.TexturePasses) != 0) plan.Textures = TextureOptimization.Build(settings); }
                 catch (Exception ex)
                 {
-                    Debug.LogException(ex);
-                    Debug.LogWarning("[My Avatar] Optimization: the upload keeps its textures as they are (" + ex.Message + ").");
+                    Debug.LogWarning("[My Avatar] Optimization: the upload keeps its textures as they are (" + ex.Message + ").\n" + ex);
                 }
                 try { RunStructure(avatar, passes, plan.Report, polygonQuality: settings.uploadOptimization.PolygonQuality); }
                 catch (PassFailed ex)
@@ -161,7 +160,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             AttachmentAnimationBuild Animations() => unbuilt ? null : build ?? (build = AttachmentAnimationBuild.Prepare(root));
             PassFailed failed = null;
             try { usage = new AvatarUsage(root, unbuilt ? (Func<Component, bool>)(c => !(c is MyAvatar) && !(c is MyAvatarFaceTracking)) : null); }
-            catch (Exception ex) { Debug.LogException(ex); Debug.LogWarning("[My Avatar] Optimization: the upload keeps the avatar as it is (" + ex.Message + ")."); yield break; }
+            catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: the upload keeps the avatar as it is (" + ex.Message + ").\n" + ex); yield break; }
 
             var steps = new List<(OptimizationPasses Pass, Action Run)>
             {
@@ -289,22 +288,19 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 try { report.DuplicateTextures += MaterialCleanup.MergeDuplicateTextures(root); }
                 catch (Exception ex)
                 {
-                    Debug.LogException(ex);
-                    Debug.LogWarning("[My Avatar] Optimization: the upload keeps its duplicate textures (" + ex.Message + ").");
+                    Debug.LogWarning("[My Avatar] Optimization: the upload keeps its duplicate textures (" + ex.Message + ").\n" + ex);
                 }
             if (textures != null)
                 try { report.ResizedTextures += UploadTextures.Apply(root, textures); }
                 catch (Exception ex)
                 {
-                    Debug.LogException(ex);
-                    Debug.LogWarning("[My Avatar] Optimization: the upload keeps its textures as they are (" + ex.Message + ").");
+                    Debug.LogWarning("[My Avatar] Optimization: the upload keeps its textures as they are (" + ex.Message + ").\n" + ex);
                 }
             if ((passes & OptimizationPasses.UnusedTextures) == 0) return;
             try { report.Textures += MaterialCleanup.DropUnusedTextures(root); }
             catch (Exception ex)
             {
-                Debug.LogException(ex);
-                Debug.LogWarning("[My Avatar] Optimization: the upload keeps its materials as they are (" + ex.Message + ").");
+                Debug.LogWarning("[My Avatar] Optimization: the upload keeps its materials as they are (" + ex.Message + ").\n" + ex);
             }
         }
     }

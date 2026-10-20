@@ -3,7 +3,8 @@ import argparse
 from pathlib import Path
 
 
-PACKAGE_ROOTS = ("Editor", "Runtime")
+# Painter~ holds the Substance 3D Painter plugin My Avatar installs (Unity skips folders ending in "~").
+PACKAGE_ROOTS = ("Editor", "Runtime", "Painter~")
 ROOT_FILES = ("README.md", "package.json")
 
 

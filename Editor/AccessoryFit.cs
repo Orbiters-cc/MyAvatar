@@ -203,6 +203,8 @@ namespace Orbiters.MyAvatar.Editor
             public OrbitersAttachment Attachment;
             public CustomBaseOriginal Original;
             public RefitGhost Ghost;
+            // The accessory before it was lined up with the original: cancelling puts it back.
+            internal Snapshot Before;
 
             internal static Placement Active { get; private set; }
 
@@ -251,6 +253,18 @@ namespace Orbiters.MyAvatar.Editor
                 return original;
             }
 
+            /// <summary>
+            /// Ends the line-up without a refit: the accessory goes back as it was before it was lined up (one Undo step), the
+            /// preview goes away.
+            /// </summary>
+            public void Cancel()
+            {
+                var before = Before;
+                Before = null;
+                Dispose();
+                before?.Restore();
+            }
+
             public void Dispose()
             {
                 SceneView.duringSceneGui -= Handle;
@@ -290,17 +304,23 @@ namespace Orbiters.MyAvatar.Editor
             cancellation.ThrowIfCancellationRequested();
             progress?.Invoke(.4f, "Loading the original body…");
             var original = info.ResolveOriginal();
+            RefitGhost ghost = null;
+            Snapshot before = null;
             try
             {
                 progress?.Invoke(.8f, "Aligning the body preview…");
-                var ghost = RefitGhost.Show(original.Avatar, original.Body, info.Body);
-                LineUp(attachment, ghost);
-                var placement = new Placement { Attachment = attachment, Original = original, Ghost = ghost };
+                ghost = RefitGhost.Show(original.Avatar, original.Body, info.Body);
+                before = new Snapshot(attachment);
+                LineUp(attachment, ghost.Root, ghost.Hips);
+                var placement = new Placement { Attachment = attachment, Original = original, Ghost = ghost, Before = before };
                 placement.Activate();
                 return placement;
             }
             catch
             {
+                // Nothing of a line-up that failed stays: the preview, or the accessory moved part-way.
+                ghost?.Dispose();
+                before?.Restore();
                 original.Dispose();
                 throw;
             }
@@ -312,16 +332,15 @@ namespace Orbiters.MyAvatar.Editor
         // onto the original's as onto an avatar's. Without key bones in common, clothing made for the original base sits on its
         // hips: when the accessory's hips are a little off the original's, it is moved there (a larger gap is a different rig,
         // left to the user).
-        private static void LineUp(OrbitersAttachment attachment, RefitGhost ghost)
+        internal static void LineUp(OrbitersAttachment attachment, Transform originalRoot, Transform originalHips)
         {
             var root = RefitRecords.AvatarRoot(attachment.transform);
+            // Fitted onto the original's armature when it differs enough; within the fit's thresholds (a few centimetres
+            // off), its hips are still put on the original's below.
             using (AccessoryPoseSync.Pause(root))
-                if (ghost.Root != null && AttachmentFit.Compare(attachment.gameObject, ghost.Root) != null)
-                {
-                    AttachmentFit.Fit(attachment, ghost.Root);
+                if (originalRoot != null && AttachmentFit.Compare(attachment.gameObject, originalRoot) != null && AttachmentFit.Fit(attachment, originalRoot) != null)
                     return;
-                }
-            if (ghost.Hips == null) return;
+            if (originalHips == null) return;
             var animator = root.GetComponent<Animator>();
             if (animator == null) animator = root.GetComponentsInChildren<Animator>(true).FirstOrDefault(a => !a.transform.IsChildOf(attachment.transform));
             var hips = animator != null && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;
@@ -332,10 +351,52 @@ namespace Orbiters.MyAvatar.Editor
             // Measured and moved where the accessory rests, not where a posing preview shows it.
             using (AccessoryPoseSync.Pause(root))
             {
-                var offset = ghost.Hips.position - itemHips.position;
+                var offset = originalHips.position - itemHips.position;
                 if (offset.magnitude < 0.005f || offset.magnitude > 0.5f) return;
                 Undo.RecordObject(attachment.transform, "Line up " + attachment.name + " with the original base");
                 attachment.transform.position += offset;
+            }
+        }
+
+        /// <summary>An accessory's bones and fit records as they are now (where it rests), to put back.</summary>
+        internal sealed class Snapshot
+        {
+            private readonly OrbitersAttachment attachment;
+            private readonly List<(Transform Bone, Vector3 Position, Quaternion Rotation, Vector3 Scale)> poses;
+            private readonly List<OrbitersAttachment.FittedPose> fitted;
+
+            internal Snapshot(OrbitersAttachment attachment)
+            {
+                this.attachment = attachment;
+                using (AccessoryPoseSync.Pause(RefitRecords.AvatarRoot(attachment.transform)))
+                    poses = attachment.GetComponentsInChildren<Transform>(true).Select(t => (t, t.localPosition, t.localRotation, t.localScale)).ToList();
+                fitted = attachment.fitted.ToList();
+            }
+
+            /// <summary>Puts back what changed since, as one Undo step.</summary>
+            internal void Restore()
+            {
+                if (!attachment) return;
+                using (AccessoryPoseSync.Pause(RefitRecords.AvatarRoot(attachment.transform)))
+                {
+                    var moved = poses.Where(p => p.Bone && (p.Bone.localPosition != p.Position || p.Bone.localRotation != p.Rotation || p.Bone.localScale != p.Scale)).ToList();
+                    bool refitted = !attachment.fitted.SequenceEqual(fitted);
+                    if (moved.Count == 0 && !refitted) return;
+                    Undo.RecordObjects(moved.Select(p => (UnityEngine.Object)p.Bone).Append(attachment).ToArray(), "Put back " + attachment.name);
+                    foreach (var (bone, position, rotation, scale) in moved)
+                    {
+                        bone.localPosition = position;
+                        bone.localRotation = rotation;
+                        bone.localScale = scale;
+                        PrefabUtility.RecordPrefabInstancePropertyModifications(bone);
+                    }
+                    if (refitted)
+                    {
+                        attachment.fitted = fitted.ToList();
+                        EditorUtility.SetDirty(attachment);
+                        PrefabUtility.RecordPrefabInstancePropertyModifications(attachment);
+                    }
+                }
             }
         }
     }

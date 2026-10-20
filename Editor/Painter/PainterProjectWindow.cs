@@ -41,16 +41,20 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private string copyError;
         // From the click that asks for the project until it is written.
         private bool sending;
-        // The choices: the avatar's last ones (the project keeps them on the avatar), the defaults for a first project.
-        private PainterPoseOptions options = new PainterPoseOptions();
-        private MyAvatar optionsFor;
+        // The choices: the avatar's last ones (the project keeps them on the avatar), the defaults for a first project. Kept
+        // across script reloads with the window.
+        [SerializeField] private PainterPoseOptions options = new PainterPoseOptions();
+        [SerializeField] private MyAvatar optionsFor;
+        [SerializeField] private int resolution;
+        [SerializeField] private bool shapesChosen;
         // The blendshapes chosen in the picker (PainterPose.Key), in the order of options.shapes.
         private readonly List<string> chosen = new List<string>();
-        private int resolution;
         private List<PainterPose.Part> parts = new List<PainterPose.Part>();
         private int mainCount;
         private Bounds framed;
-        private bool dirty, reposing, shapesChosen;
+        private bool dirty, reposing;
+        // The preview's frame tick: one for the window, whatever rebuilds it.
+        private IVisualElementScheduledItem ticking;
 
         private PreviewRenderUtility preview;
         private RenderTexture picture;
@@ -176,7 +180,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             footer.Add(create);
             status = new Label(); status.AddToClassList("ft-note"); footer.Add(status);
 
-            root.schedule.Execute(Tick).Every(16);
+            ticking ??= root.schedule.Execute(Tick).Every(16);
             // The window shows first; the copy is made on its next frame.
             if (shown == null) root.schedule.Execute(MakeCopy);
             UpdateStatus();
@@ -337,8 +341,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
             reposing = false;
             if (shown?.Copy == null || rest == null) return;
             PainterPose.Release(parts);
-            (parts, mainCount) = PainterPose.Posed(shown.Copy, rest, links, options);
+            // Nothing drawn from released meshes if posing fails (it releases what it made).
+            parts = new List<PainterPose.Part>();
+            mainCount = 0;
             dirty = true;
+            (parts, mainCount) = PainterPose.Posed(shown.Copy, rest, links, options);
         }
 
         private void UpdateStatus()

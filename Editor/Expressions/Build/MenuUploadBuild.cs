@@ -59,7 +59,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     var plan = PlanFor(avatar);
                     if (plan != null && !plan.Empty) Plans.Add(avatar, plan);
                 }
-                catch (Exception ex) { Debug.LogException(ex); Debug.LogWarning("[My Avatar] Menu: the upload keeps the menu as it is (" + ex.Message + ")."); }
+                catch (Exception ex) { Debug.LogWarning("[My Avatar] Menu: the upload keeps the menu as it is (" + ex.Message + ").\n" + ex); }
                 return true;
             }
         }
@@ -75,7 +75,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 Plans.Remove(avatar);
                 try { Debug.Log("[My Avatar] Menu: " + Run(avatar, plan)); }
                 // What was done stays (each step leaves the avatar whole); the rest is uploaded as VRCFury built it.
-                catch (Exception ex) { Debug.LogException(ex); Debug.LogWarning("[My Avatar] Menu: the upload goes on without the rest of the menu clean-up (" + ex.Message + ")."); }
+                catch (Exception ex) { Debug.LogWarning("[My Avatar] Menu: the upload goes on without the rest of the menu clean-up (" + ex.Message + ").\n" + ex); }
                 return true;
             }
         }

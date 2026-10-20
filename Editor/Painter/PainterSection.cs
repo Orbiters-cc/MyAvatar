@@ -80,7 +80,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             var session = PainterLinkService.For(avatar);
             bool plugin = PainterApp.PluginCurrent;
             string eyebrow = session != null ? "LINKED · " + session.ProjectName.ToUpperInvariant() : plugin ? "NOT LINKED"
-                : File.Exists(PainterApp.PluginPath) ? "PAINTER PLUGIN OUT OF DATE" : "PAINTER PLUGIN NOT INSTALLED";
+                : PainterApp.PluginInstalled ? "PAINTER PLUGIN OUT OF DATE" : "PAINTER PLUGIN NOT INSTALLED";
             var frame = new ToolHero(hero, Glow, eyebrow, session != null ? "painter-linked" : plugin ? "muted" : "warning",
                 "Paint in Substance 3D Painter",
                 "Strokes show on the avatar here as you paint, and saving in Painter applies the textures, with Undo. Open in Substance makes a project " +
@@ -92,7 +92,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             }
 
             // Painter in front while the avatar is open in it; else the avatar's project when it has one; a new one otherwise.
-            bool project = session == null && !string.IsNullOrEmpty(avatar.painter.projectPath) && File.Exists(avatar.painter.projectPath);
+            bool project = session == null && PainterLinkService.HasProject(avatar);
             if (session != null)
             {
                 var front = MyAvatarEditor.PressButton("Show Substance", () =>
@@ -120,7 +120,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     Show();
                 });
                 reopen.AddToClassList("ft-primary");
-                reopen.tooltip = "Opens " + Path.GetFileName(avatar.painter.projectPath) + " in Painter: it links to this avatar on its own.";
+                reopen.tooltip = "Opens " + Path.GetFileName(PainterLinkService.ProjectPath(avatar)) + " in Painter: it links to this avatar on its own.";
                 frame.Actions.Add(reopen);
             }
             var open = MyAvatarEditor.PressButton(project || session != null ? "New project…" : "Open in Substance", () => PainterProjectWindow.Open(avatar));
@@ -129,7 +129,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             frame.Actions.Add(open);
             if (!plugin)
             {
-                var install = MyAvatarEditor.PressButton(File.Exists(PainterApp.PluginPath) ? "Update the Painter plugin" : "Install the Painter plugin", InstallPlugin);
+                var install = MyAvatarEditor.PressButton(PainterApp.PluginInstalled ? "Update the Painter plugin" : "Install the Painter plugin", InstallPlugin);
                 install.AddToClassList("ft-ghost");
                 install.tooltip = "Copies My Avatar's plugin into Painter's startup folder (" + PainterApp.PluginPath + "). Painter loads it when it starts.";
                 frame.Actions.Add(install);
@@ -142,10 +142,16 @@ namespace Orbiters.MyAvatar.Editor.Painter
             if (session != noteSession) note = null;
             var status = new Label(note ?? Status(session, plugin)); status.AddToClassList("ft-note"); footer.Add(status);
             if (session?.Error == true || note != null && noteWarning) status.AddToClassList("warning");
-            if (avatar.painter.meshOutdated && !avatar.painter.posed)
+            string kept = !avatar.painter.meshOutdated ? null
+                : !avatar.painter.posed ? "The avatar's meshes changed, but this project's mesh can't follow: it wasn't made by Open in Substance (or was " +
+                                          "made before mesh updates). New project… makes one that gets the avatar's new meshes."
+                // A project linked from Painter while the avatar has the one Open in Substance made: only that one follows.
+                : session != null && !session.MadeProject ? "The avatar's meshes changed: this project keeps its own mesh (Open in Substance didn't make it). " +
+                                                            Path.GetFileName(PainterLinkService.ProjectPath(avatar)) + " gets the new mesh when it is open in Painter."
+                : null;
+            if (kept != null)
             {
-                var stale = new Label("The avatar's meshes changed, but this project's mesh can't follow: it wasn't made by Open in Substance (or was " +
-                                      "made before mesh updates). New project… makes one that gets the avatar's new meshes.");
+                var stale = new Label(kept);
                 stale.AddToClassList("ft-note");
                 stale.AddToClassList("warning");
                 footer.Add(stale);
@@ -158,7 +164,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 apply.tooltip = "Painter exports every texture set's maps and Unity applies them, as when you save in Painter.";
                 buttons.Add(apply);
                 // A mesh update that failed or waits: sent again on demand.
-                if (avatar.painter.posed && avatar.painter.meshOutdated && !PainterMeshUpdate.Busy(avatar))
+                if (session.MadeProject && avatar.painter.meshOutdated && !PainterMeshUpdate.Busy(avatar))
                 {
                     var mesh = MyAvatarEditor.PressButton("Update Painter's mesh", () => PainterMeshUpdate.Start(session));
                     mesh.AddToClassList("ft-ghost");
@@ -180,6 +186,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
             try
             {
                 PainterApp.InstallPlugin();
+                PainterLinkService.EnsureRunning();
                 if (PainterApp.Running)
                     EditorUtility.DisplayDialog("Substance 3D Painter", "My Avatar's plugin is installed. Restart Painter to load it: its My Avatar panel then links projects to avatars.", "OK");
             }
@@ -193,12 +200,13 @@ namespace Orbiters.MyAvatar.Editor.Painter
         private string Status(PainterLinkService.Session session, bool plugin)
         {
             if (session != null) return session.State;
-            bool project = !string.IsNullOrEmpty(avatar.painter.projectPath) && File.Exists(avatar.painter.projectPath);
+            bool project = PainterLinkService.HasProject(avatar);
+            string name = project ? Path.GetFileName(PainterLinkService.ProjectPath(avatar)) : null;
             // Open the project installs the plugin too.
             if (project && avatar.painter.posed && avatar.painter.meshOutdated)
-                return "The avatar's meshes changed: open " + Path.GetFileName(avatar.painter.projectPath) + " in Painter and it gets the new mesh.";
+                return "The avatar's meshes changed: open " + name + " in Painter and it gets the new mesh.";
             if (!plugin) return "Install the plugin, then open the avatar in Painter, or link a project from Painter's My Avatar panel.";
-            if (project) return "Open " + Path.GetFileName(avatar.painter.projectPath) + " in Painter: it links to this avatar on its own.";
+            if (project) return "Open " + name + " in Painter: it links to this avatar on its own.";
             if (PainterApp.Running) return "Painter is running: link a project to " + avatar.name + " from its My Avatar panel (Window menu), or open the avatar in Substance.";
             return "Open the avatar in Substance to paint it.";
         }

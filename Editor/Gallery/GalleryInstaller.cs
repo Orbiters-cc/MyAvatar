@@ -174,7 +174,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             catch (OperationCanceledException) { if (!job.Terminal) Finish(job, GalleryJob.Cancelled, CancelledText(job)); }
             catch (Exception ex)
             {
-                Debug.LogWarning("[My Avatar] Gallery installation of " + job.assetName + " stopped: " + ex);
+                Debug.LogWarning("[My Avatar] A Gallery installation stopped (the Gallery shows which): " + ex);
                 Fail(job, ex.Message);
             }
             finally

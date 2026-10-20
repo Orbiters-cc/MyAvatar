@@ -432,6 +432,8 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         internal static string FitText(string name, AttachmentFit.Measure fit) =>
+            // Measured against the original base's armature over a custom base, and matching it: made for that base.
+            !fit.NeedsFit ? name + " was made for this avatar's original base: placed on that base's armature, over the body." :
             name + " was made for another body: " + (fit.Segments > 0 && Mathf.Abs(fit.Scale - 1f) > 0.005f ? (fit.Scale > 1f ? "enlarged" : "shrunk") + " to " +
             Mathf.RoundToInt(fit.Scale * 100f) + "% and " : "") + "aligned to this avatar's armature and pose.";
 

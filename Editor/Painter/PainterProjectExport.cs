@@ -32,14 +32,16 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// A texture set per material of the avatar the parts show, named after it, for each material of the parts. A build
         /// hands its own copies of the materials (VRCFury's are "VRCFury M_Skin (Body)"): the avatar's material is the one
         /// its renderer at the same place shows in the same slot, else the one of the same name. Copies of one material
-        /// paint one texture set.
+        /// paint one texture set. A mesh made again for a project (<paramref name="project"/>: its texture sets) keeps their
+        /// names: a material whose renderer slot a set of its own name (or that name numbered, "Skin_2") paints keeps that
+        /// set, whatever order the parts come in (Painter keeps a texture set's strokes by its name).
         /// </summary>
-        internal static Dictionary<Material, Set> Sets(MyAvatar avatar, IEnumerable<PainterPose.Part> parts)
+        internal static Dictionary<Material, Set> Sets(MyAvatar avatar, IEnumerable<PainterPose.Part> parts, IList<PainterSet> project = null)
         {
             var choices = PainterMapping.Choices(avatar);
             var sets = new Dictionary<Material, Set>();
             var byAvatarMaterial = new Dictionary<Material, Set>();
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<Material>();
             foreach (var part in parts)
                 for (int slot = 0; slot < part.Materials.Length; slot++)
                 {
@@ -51,14 +53,38 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     var key = choice?.Material ?? material;
                     if (!byAvatarMaterial.TryGetValue(key, out var set))
                     {
-                        string name = ObjWriter.Clean(key.name), unique = name;
-                        for (int i = 2; !names.Add(unique); i++) unique = name + "_" + i;
-                        byAvatarMaterial[key] = set = new Set { Name = unique, Material = material, Choice = choice };
+                        byAvatarMaterial[key] = set = new Set { Material = material, Choice = choice };
+                        order.Add(key);
                     }
                     sets[material] = set;
                 }
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // The project's names first, then new ones that no set has.
+            if (project != null)
+                foreach (var key in order)
+                {
+                    var set = byAvatarMaterial[key];
+                    string own = ObjWriter.Clean(key.name);
+                    var entry = set.Choice == null ? null : project.FirstOrDefault(s => s.renderer == set.Choice.Renderer && s.slot == set.Choice.Slot &&
+                                                                                    Named(s.textureSet, own) && !names.Contains(s.textureSet));
+                    if (entry != null && names.Add(entry.textureSet)) set.Name = entry.textureSet;
+                }
+            foreach (var key in order)
+            {
+                var set = byAvatarMaterial[key];
+                if (set.Name != null) continue;
+                string name = ObjWriter.Clean(key.name), unique = name;
+                for (int i = 2; !names.Add(unique); i++) unique = name + "_" + i;
+                set.Name = unique;
+            }
             return sets;
         }
+
+        // A texture set named after a material ("Skin"), or numbered after it when another material had the name ("Skin_2").
+        private static bool Named(string set, string name) =>
+            !string.IsNullOrEmpty(set) && (string.Equals(set, name, StringComparison.OrdinalIgnoreCase) ||
+                                           set.Length > name.Length + 1 && set.StartsWith(name + "_", StringComparison.OrdinalIgnoreCase) &&
+                                           set.Substring(name.Length + 1).All(char.IsDigit));
 
         // What the avatar's renderer at the place of a copy's renderer shows in this slot: the copy is one of the avatar's root
         // (the build leaves its My Avatar out), so the same path from the roots.
@@ -102,10 +128,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 avatar.painter.sets.RemoveAll(s => string.Equals(s.textureSet, set.Name, StringComparison.OrdinalIgnoreCase));
                 avatar.painter.sets.Add(new PainterSet { textureSet = set.Name, renderer = set.Choice?.Renderer ?? "", slot = set.Choice?.Slot ?? 0 });
             }
-            string project = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Orbiters", "Painter",
+            string project = Path.Combine(PainterLinkService.Documents, "Orbiters", "Painter",
                 ObjWriter.Clean(PlayerSettings.productName), safe + ".spp");
             if (File.Exists(project)) project = Path.Combine(Path.GetDirectoryName(project), safe + " " + stamp + ".spp");
-            avatar.painter.projectPath = project;
+            // Kept from the home folder ("~/Documents/..."): scenes and prefabs never hold the user's name.
+            avatar.painter.projectPath = PainterLinkService.Portable(project);
             avatar.painter.posed = true;
             avatar.painter.pose = PainterPose.Copy(options);
             avatar.painter.meshOutdated = false;
@@ -130,9 +157,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
         }
 
         /// <summary>The posed meshes as one OBJ, a texture set (material name) per material of the parts.</summary>
-        private static (ObjWriter Obj, Dictionary<Material, Set> Sets) WriteMesh(MyAvatar avatar, List<PainterPose.Part> parts, string path)
+        private static (ObjWriter Obj, Dictionary<Material, Set> Sets) WriteMesh(MyAvatar avatar, List<PainterPose.Part> parts, string path, IList<PainterSet> project = null)
         {
-            var sets = Sets(avatar, parts);
+            var sets = Sets(avatar, parts, project);
             var obj = new ObjWriter();
             foreach (var part in parts)
                 obj.Add(part.Name, part.Mesh, part.ToWorld, part.Materials.Select(m => m && sets.TryGetValue(m, out var set) ? set.Name : null).ToList(), part.Mirrored);
@@ -141,8 +168,9 @@ namespace Orbiters.MyAvatar.Editor.Painter
         }
 
         /// <summary>
-        /// Writes the avatar's mesh again for its project (the same texture sets, made the same way), in the link's meshes
-        /// folder, and returns its file. The avatar's earlier ones there go: Painter keeps the mesh it loads in the project.
+        /// Writes the avatar's mesh again for its project (the same texture sets, by the names the project knows them by),
+        /// in the link's meshes folder, and returns its file. The avatar's earlier ones there go: Painter keeps the mesh it
+        /// loads in the project. A material new since gets a texture set of its own, mapped to it at once.
         /// </summary>
         internal static string WriteMeshUpdate(MyAvatar avatar, List<PainterPose.Part> parts)
         {
@@ -154,7 +182,20 @@ namespace Orbiters.MyAvatar.Editor.Painter
             foreach (string file in Directory.GetFiles(folder).Where(f => earlier.IsMatch(Path.GetFileName(f))))
                 try { File.Delete(file); } catch (IOException) { }
             string path = Path.Combine(folder, safe + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".obj");
-            WriteMesh(avatar, parts, path);
+            var (obj, sets) = WriteMesh(avatar, parts, path, avatar.painter.sets);
+            // Bookkeeping of the link, outside Undo (as the mesh Painter loads is).
+            bool mapped = false;
+            foreach (var set in sets.Values.Distinct().Where(s => obj.Materials.Contains(s.Name) && s.Choice != null))
+            {
+                if (avatar.painter.sets.Any(s => string.Equals(s.textureSet, set.Name, StringComparison.OrdinalIgnoreCase))) continue;
+                avatar.painter.sets.Add(new PainterSet { textureSet = set.Name, renderer = set.Choice.Renderer, slot = set.Choice.Slot });
+                mapped = true;
+            }
+            if (mapped)
+            {
+                EditorUtility.SetDirty(avatar);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(avatar);
+            }
             return path;
         }
 

@@ -5,11 +5,16 @@ stroke, and is applied to its materials when the project is saved. Projects My A
 set up here: mesh, texture sets, the avatar's textures in a "From Unity" fill layer, its normal maps as baked normals.
 
 Installed by My Avatar in Painter's user startup folder (Documents/Adobe/Adobe Substance 3D Painter/python/startup):
-Painter loads it at every start. The protocol is described in My Avatar's PainterLinkProtocol.cs.
+Painter loads it at every start, and again when My Avatar installs a newer one. The protocol is described in My Avatar's
+PainterLinkProtocol.cs. Painter only links to a Unity editor listening where its endpoint file says, and sends the token
+only once that Unity proved it holds it (when the endpoint says it can: another program on that port would get the
+token); it only runs project jobs made of files Unity wrote in the link's folder.
 """
 
 import ctypes
 import glob
+import hashlib
+import hmac
 import json
 import os
 import struct
@@ -34,13 +39,25 @@ import substance_painter.textureset
 import substance_painter.ui
 import substance_painter_plugins
 
-PLUGIN_VERSION = "1.3.1"
+PLUGIN_VERSION = "1.4.0"
 MAGIC = 0x4C50524F  # "ORPL"
 # How long a connection attempt may wait for Unity before it is tried again.
 CONNECT_SECONDS = 5.0
+# How long Unity may take to prove it holds the endpoint's token.
+PROOF_SECONDS = 5.0
+# How long a project Unity asked for may take to open before another job can run.
+PENDING_SECONDS = 600.0
+# How long the first save of a new project may take before linking goes on without it.
+SAVE_SECONDS = 120.0
 VERSION = 1
 HELLO, WELCOME, STRUCTURE, MAPPING, TEXTURE, COMMITTING, COMMIT, STATUS, REQUEST, BYE, MESH_RELOADED = range(1, 12)
 HEADER = struct.Struct("<IBBHI")
+# Frame type 0 is the Toolkit's live link proof, the same on every link: before sending the token, Painter sends a nonce
+# without a token, and Unity answers without a token with HMAC-SHA256 (keyed with the token) of this label, the magic
+# (u32), the port connected to (u16) and the nonce (LiveLinkFormat.Proof).
+PROOF = 0
+PROOF_LABEL = b"Orbiters live link proof"
+PROOF_NONCE_BYTES = 32
 ENDPOINT_KIND = "orbiters.myavatar.painterLink"
 PRESENCE_KIND = "orbiters.myavatar.painter"
 JOB_KIND = "orbiters.myavatar.painterProject"
@@ -62,6 +79,11 @@ CHANNELS = OrderedDict([
 # The map a channel's strokes change when the project is saved.
 MAP_OF_CHANNEL = {"basecolor": "basecolor", "opacity": "basecolor", "normal": "normal", "height": "normal",
                   "roughness": "roughness", "metallic": "metallic", "emissive": "emissive", "ambientocclusion": "ambientocclusion"}
+# The channel a saved map is exported from (the normal always exports: the baked normal at least).
+CHANNEL_OF_MAP = {"basecolor": ChannelType.BaseColor, "roughness": ChannelType.Roughness, "metallic": ChannelType.Metallic,
+                  "emissive": ChannelType.Emissive, "ambientocclusion": ChannelType.AO}
+# The values of a job's texture set that are images Unity wrote.
+JOB_IMAGES = ("basecolor", "opacity", "normal", "roughness", "metallic", "emissive")
 
 
 def log(message):
@@ -133,6 +155,124 @@ def texture_set_names():
     return [ts.name() for ts in substance_painter.textureset.all_texture_sets()]
 
 
+def proof_request(nonce):
+    """The frame asking Unity to prove it holds the token: the nonce, no token."""
+    return HEADER.pack(MAGIC, VERSION, PROOF, 0, len(nonce)) + nonce
+
+
+def proof(token, port, nonce):
+    """What a Unity holding the token answers to a proof request with this nonce, on this port."""
+    message = PROOF_LABEL + struct.pack("<IH", MAGIC, int(port) & 0xFFFF) + bytes(nonce)
+    return hmac.new(token.encode("utf-8"), message, hashlib.sha256).digest()
+
+
+def same_path(a, b):
+    """Whether two paths name the same file."""
+    if not a or not b:
+        return False
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def is_inside(path, folder):
+    """Whether a path lies inside a folder."""
+    if not path or not folder:
+        return False
+    root = os.path.normcase(os.path.abspath(folder)).rstrip("\\/") + os.sep
+    return os.path.normcase(os.path.abspath(path)).startswith(root)
+
+
+def choose_endpoint(endpoints, avatar_id, unity_project=None):
+    """The Unity editor to link the avatar through: one listing it, the Unity project it was linked in first (a copy of
+    that project open beside it lists the same avatar)."""
+    listing = [e for e in endpoints if any(a.get("id") == avatar_id for a in e.get("avatars", []))]
+    for endpoint in listing:
+        if unity_project and same_path(endpoint.get("projectPath"), unity_project):
+            return endpoint
+    return listing[0] if listing else None
+
+
+def owner_of(table, port):
+    """The process listening on 127.0.0.1 (or every address) at a port, from a MIB_TCPTABLE_OWNER_PID; None if none."""
+    if len(table) < 4:
+        return None
+    count = struct.unpack_from("<I", table, 0)[0]
+    for i in range(count):
+        offset = 4 + i * 24
+        if offset + 24 > len(table):
+            break
+        _state, address, local_port, _remote, _remote_port, pid = struct.unpack_from("<6I", table, offset)
+        # The port in network order in the low 16 bits; 127.0.0.1 in network order.
+        if ((local_port & 0xFF) << 8 | (local_port >> 8) & 0xFF) == port and address in (0x0100007F, 0):
+            return pid
+    return None
+
+
+def listening_pid(port):
+    """The process that listens on 127.0.0.1 at a port (Windows), or None when it can't be told."""
+    if sys.platform != "win32" or not port:
+        return None
+    try:
+        get_table = ctypes.windll.iphlpapi.GetExtendedTcpTable
+        size = ctypes.c_ulong(0)
+        # AF_INET, TCP_TABLE_OWNER_PID_LISTENER.
+        get_table(None, ctypes.byref(size), False, 2, 3, 0)
+        for _ in range(3):
+            buffer = ctypes.create_string_buffer(max(4, size.value))
+            result = get_table(buffer, ctypes.byref(size), False, 2, 3, 0)
+            if result == 0:
+                return owner_of(buffer.raw, port)
+            if result != 122:  # ERROR_INSUFFICIENT_BUFFER: the table grew meanwhile.
+                return None
+    except Exception:
+        pass
+    return None
+
+
+def job_problem(job, folder, exists=os.path.exists):
+    """
+    Why a job from Unity can't run (None when it can): a project is only made from a mesh and images Unity wrote in the
+    link's folder, and saved where no file is yet; only Painter projects are opened.
+    """
+    project = job.get("project") or ""
+    if not str(project).lower().endswith(".spp"):
+        return "it doesn't name a Painter project (%s)" % project
+    if job.get("kind") == OPEN_KIND:
+        return None
+    if exists(project):
+        return "a file is there already (%s)" % project
+    mesh = job.get("mesh") or ""
+    if not str(mesh).lower().endswith(".obj") or not is_inside(mesh, folder):
+        return "its mesh isn't one Unity wrote (%s)" % mesh
+    for entry in job.get("textureSets") or []:
+        if not isinstance(entry, dict) or not entry.get("name"):
+            return "a texture set has no name"
+        for key in JOB_IMAGES:
+            value = entry.get(key)
+            if isinstance(value, str) and not is_inside(value, folder):
+                return "an image isn't one Unity wrote (%s)" % value
+    return None
+
+
+def mapping_changes(old, new, old_size, new_size):
+    """
+    What to render after Unity sends a mapping: every live channel when the image size changed, else only those new,
+    or of a texture set that paints another material now (the others show already).
+    """
+    wanted = []
+    for name, entry in new.items():
+        before = old.get(name)
+        for channel in entry.get("channels", []):
+            if new_size != old_size or before is None or before.get("material") != entry.get("material") \
+                    or channel not in before.get("channels", []):
+                wanted.append((name, channel))
+    return wanted
+
+
+def exportable(maps, has_channel):
+    """The saved maps a texture set can export: those whose channel it has, and the normal."""
+    return [m for m in maps if m == "normal" or (m in CHANNEL_OF_MAP and has_channel(CHANNEL_OF_MAP[m]))]
+
+
 class Link(QtCore.QObject):
     """The connection to Unity, the live renders and the commits."""
 
@@ -143,6 +283,11 @@ class Link(QtCore.QObject):
         self.socket = None
         self.buffer = bytearray()
         self.endpoint = None
+        # Whether the connection's Unity proved it holds the token (or its endpoint doesn't ask): nothing is sent before.
+        self.proved = False
+        # The nonce of a proof request not answered yet, and when it was sent.
+        self.awaiting_proof = None
+        self.proof_started = 0.0
         self.avatar_id = None
         self.avatar_name = None
         self.connected = False
@@ -161,14 +306,25 @@ class Link(QtCore.QObject):
         self.pressed = False
         self.saving_ourselves = False
         self.pending_job = None
+        self.pending_since = 0.0
         self.structure_sent = False
+        self.last_structure = None
         self.connect_started = 0.0
+        # The Unity project the link was made in (a copy of it may list the same avatar).
+        self.unity_project = None
+        # Another project took the avatar over in Unity: no linking again on its own until asked.
+        self.paused = False
+        # A new project's first save is under way: it links once it has its file.
+        self.awaiting_save = 0.0
+        # The mesh Unity asked for last, and the answer Unity didn't get (it was away): sent once linked again.
+        self.mesh_path = None
+        self.unsent_mesh_answer = None
         # The converted map that is the exported normal (looked up once), and when this code was loaded.
         self.normal_map = None
         try:
             self.loaded_at = os.path.getmtime(__file__)
         except OSError:
-            self.loaded_at = float("inf")
+            self.loaded_at = time.time()
         self.render_timer = QtCore.QTimer(self)
         self.render_timer.setSingleShot(True)
         self.render_timer.timeout.connect(self.render_next)
@@ -193,18 +349,23 @@ class Link(QtCore.QObject):
         if not substance_painter.project.is_open():
             self.avatar_id = None
             self.avatar_name = None
+            self.unity_project = None
+            self.paused = False
             return
         try:
             link = substance_painter.project.Metadata(METADATA).get("link")
         except Exception as exception:
             log("The project's link could not be read now (%s): keeping %s." % (exception, self.avatar_name or "none"))
             return
+        self.paused = False
         if isinstance(link, dict):
             self.avatar_id = link.get("avatarId")
             self.avatar_name = link.get("avatarName")
+            self.unity_project = link.get("unityProject")
         else:
             self.avatar_id = None
             self.avatar_name = None
+            self.unity_project = None
 
     def link_to(self, endpoint, avatar):
         """Links the open project to an avatar of a Unity editor (kept in the project's metadata)."""
@@ -215,16 +376,35 @@ class Link(QtCore.QObject):
             "unityProject": endpoint.get("projectPath"), "plugin": PLUGIN_VERSION})
         self.avatar_id = avatar["id"]
         self.avatar_name = avatar.get("name")
+        self.unity_project = endpoint.get("projectPath")
+        self.paused = False
         self.disconnect()
-        self.connect_to(endpoint)
+        if self.trusted(endpoint):
+            self.connect_to(endpoint)
 
     def unlink(self):
         if substance_painter.project.is_open():
             substance_painter.project.Metadata(METADATA).set("link", {})
         self.avatar_id = None
         self.avatar_name = None
+        self.unity_project = None
+        self.paused = False
         self.disconnect()
         self.set_message("Not linked to an avatar.")
+
+    def resume(self):
+        """Links again after another project took the avatar (it takes the avatar back)."""
+        self.paused = False
+        self.set_message("Linking to %s again…" % (self.avatar_name or "the avatar"))
+        self.tick()
+
+    def trusted(self, endpoint):
+        """Whether the endpoint's Unity listens on its port: another program there would get the token."""
+        owner = listening_pid(int(endpoint.get("port") or 0))
+        if owner is None or owner == endpoint.get("pid"):
+            return True
+        self.set_message("Another program listens where Unity should: not linking. Reopen the avatar's Inspector in Unity.", True)
+        return False
 
     def set_message(self, text, error=False):
         self.message = text
@@ -236,20 +416,22 @@ class Link(QtCore.QObject):
         try:
             self.check_update()
             self.check_jobs()
+            self.check_proof()
             # The texture sets once Painter is free again (it was busy when Unity answered).
-            if self.connected and not self.structure_sent:
+            if self.connected and self.proved and not self.structure_sent:
                 self.send_structure()
             # An attempt Unity never answered (it was restarting its scripts): tried again from its endpoint file.
             if self.socket is not None and not self.connected and time.time() - self.connect_started > CONNECT_SECONDS:
                 log("Unity didn't answer on port %s: trying again." % (self.endpoint or {}).get("port"))
                 self.disconnect()
-            if self.socket is None and self.avatar_id and self.project_ready():
-                for endpoint in read_endpoints():
-                    if any(a.get("id") == self.avatar_id for a in endpoint.get("avatars", [])):
-                        self.connect_to(endpoint)
-                        break
-                else:
+            # A new project links once its first save gave it its file (Unity tells the project it made by its file).
+            saving = self.awaiting_save and time.time() - self.awaiting_save < SAVE_SECONDS
+            if self.socket is None and self.avatar_id and not self.paused and not saving and self.project_ready():
+                endpoint = choose_endpoint(read_endpoints(), self.avatar_id, self.unity_project)
+                if endpoint is None:
                     self.set_message("Waiting for Unity: open the project with " + (self.avatar_name or "the avatar") + " in Unity.")
+                elif self.trusted(endpoint):
+                    self.connect_to(endpoint)
         except Exception:
             log("Tick failed: " + traceback.format_exc())
 
@@ -259,6 +441,8 @@ class Link(QtCore.QObject):
         self.endpoint = endpoint
         self.buffer = bytearray()
         self.connect_started = time.time()
+        self.proved = False
+        self.awaiting_proof = None
         socket = QtNetwork.QTcpSocket(self)
         self.socket = socket
         # Each socket's signals act only while it is the link's: a closed one's late "disconnected" must not end the
@@ -274,19 +458,35 @@ class Link(QtCore.QObject):
         self.socket = None
         self.connected = False
         self.mapping = {}
+        self.awaiting_proof = None
         if socket is not None:
             try:
-                if socket.state() == QtNetwork.QAbstractSocket.SocketState.ConnectedState:
+                # A goodbye carries the token: only to a Unity that proved it holds it.
+                if self.proved and socket.state() == QtNetwork.QAbstractSocket.SocketState.ConnectedState:
                     self.send(BYE, socket=socket)
                 socket.abort()
             except RuntimeError:
                 pass
             socket.deleteLater()
+        self.proved = False
         self.changed.emit()
+
+    def refuse(self, message):
+        """Drops a connection whose peer didn't prove it is the endpoint's Unity: the token never went to it."""
+        log(message)
+        self.proved = False
+        self.disconnect()
+        self.set_message(message, True)
+
+    def check_proof(self):
+        """A proof request Unity never answered: the connection goes (it is tried again from the endpoint file)."""
+        if self.awaiting_proof is not None and time.time() - self.proof_started > PROOF_SECONDS:
+            self.refuse("Unity didn't prove it holds the link's token on port %s: not linked." % (self.endpoint or {}).get("port"))
 
     def send(self, frame_type, payload=None, socket=None):
         socket = socket or self.socket
-        if socket is None:
+        # Nothing (the token least of all) leaves before Unity proved it holds the token.
+        if socket is None or not self.proved:
             return False
         token = (self.endpoint or {}).get("token", "").encode("utf-8")
         data = b"" if payload is None else json.dumps(payload).encode("utf-8")
@@ -296,12 +496,44 @@ class Link(QtCore.QObject):
 
     def on_connected(self):
         self.connected = True
+        if (self.endpoint or {}).get("proof"):
+            # Unity proves it holds the endpoint's token before Painter sends it (something else may listen on the port
+            # while Unity reloads its scripts).
+            nonce = os.urandom(PROOF_NONCE_BYTES)
+            self.awaiting_proof = nonce
+            self.proof_started = time.time()
+            self.socket.write(proof_request(nonce))
+            self.socket.flush()
+            self.set_message("Checking Unity…")
+            return
+        self.proved = True
+        self.hello()
+
+    def on_proof(self, token_length, payload):
+        """Unity's answer to the proof request: linked when it holds the token, dropped otherwise."""
+        nonce = self.awaiting_proof
+        endpoint = self.endpoint or {}
+        expected = proof(endpoint.get("token", ""), endpoint.get("port") or 0, nonce) if nonce is not None else b""
+        if nonce is None or token_length != 0 or not hmac.compare_digest(payload, expected):
+            self.refuse("What listens on Unity's port doesn't hold the link's token (an editor that is gone?): not linked.")
+            return
+        self.awaiting_proof = None
+        self.proved = True
+        self.hello()
+
+    def hello(self):
+        """Says which avatar the project is linked to, then sends its texture sets."""
         log("Linked to Unity on port %s." % (self.endpoint or {}).get("port"))
         self.send(HELLO, {
             "protocolVersion": VERSION, "painter": substance_painter.application.version(), "plugin": PLUGIN_VERSION,
             "avatarId": self.avatar_id, "projectName": substance_painter.project.name(),
             "projectPath": substance_painter.project.file_path()})
+        self.structure_sent = False
         self.send_structure()
+        # A mesh loaded while Unity was away (its scripts reloading): it still waits for the answer.
+        if self.unsent_mesh_answer is not None:
+            answer, self.unsent_mesh_answer = self.unsent_mesh_answer, None
+            self.send(MESH_RELOADED, answer)
         self.set_message("Connected to Unity.")
 
     def on_disconnected(self):
@@ -310,6 +542,8 @@ class Link(QtCore.QObject):
         socket = self.socket
         self.socket = None
         self.connected = False
+        self.proved = False
+        self.awaiting_proof = None
         self.mapping = {}
         socket.deleteLater()
         log("Unity went away: linking again once it is back.")
@@ -331,26 +565,46 @@ class Link(QtCore.QObject):
                 return
             payload = bytes(self.buffer[HEADER.size + token_length:size])
             del self.buffer[:size]
+            # The proof (no token) comes first when it was asked for; nothing else is read before it.
+            if frame_type == PROOF:
+                self.on_proof(token_length, payload)
+                if self.socket is not socket:
+                    return
+                continue
+            if not self.proved:
+                self.refuse("Unity sent frames before proving it holds the link's token: not linked.")
+                return
             try:
-                self.on_frame(frame_type, json.loads(payload.decode("utf-8")) if payload else {})
+                data = json.loads(payload.decode("utf-8")) if payload else {}
+                self.on_frame(frame_type, data if isinstance(data, dict) else {})
             except Exception:
                 log("Frame failed: " + traceback.format_exc())
+            # The frame ended the link: what follows it is not read.
+            if self.socket is not socket:
+                return
 
     def on_frame(self, frame_type, data):
         if frame_type == WELCOME:
             self.avatar_name = data.get("avatarName") or self.avatar_name
             self.set_message("Linked to " + (self.avatar_name or "the avatar") + ".")
         elif frame_type == MAPPING:
-            self.mapping = {s["textureSet"]: s for s in data.get("sets", []) if s.get("material")}
-            self.preview_size = int(data.get("previewSize") or 1024)
-            # Everything shown live once, as it is now.
-            for name, entry in self.mapping.items():
-                for channel in entry.get("channels", []):
-                    self.dirty[(name, channel)] = True
+            mapping = {s["textureSet"]: s for s in data.get("sets", []) if isinstance(s, dict) and s.get("textureSet") and s.get("material")}
+            size = int(data.get("previewSize") or 1024)
+            # Shown live once, as it is now: what is new to Unity (a mapping sent again changes nothing shown).
+            for key in mapping_changes(self.mapping, mapping, self.preview_size, size):
+                self.dirty[key] = True
+            self.mapping = mapping
+            self.preview_size = size
             self.schedule_render(50)
             self.changed.emit()
         elif frame_type == STATUS:
             self.set_message(data.get("message") or self.message, bool(data.get("error")))
+            if data.get("takenOver"):
+                self.paused = True
+            # Unity ends the link (the avatar's scene closed, another project took it): its message stays shown.
+            if data.get("closing"):
+                log("Unity ended the link: %s" % self.message)
+                self.disconnect()
         elif frame_type == REQUEST:
             if data.get("kind") == "refresh":
                 for name, entry in self.mapping.items():
@@ -377,7 +631,13 @@ class Link(QtCore.QObject):
             except Exception:
                 pass
             sets.append({"name": ts.name(), "width": resolution.width, "height": resolution.height, "channels": channels})
-        self.structure_sent = self.send(STRUCTURE, {"textureSets": sets})
+        payload = {"textureSets": sets}
+        # Layer edits ask for it again and again: the same texture sets go once.
+        if self.structure_sent and payload == self.last_structure:
+            return
+        self.structure_sent = self.send(STRUCTURE, payload)
+        if self.structure_sent:
+            self.last_structure = payload
 
     # ---- Live renders ----
 
@@ -494,13 +754,23 @@ class Link(QtCore.QObject):
     # ---- Updates ----
 
     def check_update(self):
-        """A newer plugin installed by My Avatar (its file changed): reloads itself, the project and link kept."""
+        """
+        A newer plugin installed by My Avatar (its file changed): reloads itself, the project and link kept. A file that
+        doesn't compile (still being written) waits for the next change.
+        """
         try:
-            if os.path.getmtime(__file__) <= self.loaded_at:
-                return
+            changed = os.path.getmtime(__file__)
         except OSError:
             return
-        self.loaded_at = float("inf")
+        if changed <= self.loaded_at:
+            return
+        self.loaded_at = changed
+        try:
+            with open(__file__, "r", encoding="utf-8") as handle:
+                compile(handle.read(), __file__, "exec")
+        except (OSError, SyntaxError, ValueError) as exception:
+            log("The plugin's new file can't be loaded (%s): waiting for the next one." % exception)
+            return
         log("A new version of the plugin was installed: reloading it.")
         module = sys.modules.get(__name__)
         if module is not None:
@@ -513,6 +783,7 @@ class Link(QtCore.QObject):
         Puts the avatar's new mesh (an OBJ Unity wrote, posed as the project's) in the project, the strokes kept where they
         are on the surface. Waits for Painter to be free and for a stroke under way to end, half a second at a time.
         """
+        self.mesh_path = path
         if not path or not os.path.isfile(path):
             self.mesh_reloaded("the mesh file is missing: %s" % path)
             return
@@ -546,7 +817,10 @@ class Link(QtCore.QObject):
             self.set_message("The avatar's new mesh is in the project.")
             # The texture sets as the new mesh has them, on the next tick.
             self.structure_sent = False
-        self.send(MESH_RELOADED, {"error": error})
+        answer = {"error": error, "path": self.mesh_path}
+        # Unity away meanwhile (its scripts reloading): it gets the answer once linked again.
+        if not (self.connected and self.send(MESH_RELOADED, answer)):
+            self.unsent_mesh_answer = answer
 
     # ---- Commits ----
 
@@ -588,14 +862,21 @@ class Link(QtCore.QObject):
         if not self.connected or not self.mapping:
             return
         wanted = {}
+        stacks = {}
         for name, entry in self.mapping.items():
-            available = entry.get("maps", [])
+            try:
+                stack = substance_painter.textureset.TextureSet.from_name(name).get_stack()
+            except Exception:
+                continue
+            # Only maps the texture set has a channel for (an export of a missing channel fails the whole save).
+            available = exportable(entry.get("maps", []), stack.has_channel)
             maps = [m for m in available if everything or (name, m) in self.touched]
             # Metallic and roughness go together: some shaders read them from one packed texture, others need both set.
             if "roughness" in maps or "metallic" in maps:
                 maps += [m for m in ("roughness", "metallic") if m in available and m not in maps]
             if maps:
                 wanted[name] = maps
+                stacks[name] = stack
         if not wanted:
             return
         self.send(COMMITTING, {})
@@ -604,7 +885,7 @@ class Link(QtCore.QObject):
         os.makedirs(folder, exist_ok=True)
         presets, export_list = [], []
         for name, maps in wanted.items():
-            stack = substance_painter.textureset.TextureSet.from_name(name).get_stack()
+            stack = stacks[name]
             preset = "orbiters_" + str(len(presets))
             presets.append({"name": preset, "maps": [self.map_definition(m, stack) for m in maps]})
             export_list.append({"rootPath": name, "exportPreset": preset})
@@ -649,7 +930,12 @@ class Link(QtCore.QObject):
 
     def check_jobs(self):
         if self.pending_job is not None:
-            return
+            if time.time() - self.pending_since < PENDING_SECONDS:
+                return
+            # The project never opened: another job may run.
+            log("The project for %s never opened." % self.pending_job.get("avatarName", "the avatar"))
+            self.set_message("The project for %s didn't open in Painter: ask again from Unity." % self.pending_job.get("avatarName", "the avatar"), True)
+            self.pending_job = None
         for path in sorted(glob.glob(os.path.join(link_folder(), "jobs", "*.json"))):
             try:
                 with open(path, "r", encoding="utf-8") as handle:
@@ -659,6 +945,12 @@ class Link(QtCore.QObject):
             if job.get("kind") not in (JOB_KIND, OPEN_KIND):
                 continue
             if not pid_alive(job.get("unityPid")) or time.time() - os.path.getmtime(path) > 3600:
+                self.remove(path)
+                continue
+            problem = job_problem(job, link_folder())
+            if problem:
+                log("Job %s refused: %s." % (os.path.basename(path), problem))
+                self.set_message("Unity's request was refused: %s." % problem, True)
                 self.remove(path)
                 continue
             # Taken: another Painter (or a second look) won't run it again.
@@ -727,6 +1019,7 @@ class Link(QtCore.QObject):
             self.remove(path)
             return
         self.pending_job = job
+        self.pending_since = time.time()
         self.remove(path)
         settings = substance_painter.project.Settings(
             normal_map_format=substance_painter.project.NormalMapFormat.OpenGL,
@@ -759,9 +1052,13 @@ class Link(QtCore.QObject):
             "plugin": PLUGIN_VERSION})
         self.avatar_id = job["avatarId"]
         self.avatar_name = job.get("avatarName")
+        self.unity_project = job.get("unityProject")
+        self.paused = False
         path = job.get("project")
         if path:
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            # Linked once saved: Unity knows the project it made by its file.
+            self.awaiting_save = time.time()
 
             def save():
                 self.saving_ourselves = True
@@ -771,6 +1068,7 @@ class Link(QtCore.QObject):
                     self.set_message("The project could not be saved to %s: %s" % (path, exception), True)
                 finally:
                     self.saving_ourselves = False
+                    self.awaiting_save = 0.0
                 self.tick()
 
             substance_painter.project.execute_when_not_busy(save)
@@ -877,7 +1175,7 @@ class Panel(QtWidgets.QWidget):
         link = self.link
         linked = bool(link.avatar_id)
         self.avatars.setVisible(not linked)
-        self.link_button.setText("Unlink" if linked else "Link")
+        self.link_button.setText("Link again" if link.paused else "Unlink" if linked else "Link")
         self.link_button.setEnabled(linked or (self.avatars.count() > 0 and substance_painter.project.is_open()))
         if not substance_painter.project.is_open():
             text = "Open a project, or click Open in Substance in My Avatar (Unity)."
@@ -899,7 +1197,9 @@ class Panel(QtWidgets.QWidget):
         self.detail.setText(" · ".join(detail))
 
     def on_link(self):
-        if self.link.avatar_id:
+        if self.link.paused:
+            self.link.resume()
+        elif self.link.avatar_id:
             self.link.unlink()
         else:
             index = self.avatars.currentIndex()

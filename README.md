@@ -1,5 +1,62 @@
 # My Avatar
 
+## 0.9.12 — 2026-10-20
+
+- **Share My Avatar diagnostics** (Orbiters settings › My Avatar · Diagnostics, off by default) sends My Avatar's own
+  warnings and errors, with their stack traces, to Orbiters through Orbiters Toolkit's shared reporter. The card says it
+  covers every Unity project on the computer and that reports are linked to your Orbiters account while you are signed
+  in. Tokens, keys, cookies, e-mails, links, VRChat ids, other accounts' and avatars' names, your user and computer names
+  and folder paths are removed first; ReFit's, VRCFury's and Unity's logs and tests' deliberate failures are never sent
+  as My Avatar's.
+- **Export FBX** on a refitted accessory writes its refitted meshes as they look fitted (the fit applied, the body's
+  blendshapes kept at their weights) with their armature to one FBX file that Unity and Blender import as it is.
+  Requires Orbiters Toolkit 0.4.1.
+- **Substance 3D Painter link** (see [Substance 3D Painter link](#substance-3d-painter-link-beta), now described):
+  - Live metallic and roughness show as painted: the preview packed them with every pass of its shader and showed
+    (0, 0, 0, 1) whatever was painted (Standard looked like a mirror). Live images are uploaded without a mip chain made
+    on the editor's thread; their mips are made on the GPU.
+  - Closing or reopening the avatar's scene ends the link and tells Painter why; Painter links again once the avatar is
+    back. Before, Painter stayed "linked": its saves were dropped and Scene views repainted every frame.
+  - Only the project Open in Substance made follows the avatar's meshes. A project linked from Painter keeps its own mesh
+    (a Blender export replaced it with the posed avatar, strokes reprojected) and no longer replaces the made project on
+    the avatar. Mesh updates keep the names of the project's texture sets (two materials of one name no longer swap),
+    include the renderers the project was made with that are hidden now, and map a new material's texture set at once. A
+    mesh Painter was loading across a script reload is settled by its answer instead of being loaded twice.
+  - Each save in Painter is imported into new files (`Skin_BaseColor 2.png`, …; the newest four of each map stay): Undo
+    of a save shows the one before. Two texture sets on one material give it the first one's maps instead of failing the
+    whole save, and texture sets whose names make the same file name no longer overwrite each other. Painter's exports
+    are deleted once applied.
+  - Unity reads Painter's images only from the link's folder, and Painter only makes projects from files Unity wrote
+    there, saved where no file is yet. Painter only links to the Unity editor listening on the port its endpoint file
+    names (Windows), and sends the link's token only once that Unity proved it holds it (with an Orbiters Toolkit that
+    answers the live link's proof request; the endpoint file says so). A payload that doesn't hold together closes the
+    connection.
+  - A second Painter project linking the same avatar takes it over once: the first stops linking until you click
+    **Link again** in its panel (they took turns every 1.5 seconds). With two copies of a Unity project open, Painter
+    links through the one the project was linked in.
+  - Painter plugin 1.4.0: installed by its version, never over a newer one (another project's), written whole and dated so
+    a running Painter reloads it; a file that doesn't compile yet is never loaded. Painter renders again only what a
+    mapping changes (a layer edit rendered every channel of every texture set again), exports only the maps a texture set
+    has a channel for, and a project that never opened no longer holds up the next one.
+  - The listener only starts once the plugin is installed. The Painter card no longer reads the plugin files or lists
+    processes at every redraw. Open in Substance keeps its choices across script reloads and no longer adds a timer at
+    each rebuild; posed meshes no longer leak when posing fails; the bones' X-ray and weight paint shown on the avatar are
+    never baked into Painter's mesh.
+  - The project's path is kept from your home folder (`~/Documents/…`): scenes and prefabs no longer hold your user
+    name. On macOS, Unity uses the folders the plugin uses.
+  - The link's folder is cleared once per Unity session of what nobody needs (see the section).
+  - The plugin is in the release package again: the package's file list left `Painter~` out, so **Install the Painter
+    plugin** failed with "missing from the package".
+- Clothing lined up with the original base has its hips put on the original's again when they are a few centimetres off
+  and the armature fit leaves it as it is (0.9.10 left them 1 to 6 cm off). Cancelling or dismissing a line-up puts the
+  clothing back as it was before it, with Undo. Clothing made for the avatar's original base says so instead of "made for
+  another body".
+- The optimization estimate is measured again when a component's settings change (a PhysBone's, a toggle's) and after a
+  package or SDK update; the bones' X-ray shown on the avatar no longer makes it measure again.
+- An upload step that fails and is skipped (menu clean-up, an optimization pass) logs one warning with the exception's
+  details instead of an exception and a warning. A Gallery installation that stops no longer names the asset in the
+  console.
+
 ## 0.9.11 — 2026-10-19
 
 - Requires Orbiters Toolkit 0.4.0, which now draws the bones the Posing section uses; the separate gizmos package is no longer needed.
@@ -735,6 +792,40 @@ contact and reference, who may use it as an avatar (only you, people you allow, 
 violent or sexual use, redistribution and modification are allowed, all off by default. Many bases forbid converting
 them to other formats: **The model's license allows VRM** must be on before Export. The file's license in VRM 0.x
 follows the switches (redistribution prohibited, else CC BY with NC and ND as they say).
+
+## Substance 3D Painter link (beta)
+
+The Painter card shows under Export to VRM when Substance 3D Painter is installed (Adobe's installer or Steam). It is on
+by default; turn it off in **Settings** (bottom toolbar) › Features › My Avatar › Substance 3D Painter link.
+
+- **Open in Substance** poses a hidden copy of the avatar for painting (arms level, legs apart, fingers spread, the mouth
+  open, centered for Painter's symmetry, with copies in natural poses if you want them) and Painter makes a project of
+  it: a texture set per material, the avatar's textures in a "From Unity" layer, its normal maps as the baked normals.
+  The avatar in your scene is never posed.
+- **Live**: what you paint shows on the avatar in Unity a moment after each stroke, through the renderers' property
+  blocks (never saved, never in Undo). **Saving in Painter** applies the maps you painted to the avatar's materials as
+  a texture drop does, with Undo. The card maps each texture set to the material it paints.
+- **Mesh updates**: when MCB applies a Blender export (or shows Blender's edits live), the project Open in Substance
+  made gets the avatar's new mesh, posed as it was made, the strokes kept on the surface. A project you linked from
+  Painter's My Avatar panel keeps its own mesh.
+
+What it installs, runs and writes:
+
+- **A Python plugin in Painter**: installing it (the card's button, Open in Substance or Open the project) copies
+  `orbiters_my_avatar.py` into Painter's startup folder (`Documents/Adobe/Adobe Substance 3D Painter/python/startup`).
+  Painter runs it at every start and reloads it when My Avatar installs a newer one; it adds a **My Avatar** panel.
+  Delete the file to remove it.
+- **A listener on this computer**: once the plugin is installed, each Unity editor listens on 127.0.0.1 (a port the
+  system picks; nothing from outside the computer reaches it) and writes its port, a random token and the names of the
+  avatars in its open scenes to `%LOCALAPPDATA%/Orbiters/PainterLink/unity-<pid>.json`, deleted when Unity quits. Painter
+  links only to the Unity editor listening on that port, has it prove it holds the token before sending it, and proves
+  the token itself before Unity reads anything it sends.
+- **Files**: live images (`live/`), saved maps (`commit/`, deleted once applied), what projects are made from
+  (`projects/`) and mesh updates (`meshes/`), all under `%LOCALAPPDATA%/Orbiters/PainterLink` (on macOS
+  `~/Library/Application Support/Orbiters/PainterLink`), cleared once per Unity session of what nobody needs (applied
+  exports, live images of Painters that closed, project sources and meshes older than a week, old jobs and endpoint
+  files). Projects are saved in `Documents/Orbiters/Painter/<Unity project>/`; saved maps are imported into
+  `Assets/Orbiters/MyAvatar/<batch>/Painter`. The avatar keeps its project's path from your home folder (`~/Documents/…`).
 
 ## Materials that don't render
 

@@ -7,6 +7,7 @@ using NUnit.Framework;
 using Orbiters.Toolkit.Editor.Refit;
 using Orbiters.Toolkit.Editor.VRChat.Refit;
 using Orbiters.Toolkit.VRChat;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -179,6 +180,119 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(note.fitBase, Is.EqualTo("Muscle Orbit 1.0"));
             Assert.That(note.fitKey, Is.EqualTo("test:14:1.0"));
             Assert.That(note.fitShapes, Is.EqualTo(1));
+        }
+
+        // Clothing made for the original base whose hips stand 2 cm above the original's: within the armature fit's
+        // thresholds, so the fit leaves it, and lining up still puts its hips on the original's (0.9.10 left them off).
+        [Test] public void LiningUpPutsHipsALittleOffOnTheOriginals()
+        {
+            var root = Own(new GameObject("Humanoid avatar"));
+            SceneManager.MoveGameObjectToScene(root, scene);
+            root.AddComponent<MyAvatar>();
+            Humanoid(root.transform);
+            // The original base: the same skeleton, its body skinned to it.
+            var original = Own(new GameObject("Original base"));
+            SceneManager.MoveGameObjectToScene(original, scene);
+            var bones = Humanoid(original.transform);
+            Skinned("Body", original.transform, bones.Values.ToArray());
+            // A jacket rigged on the original's hips, spine and chest, 2 cm high.
+            var jacket = new GameObject("Jacket");
+            jacket.transform.SetParent(root.transform, false);
+            var jacketHips = new GameObject("Hips").transform;
+            jacketHips.SetParent(jacket.transform, false);
+            jacketHips.localPosition = new Vector3(0, 1.02f, 0);
+            var spine = new GameObject("Spine").transform;
+            spine.SetParent(jacketHips, false);
+            spine.localPosition = new Vector3(0, .1f, 0);
+            var chest = new GameObject("Chest").transform;
+            chest.SetParent(spine, false);
+            chest.localPosition = new Vector3(0, .15f, 0);
+            Skinned("Jacket mesh", jacket.transform, new[] { jacketHips, spine, chest });
+            var attachment = jacket.AddComponent<OrbitersAttachment>();
+            var measure = Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentFit.Compare(jacket, original.transform);
+            Assert.That(measure, Is.Not.Null, "Precondition: the jacket's bones are the original's.");
+            Assert.That(measure.NeedsFit, Is.False, "Precondition: 2 cm is within the armature fit's thresholds.");
+            AccessoryFit.LineUp(attachment, original.transform, bones["Hips"]);
+            Assert.That(Vector3.Distance(jacketHips.position, bones["Hips"].position), Is.LessThan(.001f));
+            Undo.ClearUndo(jacket.transform);
+        }
+
+        // A skinned mesh of three vertices on these bones.
+        private void Skinned(string name, Transform parent, Transform[] bones)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var mesh = Own(new Mesh
+            {
+                name = name, vertices = new[] { Vector3.up, Vector3.up + Vector3.right * .1f, Vector3.up + Vector3.forward * .1f }, triangles = new[] { 0, 1, 2 },
+                boneWeights = Enumerable.Repeat(new BoneWeight { boneIndex0 = 0, weight0 = 1 }, 3).ToArray(),
+                bindposes = bones.Select(b => b.worldToLocalMatrix * go.transform.localToWorldMatrix).ToArray(),
+            });
+            var renderer = go.AddComponent<SkinnedMeshRenderer>();
+            renderer.sharedMesh = mesh;
+            renderer.bones = bones;
+            renderer.rootBone = bones[0];
+        }
+
+        // Cancelling a line-up puts the accessory back as it was before it (its bones and what the fit recorded).
+        [Test] public void CancellingALineUpPutsTheAccessoryBack()
+        {
+            var (_, attachment) = Setup();
+            var bone = attachment.transform.GetChild(0);
+            var position = attachment.transform.position;
+            var rotation = bone.localRotation;
+            var before = new AccessoryFit.Snapshot(attachment);
+            attachment.transform.position += Vector3.up * .08f;
+            bone.localRotation = Quaternion.Euler(0, 30, 0);
+            attachment.fitted.Add(new OrbitersAttachment.FittedPose { transform = attachment.transform });
+            before.Restore();
+            Assert.That(Vector3.Distance(attachment.transform.position, position), Is.LessThan(1e-5f));
+            Assert.That(Quaternion.Angle(bone.localRotation, rotation), Is.LessThan(.01f));
+            Assert.That(attachment.fitted, Is.Empty);
+            Undo.ClearUndo(attachment);
+            Undo.ClearUndo(attachment.transform);
+            Undo.ClearUndo(bone);
+        }
+
+        // A humanoid skeleton (hips 1 m up) and its Animator.
+        private Dictionary<string, Transform> Humanoid(Transform root)
+        {
+            var human = new Dictionary<string, Transform>();
+            void Add(string name, string parent, Vector3 position)
+            {
+                var bone = new GameObject(name).transform;
+                bone.SetParent(parent == null ? root : human[parent], false);
+                bone.localPosition = position;
+                human[name] = bone;
+            }
+            Add("Hips", null, new Vector3(0, 1, 0)); Add("Spine", "Hips", new Vector3(0, .1f, 0)); Add("Chest", "Spine", new Vector3(0, .15f, 0));
+            Add("Neck", "Chest", new Vector3(0, .24f, 0)); Add("Head", "Neck", new Vector3(0, .08f, 0));
+            foreach (var side in new[] { "L", "R" })
+            {
+                float x = side == "L" ? -1 : 1;
+                Add("UpperArm" + side, "Chest", new Vector3(.15f * x, .15f, 0)); Add("LowerArm" + side, "UpperArm" + side, new Vector3(.25f * x, 0, 0));
+                Add("Hand" + side, "LowerArm" + side, new Vector3(.25f * x, 0, 0));
+                Add("UpperLeg" + side, "Hips", new Vector3(.1f * x, -.05f, 0)); Add("LowerLeg" + side, "UpperLeg" + side, new Vector3(0, -.45f, 0));
+                Add("Foot" + side, "LowerLeg" + side, new Vector3(0, -.45f, 0));
+            }
+            var map = new Dictionary<string, string>
+            {
+                ["Hips"] = "Hips", ["Spine"] = "Spine", ["Chest"] = "Chest", ["Neck"] = "Neck", ["Head"] = "Head",
+                ["LeftUpperArm"] = "UpperArmL", ["LeftLowerArm"] = "LowerArmL", ["LeftHand"] = "HandL",
+                ["RightUpperArm"] = "UpperArmR", ["RightLowerArm"] = "LowerArmR", ["RightHand"] = "HandR",
+                ["LeftUpperLeg"] = "UpperLegL", ["LeftLowerLeg"] = "LowerLegL", ["LeftFoot"] = "FootL",
+                ["RightUpperLeg"] = "UpperLegR", ["RightLowerLeg"] = "LowerLegR", ["RightFoot"] = "FootR",
+            };
+            var description = new HumanDescription
+            {
+                human = map.Select(pair => new HumanBone { humanName = pair.Key, boneName = pair.Value, limit = new HumanLimit { useDefaultValues = true } }).ToArray(),
+                skeleton = root.GetComponentsInChildren<Transform>(true).Select(t => new SkeletonBone { name = t.name, position = t.localPosition, rotation = t.localRotation, scale = t.localScale }).ToArray(),
+                upperArmTwist = .5f, lowerArmTwist = .5f, upperLegTwist = .5f, lowerLegTwist = .5f, armStretch = .05f, legStretch = .05f,
+            };
+            var avatar = Own(AvatarBuilder.BuildHumanAvatar(root.gameObject, description));
+            root.gameObject.AddComponent<Animator>().avatar = avatar;
+            Assert.That(root.GetComponent<Animator>().isHuman, Is.True);
+            return human;
         }
 
         // A body whose arm skin "Flex arms" moves, and a sleeve 1 cm from it.

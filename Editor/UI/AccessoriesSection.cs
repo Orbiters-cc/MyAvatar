@@ -430,6 +430,12 @@ namespace Orbiters.MyAvatar.Editor
                 if (attachment.mode == OrbitersAttachment.AttachMode.Parent)
                     top.Add(Small("Bone ▾", () => BoneMenu(item)));
                 top.Add(Small("Select", () => Select(item.gameObject)));
+                if (RefitFbxExport.Applied(item.transform).Count > 0)
+                {
+                    var export = Small("Export FBX", () => RefitFbxExport.Save(RefitFbxExport.Applied(item.transform), item.name));
+                    export.tooltip = "Writes its refitted meshes as they look fitted, with their bones and blendshapes, to an FBX file.";
+                    top.Add(export);
+                }
                 top.Add(Small("Remove", () =>
                 {
                     entry.style.display = DisplayStyle.None;

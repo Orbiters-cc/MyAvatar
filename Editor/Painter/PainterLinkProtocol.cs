@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Orbiters.Toolkit.Editor.LiveLink;
@@ -17,8 +18,13 @@ namespace Orbiters.MyAvatar.Editor.Painter
     /// metadata and connects again on its own. Projects Unity asks Painter to create are jobs in <c>jobs/</c> (see
     /// <see cref="PainterProjectJob"/>).
     ///
-    /// Transport: Toolkit's live link format (TCP on 127.0.0.1, magic "ORPL", version <see cref="Version"/>), every frame
-    /// with the editor's token. Payloads are UTF-8 JSON; images travel as files Painter writes in the link's temporary folder.
+    /// Transport: Toolkit's live link format (TCP on 127.0.0.1, magic "ORPL", version <see cref="Version"/>). Painter's
+    /// frames carry the editor's token, Hello first; Unity reads nothing else from a connection until it proved the token,
+    /// and Painter reads no token in Unity's frames. Painter only connects to the port the endpoint's Unity listens on and,
+    /// when the endpoint offers it (<see cref="Endpoint.proof"/>), first asks Unity to prove it holds the token (Toolkit's
+    /// type 0 frame, <c>LiveLinkFormat.Proof</c>): it sends the token only then.
+    /// Payloads are UTF-8 JSON; images travel as files Painter writes in the link's folder, and Unity only reads them
+    /// there (<c>live/</c> for live images, <c>commit/</c> for saved maps).
     /// <list type="bullet">
     /// <item>Hello (Painter): <see cref="Hello"/>, which avatar the project is linked to. Unity answers Welcome
     /// (<see cref="Welcome"/>: the avatar's materials and the mapping it knows), or Status with an error and closes.</item>
@@ -29,9 +35,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
     /// shortly after a stroke). Several waiting for one channel collapse to the newest.</item>
     /// <item>Committing (Painter): the project is being saved and its maps exported. Commit (Painter):
     /// <see cref="Commit"/>, the exported maps: Unity applies them to the materials, as a texture drop does.</item>
-    /// <item>Status (Unity): <see cref="Status"/>, what Painter's panel shows. Request (Unity): <see cref="Request"/>, render
-    /// again ("refresh"), export now ("commit"), or put a new mesh of the avatar in the project ("reloadMesh", with its OBJ:
-    /// the avatar's meshes changed). MeshReloaded (Painter): <see cref="MeshReloaded"/>, how that went.</item>
+    /// <item>Status (Unity): <see cref="Status"/>, what Painter's panel shows; with <see cref="Status.closing"/>, Unity
+    /// ends the link (Painter closes it and keeps the message). Request (Unity): <see cref="Request"/>, render again
+    /// ("refresh"), export now ("commit"), or put a new mesh of the avatar in the project ("reloadMesh", with its OBJ:
+    /// the avatar's meshes changed). MeshReloaded (Painter): <see cref="MeshReloaded"/>, how that went (sent once Painter is
+    /// linked again when Unity was away meanwhile).</item>
     /// <item>Bye (either way): the connection closes.</item>
     /// </list>
     /// </summary>
@@ -63,9 +71,38 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
         public static readonly LiveLinkFormat Format = new LiveLinkFormat(Magic, Version, MaxPayloadBytes, type => Enum.IsDefined(typeof(FrameType), type));
 
+        /// <summary>
+        /// Whether the Toolkit's live link server answers proof requests (Toolkit releases before it close the connection
+        /// on one, so the endpoint only offers it when it does). The same check as Mixer's link.
+        /// </summary>
+        public static readonly bool ServerProvesToken =
+            typeof(LiveLinkFormat).GetMethod("Proof", new[] { typeof(string), typeof(int), typeof(byte[]) }) != null;
+
         public static byte[] Json(object value) => Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(value));
 
         public static T Read<T>(byte[] payload) => JsonConvert.DeserializeObject<T>(Encoding.UTF8.GetString(payload ?? Array.Empty<byte>()));
+
+        /// <summary>
+        /// A payload read from Painter, as it is used: lists that are missing become empty, entries that are null or unnamed
+        /// go; null when what is left can't be used (a texture without its set, channel or file).
+        /// </summary>
+        public static object Checked(object payload)
+        {
+            switch (payload)
+            {
+                case Structure structure:
+                    structure.textureSets = (structure.textureSets ?? new List<TextureSetInfo>()).Where(s => s != null && !string.IsNullOrEmpty(s.name)).ToList();
+                    foreach (var set in structure.textureSets) set.channels = (set.channels ?? new List<string>()).Where(c => c != null).ToList();
+                    return structure;
+                case Texture texture:
+                    return string.IsNullOrEmpty(texture.textureSet) || string.IsNullOrEmpty(texture.channel) || string.IsNullOrEmpty(texture.path) ? null : texture;
+                case Commit commit:
+                    commit.maps = (commit.maps ?? new List<CommitMap>()).Where(m => m != null && !string.IsNullOrEmpty(m.textureSet) && !string.IsNullOrEmpty(m.map)).ToList();
+                    return commit;
+                default:
+                    return payload;
+            }
+        }
 
         // ---- Payloads (field names are the JSON's) ----
 
@@ -77,6 +114,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
             public string host = "127.0.0.1";
             public int port;
             public string token;
+            /// <summary>Unity answers proof requests: Painter checks Unity holds the token before it sends it.</summary>
+            public bool proof = ServerProvesToken;
             public string projectName, projectPath;
             public List<EndpointAvatar> avatars = new List<EndpointAvatar>();
         }
@@ -170,6 +209,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
             public bool error;
             /// <summary>The texture sets shown live on the avatar.</summary>
             public List<string> live = new List<string>();
+            /// <summary>Unity ends the link after this (the avatar's scene closed, another project took the avatar): Painter
+            /// closes the connection and keeps the message instead of saying Unity went away.</summary>
+            public bool closing;
+            /// <summary>Another Painter project linked to the avatar: this one stops linking on its own until asked to.</summary>
+            public bool takenOver;
         }
 
         public sealed class Request
@@ -183,6 +227,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
         {
             /// <summary>Why Painter could not load the mesh, or null when the project has it.</summary>
             public string error;
+            /// <summary>The OBJ the answer is about (the <see cref="Request.path"/> it answers).</summary>
+            public string path;
         }
     }
 }

@@ -590,7 +590,42 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             return stats;
         }
 
-        // Measured again once the avatar's objects, components, meshes, materials or imported assets change.
+        // ---- Settings edited ----------------------------------------------------------------------------------
+
+        // Settings of a component edited in an open scene (an Inspector, a tool with Undo): what an upload makes may change.
+        // Kept across script reloads, like the estimates keyed by it.
+        private const string EditsKey = "Orbiters.MyAvatar.OptimizationEstimate.Edits";
+        private static int? edits;
+        private static int Edits => edits ??= SessionState.GetInt(EditsKey, 0);
+
+        [InitializeOnLoadMethod]
+        private static void WatchEdits() => ObjectChangeEvents.changesPublished += Published;
+
+        private static void Published(ref ObjectChangeEventStream stream)
+        {
+            for (int i = 0; i < stream.length; i++)
+            {
+                if (stream.GetEventType(i) != ObjectChangeKind.ChangeGameObjectOrComponentProperties) continue;
+                stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var change);
+                if (!(EditorUtility.InstanceIDToObject(change.instanceId) is Component component) || !SettingsMatter(component)) continue;
+                edits = Edits + 1;
+                SessionState.SetInt(EditsKey, edits.Value);
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Whether editing this component's settings may change what an upload makes (a PhysBone's, a toggle's). Not the
+        /// components whose settings that matter are keyed already (renderers, the avatar's My Avatar), those that change
+        /// without changing the upload (transforms, the Animator, the descriptor), editor tools' own, nor the copies
+        /// estimates and previews work on.
+        /// </summary>
+        internal static bool SettingsMatter(Component component) =>
+            !(component is Transform || component is Renderer || component is Animator || component is MyAvatar ||
+              component is VRC.SDK3.Avatars.Components.VRCAvatarDescriptor) &&
+            !TextureOptimization.EditorHelper(component) && component.gameObject.scene.IsValid() && !EditorSceneManager.IsPreviewScene(component.gameObject.scene);
+
+        // Measured again once the avatar's objects, components (their settings too), meshes, materials or imported assets change.
         private static string Key(MyAvatar avatar, OptimizationPasses passes)
         {
             var key = new System.Text.StringBuilder().Append((int)passes).Append('|').Append(TextureOptimization.ChangeKey(avatar));
@@ -600,13 +635,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             key.Append('|').Append(TextureOptimization.PlatformName(TextureOptimization.Mobile));
             foreach (var component in TextureOptimization.AvatarRoot(avatar).GetComponentsInChildren<Component>(true))
             {
-                if (component == null) continue;
+                if (component == null || TextureOptimization.EditorHelper(component)) continue;
                 key.Append(',').Append(component.GetInstanceID());
                 if (component is Transform t) key.Append(t.gameObject.activeSelf ? '+' : '-');
                 else if (component is Behaviour b) key.Append(b.enabled ? '+' : '-');
                 else if (component is Renderer r) key.Append(r.enabled ? '+' : '-');
             }
-            return key.ToString();
+            return key.Append('|').Append(Edits).ToString();
         }
     }
 }

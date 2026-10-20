@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Orbiters.Toolkit.Editor.Processes;
 using UnityEditor;
 using UnityEngine;
@@ -53,19 +54,26 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 yield return Path.Combine(folder, ExecutableName + ".exe");
         }
 
-        /// <summary>Whether Painter is running (it then picks up project jobs on its own).</summary>
+        private const double RunningSeconds = 2d;
+        private static bool running;
+        private static double runningAt = -1;
+
+        /// <summary>Whether Painter is running (it then picks up project jobs on its own); looked up every 2 seconds at most.</summary>
         internal static bool Running
         {
             get
             {
+                double now = EditorApplication.timeSinceStartup;
+                if (runningAt >= 0 && now - runningAt < RunningSeconds) return running;
+                runningAt = now;
                 try
                 {
                     var processes = Process.GetProcessesByName(ExecutableName);
-                    bool running = processes.Length > 0;
+                    running = processes.Length > 0;
                     foreach (var process in processes) process.Dispose();
-                    return running;
                 }
-                catch (Exception) { return false; }
+                catch (Exception) { running = false; }
+                return running;
             }
         }
 
@@ -120,10 +128,14 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// </summary>
         internal static (bool Opening, string Message) OpenProject(MyAvatar avatar)
         {
-            string project = avatar.painter.projectPath;
+            string project = PainterLinkService.ProjectPath(avatar);
             string name = Path.GetFileName(project);
             if (string.IsNullOrEmpty(project) || !File.Exists(project)) return (false, "The project is gone: " + project + ". Open in Substance makes a new one.");
-            if (!Running) return Launch(project) ? (true, "Painter starts on " + name + "…") : (false, "Substance 3D Painter wasn't found.");
+            if (!Running)
+            {
+                runningAt = -1;
+                return Launch(project) ? (true, "Painter starts on " + name + "…") : (false, "Substance 3D Painter wasn't found.");
+            }
             var plugin = RunningPlugin;
             if (plugin == null || plugin < Opens)
                 return (false, "The Painter that is open runs an older My Avatar plugin: open " + name + " from its File menu, or restart Painter " +
@@ -139,28 +151,85 @@ namespace Orbiters.MyAvatar.Editor.Painter
         }
 
         /// <summary>Painter's user folder (Documents/Adobe/Adobe Substance 3D Painter), where it loads Python plugins from.</summary>
-        internal static string UserFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Adobe", ExecutableName);
+        internal static string UserFolder => Path.Combine(PainterLinkService.Documents, "Adobe", ExecutableName);
 
         /// <summary>The plugin's file in Painter's startup folder: Painter runs it whenever it starts.</summary>
         internal static string PluginPath => Path.Combine(UserFolder, "python", "startup", PluginName + ".py");
 
-        /// <summary>Whether the plugin Painter runs is this package's (a newer My Avatar brings a newer plugin).</summary>
+        /// <summary>Whether My Avatar's plugin is in Painter's startup folder (any version).</summary>
+        internal static bool PluginInstalled => File.Exists(PluginPath);
+
+        private static readonly Regex VersionLine = new Regex(@"^PLUGIN_VERSION\s*=\s*""([0-9]+(?:\.[0-9]+){1,3})""", RegexOptions.Multiline);
+        private static (string Stamp, Version Version) installed, bundled;
+
+        /// <summary>The version a plugin file declares (its <c>PLUGIN_VERSION</c>), or null; read again only when the file changes.</summary>
+        internal static Version VersionOf(string path, ref (string Stamp, Version Version) cache)
+        {
+            try
+            {
+                var file = new FileInfo(path);
+                if (!file.Exists) return null;
+                string stamp = file.Length + ":" + file.LastWriteTimeUtc.Ticks;
+                if (cache.Stamp != stamp)
+                {
+                    var match = VersionLine.Match(File.ReadAllText(path));
+                    cache = (stamp, match.Success && Version.TryParse(match.Groups[1].Value, out var version) ? version : null);
+                }
+                return cache.Version;
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>The plugin version this package brings.</summary>
+        internal static Version BundledPlugin => VersionOf(Path.GetFullPath(PluginSource), ref bundled);
+
+        /// <summary>The plugin version in Painter's startup folder, or null.</summary>
+        internal static Version InstalledPlugin => VersionOf(PluginPath, ref installed);
+
+        /// <summary>
+        /// Whether the plugin Painter runs is this package's or newer (another project's newer My Avatar may have installed a
+        /// newer one: it stays).
+        /// </summary>
         internal static bool PluginCurrent
         {
             get
             {
-                try { return File.Exists(PluginPath) && File.ReadAllText(PluginPath) == File.ReadAllText(Path.GetFullPath(PluginSource)); }
-                catch (Exception) { return false; }
+                var have = InstalledPlugin;
+                var bring = BundledPlugin;
+                return have != null && bring != null && have >= bring;
             }
         }
 
-        /// <summary>Installs (or updates) the plugin; Painter loads it at its next start.</summary>
-        internal static void InstallPlugin()
+        /// <summary>
+        /// Installs (or updates) the plugin, never over a newer one; false when there was nothing to do. Written whole (a
+        /// running plugin never reloads a half-copied file) and dated now: a running Painter reloads it at once.
+        /// </summary>
+        internal static bool InstallPlugin()
         {
             string source = Path.GetFullPath(PluginSource);
             if (!File.Exists(source)) throw new FileNotFoundException("My Avatar's Painter plugin is missing from the package.", source);
+            if (PluginCurrent) return false;
             Directory.CreateDirectory(Path.GetDirectoryName(PluginPath));
-            File.Copy(source, PluginPath, true);
+            string temp = PluginPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.Copy(source, temp, true);
+                File.SetLastWriteTimeUtc(temp, DateTime.UtcNow);
+                if (!File.Exists(PluginPath)) File.Move(temp, PluginPath);
+                else
+                {
+                    // A Documents folder some sync tool holds may refuse the swap: copied over then (the file is whole already).
+                    try { File.Replace(temp, PluginPath, null); }
+                    catch (IOException) { File.Copy(temp, PluginPath, true); }
+                }
+                File.SetLastWriteTimeUtc(PluginPath, DateTime.UtcNow);
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (Exception) { }
+            }
+            return true;
         }
     }
 }
