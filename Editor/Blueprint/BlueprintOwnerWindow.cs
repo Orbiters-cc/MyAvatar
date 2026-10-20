@@ -23,9 +23,11 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static void ShowAfterSdkDialog(PipelineManager pipeline, BlueprintOwnershipResult result)
         {
+            // The other account's display name and its avatar's name stay in the window: the Console (and diagnostics) never
+            // hold a third party's name.
             Debug.LogWarning("[My Avatar] Build & Publish stopped before the build: the blueprint ID " + result.AvatarId + " of " +
-                             (pipeline != null ? pipeline.gameObject.name : "the avatar") + " belongs to " + Describe(result) +
-                             ". VRChat would refuse the upload. Clear the ID to upload it as a new avatar.");
+                             (pipeline != null ? pipeline.gameObject.name : "the avatar") + " belongs to an avatar another VRChat account" +
+                             " published. VRChat would refuse the upload. Clear the ID to upload it as a new avatar.");
             // The SDK shows its modal dialog right after the callback; editor updates resume once it is closed.
             void Open()
             {
@@ -41,12 +43,6 @@ namespace Orbiters.MyAvatar.Editor
             }
 
             EditorApplication.update += Open;
-        }
-
-        private static string Describe(BlueprintOwnershipResult result)
-        {
-            string avatar = string.IsNullOrEmpty(result.AvatarName) ? "an avatar" : "“" + result.AvatarName + "”";
-            return avatar + " published by " + (string.IsNullOrEmpty(result.OwnerName) ? "another VRChat account" : result.OwnerName);
         }
 
         private void CreateGUI()

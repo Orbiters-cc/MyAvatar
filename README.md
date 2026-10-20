@@ -72,6 +72,8 @@
 - An upload step that fails and is skipped (menu clean-up, an optimization pass) logs one warning with the exception's
   details instead of an exception and a warning. A Gallery installation that stops no longer names the asset in the
   console.
+- The Console warning of the blueprint ID check no longer names the other VRChat account or its avatar (the window still
+  does).
 
 ## 0.9.11 — 2026-10-19
 
