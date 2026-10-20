@@ -37,5 +37,28 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
             finally { EditorSceneManager.ClosePreviewScene(scene); }
         }
+
+        // A setting edited counts for the avatars whose upload holds it only: a light or another avatar measures nothing again.
+        [Test] public void SettingsCountForTheAvatarsHoldingThem()
+        {
+            var scene = EditorSceneManager.NewPreviewScene();
+            try
+            {
+                var root = new GameObject("Avatar");
+                SceneManager.MoveGameObjectToScene(root, scene);
+                root.AddComponent<MyAvatar>();
+                var hair = new GameObject("Hair");
+                hair.transform.SetParent(root.transform, false);
+                var light = new GameObject("Light");
+                SceneManager.MoveGameObjectToScene(light, scene);
+                Assert.That(Optimization.OptimizationEstimate.RootsOf(hair.transform), Is.EqualTo(new[] { root }));
+                Assert.That(Optimization.OptimizationEstimate.RootsOf(root.transform), Is.EqualTo(new[] { root }));
+                Assert.That(Optimization.OptimizationEstimate.RootsOf(light.transform), Is.Empty);
+                var seen = new System.Collections.Generic.HashSet<Transform>();
+                Assert.That(Optimization.OptimizationEstimate.RootsOf(hair.transform, seen), Is.EqualTo(new[] { root }));
+                Assert.That(Optimization.OptimizationEstimate.RootsOf(root.transform, seen), Is.Empty, "Found once per change stream.");
+            }
+            finally { EditorSceneManager.ClosePreviewScene(scene); }
+        }
     }
 }

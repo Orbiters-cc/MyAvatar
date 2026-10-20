@@ -64,6 +64,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             /// <summary>The hidden copy being put through the upload's changes, a few of them per editor frame.</summary>
             public Copying Copying;
             public readonly List<Action> Ready = new List<Action>();
+            /// <summary>Since when a tool has been editing the avatar's meshes live (the job waits meanwhile), or null.</summary>
+            public double? PausedSince;
 
             /// <summary>Drops the hidden copy of a job that won't finish (replaced, its avatar gone, a script reload).</summary>
             public void Abandon()
@@ -81,6 +83,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public readonly Dictionary<int, Job> Running = new Dictionary<int, Job>();
             // The last estimate each avatar got, whatever changed since: the card shows its rank while measuring again.
             public readonly Dictionary<int, Result> Last = new Dictionary<int, Result>();
+            // Until when the editor frames skip the jobs: each one waited on live edits when last asked.
+            public double PausedUntil;
         }
 
         private static State state = Restore();
@@ -200,31 +204,70 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// <summary>Makes estimates fail with this message (tests, and captures of the card's failure state).</summary>
         internal static string FailWith;
 
-        /// <summary>Measures every pending estimate now, without waiting for editor frames (tests).</summary>
-        internal static void Finish()
+        /// <summary>
+        /// Measures every pending estimate now, without waiting for editor frames (tests, diagnostics). Live edits of an
+        /// avatar's meshes hold its estimate back only when <paramref name="waitForLiveEdits"/>: then it returns once every
+        /// job left waits on them. Throws when the estimates could not all be measured otherwise.
+        /// </summary>
+        internal static void Finish(bool waitForLiveEdits = false)
         {
             for (int guard = 0; state.Running.Count > 0 && guard < 10000; guard++)
             {
                 foreach (var job in state.Running.Values) job.Measuring?.Deflate.Wait();
-                Tick();
+                if (waitForLiveEdits && Next(true, out _) == null) return;
+                Step(waitForLiveEdits);
             }
+            if (state.Running.Count > 0) throw new InvalidOperationException(state.Running.Count + " optimization estimate(s) still measuring after 10000 steps.");
         }
 
-        // One step of one job per editor frame.
+        // Seconds a job waiting on live edits keeps its hidden copy: one waiting longer (a Mixer mode left on) lets it go and
+        // copies the avatar again once it goes on.
+        private const double KeepCopyWhilePaused = 5;
+        // While every job waits on live edits, they are asked again this often, not every frame.
+        private const double PausedLook = .25;
+
         private static void Tick()
         {
+            if (EditorApplication.timeSinceStartup < state.PausedUntil) return;
+            Step(waitForLiveEdits: true);
+        }
+
+        // The job to advance: the first one whose avatar no tool edits live (Mixer sculpting: its frames come first, and what
+        // it shows is a temporary copy), the others going on meanwhile. One edited live waits, its hidden copy let go if it
+        // waits long. Live edits don't count for tests, nor once Play Mode starts (every job stops).
+        private static Job Next(bool waitForLiveEdits, out int id)
+        {
+            double now = EditorApplication.timeSinceStartup;
+            bool wait = waitForLiveEdits && !EditorApplication.isPlayingOrWillChangePlaymode;
+            foreach (var pair in state.Running)
+            {
+                var job = pair.Value;
+                if (wait && job.Avatar && Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.IsLiveEditing(TextureOptimization.AvatarRoot(job.Avatar).transform))
+                {
+                    job.PausedSince ??= now;
+                    if (now - job.PausedSince.Value > KeepCopyWhilePaused) job.Abandon();
+                    continue;
+                }
+                job.PausedSince = null;
+                id = pair.Key;
+                return job;
+            }
+            id = 0;
+            return null;
+        }
+
+        // One step of one job (see Next) per editor frame.
+        private static void Step(bool waitForLiveEdits)
+        {
             var running = state.Running;
-            var job = running.Values.FirstOrDefault();
-            if (job == null) { EditorApplication.update -= Tick; return; }
-            int id = running.First(p => p.Value == job).Key;
+            if (running.Count == 0) { EditorApplication.update -= Tick; return; }
+            var job = Next(waitForLiveEdits, out int id);
+            if (job == null) { state.PausedUntil = EditorApplication.timeSinceStartup + PausedLook; return; }
             try
             {
                 if (!job.Avatar || EditorApplication.isPlayingOrWillChangePlaymode) { job.Abandon(); running.Remove(id); return; }
                 if (FailWith != null) throw new InvalidOperationException(FailWith);
                 var root = TextureOptimization.AvatarRoot(job.Avatar);
-                // A tool edits the avatar's meshes live (Mixer sculpting): its frames come first, and what it shows is a
-                // temporary copy. The estimate goes on once it is done.
-                if (Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.IsLiveEditing(root.transform)) return;
                 // First the textures' downloads for the platform the project builds for, as they stand and as the upload's
                 // copies (made now, the upload reuses them).
                 bool mobile = TextureOptimization.Mobile;
@@ -596,25 +639,51 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         // ---- Settings edited ----------------------------------------------------------------------------------
 
         // Settings of a component edited in an open scene (an Inspector, a tool with Undo): what an upload makes may change.
-        // Kept across script reloads, like the estimates keyed by it.
-        private const string EditsKey = "Orbiters.MyAvatar.OptimizationEstimate.Edits";
-        private static int? edits;
-        private static int Edits => edits ??= SessionState.GetInt(EditsKey, 0);
+        // Counted for each avatar root holding the component (by its instance ID), so an edit elsewhere (a light, another
+        // avatar) measures no avatar again. Kept across script reloads, like the estimates keyed by them.
+        private const string EditsKey = "Orbiters.MyAvatar.OptimizationEstimate.Edits.";
+        private static readonly Dictionary<int, int> edits = new Dictionary<int, int>();
+
+        private static int Edits(GameObject root)
+        {
+            int id = root.GetInstanceID();
+            if (!edits.TryGetValue(id, out int count)) edits[id] = count = SessionState.GetInt(EditsKey + id, 0);
+            return count;
+        }
 
         [InitializeOnLoadMethod]
         private static void WatchEdits() => ObjectChangeEvents.changesPublished += Published;
 
         private static void Published(ref ObjectChangeEventStream stream)
         {
+            HashSet<GameObject> edited = null;
+            // Objects whose parents were walked already in this stream.
+            var seen = new HashSet<Transform>();
             for (int i = 0; i < stream.length; i++)
             {
                 if (stream.GetEventType(i) != ObjectChangeKind.ChangeGameObjectOrComponentProperties) continue;
                 stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var change);
                 if (!(EditorUtility.InstanceIDToObject(change.instanceId) is Component component) || !SettingsMatter(component)) continue;
-                edits = Edits + 1;
-                SessionState.SetInt(EditsKey, edits.Value);
-                return;
+                foreach (var root in RootsOf(component.transform, seen)) (edited ??= new HashSet<GameObject>()).Add(root);
             }
+            if (edited == null) return;
+            foreach (var root in edited)
+            {
+                int id = root.GetInstanceID(), count = Edits(root) + 1;
+                edits[id] = count;
+                SessionState.SetInt(EditsKey + id, count);
+            }
+        }
+
+        /// <summary>
+        /// The avatar roots (as <see cref="TextureOptimization.AvatarRoot"/> finds them: the descriptor's object, else My
+        /// Avatar's) at or above <paramref name="transform"/>, whose uploads hold it. None above a transform already in
+        /// <paramref name="seen"/> (they were found from it).
+        /// </summary>
+        internal static IEnumerable<GameObject> RootsOf(Transform transform, HashSet<Transform> seen = null)
+        {
+            for (var t = transform; t && (seen == null || seen.Add(t)); t = t.parent)
+                if (t.GetComponent<VRC.SDKBase.VRC_AvatarDescriptor>() || t.GetComponent<MyAvatar>()) yield return t.gameObject;
         }
 
         /// <summary>
@@ -631,12 +700,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         // Measured again once the avatar's objects, components (their settings too), meshes, materials or imported assets change.
         private static string Key(MyAvatar avatar, OptimizationPasses passes)
         {
+            var root = TextureOptimization.AvatarRoot(avatar);
             var key = new System.Text.StringBuilder().Append((int)passes).Append('|').Append(TextureOptimization.ChangeKey(avatar));
             if ((passes & OptimizationPasses.FewerPolygons) != 0) key.Append('|').Append(avatar.uploadOptimization.PolygonQuality.ToString("R", CultureInfo.InvariantCulture));
             if ((passes & OptimizationPasses.ResizeTextures) != 0) key.Append('|').Append(avatar.uploadOptimization.SharpFrom.ToString("R", CultureInfo.InvariantCulture));
             // The platform the textures are planned and measured for.
             key.Append('|').Append(TextureOptimization.PlatformName(TextureOptimization.Mobile));
-            foreach (var component in TextureOptimization.AvatarRoot(avatar).GetComponentsInChildren<Component>(true))
+            foreach (var component in root.GetComponentsInChildren<Component>(true))
             {
                 if (component == null || TextureOptimization.EditorHelper(component)) continue;
                 key.Append(',').Append(component.GetInstanceID());
@@ -644,7 +714,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 else if (component is Behaviour b) key.Append(b.enabled ? '+' : '-');
                 else if (component is Renderer r) key.Append(r.enabled ? '+' : '-');
             }
-            return key.Append('|').Append(Edits).ToString();
+            return key.Append('|').Append(Edits(root)).ToString();
         }
     }
 }

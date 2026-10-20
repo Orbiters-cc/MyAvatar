@@ -461,7 +461,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                             if (posed == null) { runs.Free(result); return null; }
                             shaped.Add((points, normals, posed, normals != null && resultNormals.Length == vertices.Length ? Turned(result, resultNormals, pose) : null));
                         }
-                        bool Fits() => shaped.All(s => MeshParts.Within(s.Points, s.Vertices, triangles, budget, s.Normals, s.VertexNormals));
+                        // Stops between poses once the runs are cancelled (a script reload): each pose's check runs whole.
+                        bool Fits() => shaped.All(s =>
+                        {
+                            token.ThrowIfCancellationRequested();
+                            return MeshParts.Within(s.Points, s.Vertices, triangles, budget, s.Normals, s.VertexNormals);
+                        });
                         bool fits = background ? await Task.Run(Fits, token) : Fits();
                         token.ThrowIfCancellationRequested();
                         if (fits) return result;

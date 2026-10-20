@@ -720,6 +720,33 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(OptimizationEstimate.Latest(settings), Is.SameAs(result));
         }
 
+        // A tool editing one avatar's meshes live (Mixer sculpting) holds back that avatar's estimate only, even when it was
+        // asked for first.
+        [Test] public void AnAvatarEditedLiveHoldsBackOnlyItsOwnEstimate()
+        {
+            Skinned("Body");
+            settings.uploadOptimization.level = OptimizationLevel.Small;
+            var otherRoot = new GameObject("Other avatar");
+            SceneManager.MoveGameObjectToScene(otherRoot, scene);
+            otherRoot.AddComponent<VRCAvatarDescriptor>();
+            var other = otherRoot.AddComponent<MyAvatar>();
+            Func<Transform, bool> editing = avatarRoot => avatarRoot == root.transform;
+            Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.LiveEditing += editing;
+            try
+            {
+                Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null);
+                Assert.That(OptimizationEstimate.Get(other, other.uploadOptimization.Passes, null), Is.Null);
+                OptimizationEstimate.Finish(waitForLiveEdits: true);
+                Assert.That(OptimizationEstimate.Get(other, other.uploadOptimization.Passes, null), Is.Not.Null, "The other avatar is measured meanwhile.");
+                Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null, "The avatar edited live waits.");
+            }
+            finally { Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.LiveEditing -= editing; }
+            OptimizationEstimate.Finish();
+            var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+            Assert.That(result, Is.Not.Null, "Measured once the live edits are over.");
+            Assert.That(result.Error, Is.Null);
+        }
+
         // A failing estimate is kept and shown with its reason: no new attempt (and no new error in the console) every few
         // seconds, until something changes or the card tries again.
         [Test] public void AFailingEstimateIsShownUntilTriedAgain()

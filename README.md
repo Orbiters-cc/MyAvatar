@@ -4,6 +4,7 @@
 
 - The optimization estimate waits while a tool edits the avatar's meshes live (Mixer sculpting or painting): it took
   ~30 ms of every frame and sometimes 2.6 s at once, which made strokes stutter, and measured a temporary copy anyway.
+  Only that avatar's estimate waits: the other avatars' go on, and its hidden copy is let go when the editing lasts.
 - My Avatar works from other views of the avatar (Orbiters Toolkit's `AvatarObjectTools`): Mixer's Hierarchy shows a
   "Drop anything" field on the avatar's row, and what is dropped there goes to My Avatar's drop field (clothing,
   accessories or textures, exactly as there); an accessory whose fit is in question shows "ReFit ?" on its row, which
@@ -61,7 +62,8 @@
   clothing back as it was before it, with Undo. Clothing made for the avatar's original base says so instead of "made for
   another body".
 - The optimization estimate is measured again when a component's settings change (a PhysBone's, a toggle's) and after a
-  package or SDK update; the bones' X-ray shown on the avatar no longer makes it measure again.
+  package or SDK update; the bones' X-ray shown on the avatar no longer makes it measure again. A setting counts for the
+  avatar holding the component only: editing a light or another avatar measures no avatar again.
 - An upload step that fails and is skipped (menu clean-up, an optimization pass) logs one warning with the exception's
   details instead of an exception and a warning. A Gallery installation that stops no longer names the asset in the
   console.
