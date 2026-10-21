@@ -153,7 +153,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             // An update replaces the previous installation only once the new one is in place.
             if (!string.IsNullOrEmpty(job.updateOf))
             {
-                foreach (var old in AttachmentInstaller.Installed(avatar.transform).Where(a => a && a.gallery?.installId == job.updateOf).ToList()) AttachmentInstaller.Remove(old);
+                var olds = AttachmentInstaller.Installed(avatar.transform).Where(a => a && a.gallery?.installId == job.updateOf).ToList();
+                // The settings chosen on the older copy's card (Orb's text slots) carry over.
+                for (int i = 0; i < olds.Count && i < attachments.Count; i++)
+                {
+                    try { AttachmentHooks.CarryOptions(olds[i].gameObject, attachments[i].gameObject); }
+                    catch (Exception ex) { Debug.LogWarning("[My Avatar] " + job.assetName + " was updated without its earlier settings (set them again on its card): " + ex.Message); }
+                }
+                foreach (var old in olds) AttachmentInstaller.Remove(old);
                 GalleryLedger.MarkRemoved(job.updateOf);
             }
             string root = GalleryLedger.ProjectRoot;
