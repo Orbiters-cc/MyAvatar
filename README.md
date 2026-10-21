@@ -1,6 +1,6 @@
 # My Avatar
 
-## 0.9.12 — 2026-10-20
+## 0.9.12 — 2026-10-21
 
 - The optimization estimate waits while a tool edits the avatar's meshes live (Mixer sculpting or painting): it took
   ~30 ms of every frame and sometimes 2.6 s at once, which made strokes stutter, and measured a temporary copy anyway.
