@@ -468,6 +468,24 @@ namespace Orbiters.MyAvatar.Editor
         {
             var row = new VisualElement { tooltip = option.Tooltip }; row.AddToClassList("accessory-item__option");
             var label = new Label(option.Label); label.AddToClassList("accessory-item__option-label"); row.Add(label);
+            if (option.IsToggle)
+            {
+                // The switch moves on press; the change (its first time builds the prop's new controller) runs after that frame.
+                ToggleSwitch toggle = null;
+                toggle = new ToggleSwitch(option.Current == 1, on => row.schedule.Execute(() =>
+                {
+                    try { option.Choose(on ? 1 : 0); option.Current = on ? 1 : 0; }
+                    catch (Exception e)
+                    {
+                        toggle.SetValueWithoutNotify(option.Current == 1);
+                        AccessoryService.Status(avatar, "Could not change " + option.Label.ToLowerInvariant() + ": " + e.Message, true, avatar.accessoryNotes);
+                        return;
+                    }
+                    Schedule();
+                }).StartingIn(30));
+                row.Add(toggle);
+                return row;
+            }
             SegmentedControl choices = null;
             choices = new SegmentedControl(option.Choices.Select((c, i) => new SegmentedControl.Option(c, null, option.ChoiceTooltips?.ElementAtOrDefault(i))), index =>
             {
