@@ -10,6 +10,9 @@
 - A gallery item with a newer version shows Update on its line in Mixer's Hierarchy too (the same update as on its line
   under On this avatar, in the background, the pill saying "Updating…" meanwhile).
 - The gallery's green buttons (Add, Update, Post review) have white text, like the progress bar that takes their place.
+- Upload optimization leaves glyph and font atlases as they are (Orb's panel and screen, avatar text): they are read a
+  letter's cell at a time, so their mesh says nothing of how sharp they must be. Orb's atlas went up at 64 × 128 and its
+  letters showed as blobs.
 
 ## 0.9.12 — 2026-10-21
 

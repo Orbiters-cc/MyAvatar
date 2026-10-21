@@ -60,6 +60,9 @@ namespace Orbiters.MyAvatar.Editor
 
         // Ramps, lookup tables and gradients are read as data: resizing or block compression bands them. HDR sources lose range.
         private static readonly HashSet<string> DataWords = new HashSet<string> { "ramp", "lut", "lookup", "gradient", "gradation", "sdf" };
+        // Glyph and font atlases are read a letter's cell at a time, at coordinates the shader works out (Orb's panel and
+        // screen, avatar text): their mesh says nothing of how sharp they must be, and any shrinking blurs the letters.
+        private static readonly HashSet<string> GlyphWords = new HashSet<string> { "glyph", "glyphs", "font", "fonts" };
 
         internal static string Exclusion(string path, string name, string slot, int width, int height)
         {
@@ -67,7 +70,9 @@ namespace Orbiters.MyAvatar.Editor
             if (extension == ".exr" || extension == ".hdr") return "HDR image";
             int small = Mathf.Min(width, height);
             if (small <= 16 || Mathf.Max(width, height) >= 8 * small) return "ramp or lookup strip";
-            if (TextureMatching.Tokens(name + " " + slot, stem: false).Any(DataWords.Contains)) return "ramp, lookup or gradient data";
+            var tokens = TextureMatching.Tokens(name + " " + slot, stem: false).ToList();
+            if (tokens.Any(DataWords.Contains)) return "ramp, lookup or gradient data";
+            if (tokens.Any(GlyphWords.Contains)) return "glyph or font atlas";
             return null;
         }
 
