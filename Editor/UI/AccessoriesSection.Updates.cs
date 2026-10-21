@@ -41,17 +41,12 @@ namespace Orbiters.MyAvatar.Editor
 
             click = () =>
             {
-                var job = Current();
-                if (job != null && job.stage == GalleryJob.Failed && job.updateOf == installed.installId) { GalleryInstaller.Retry(job); return; }
-                if (GalleryUI.Newer(offered, installed) == null || GalleryInstaller.Busy(avatar)) return;
                 // Seen at once; the installation runs in the background and replaces this row when it is done.
                 button.text = "Updating…"; button.SetEnabled(false);
-                var started = GalleryInstaller.Update(avatar, offered, installed);
-                if (started == null) { button.style.display = DisplayStyle.None; return; }
-                Show(started);
+                Show(GalleryUpdates.Start(avatar, offered, installed) ?? Current());
             };
 
-            GalleryJob Current() => GalleryJournal.For(GalleryInstaller.AvatarId(avatar), installed.assetId);
+            GalleryJob Current() => GalleryUpdates.Job(avatar, installed);
             void JobChanged(GalleryJob job) { if (job != null && job.assetId == installed.assetId) Show(job); }
             // Listening while on screen: docked again (or the Inspector rebuilt), it listens again and catches up.
             GalleryJournal.Changed += JobChanged;

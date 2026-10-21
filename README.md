@@ -7,6 +7,9 @@
   follows; a toggle adds Orb's Walk boost radial to its menu, another (Replace Orbiters overlay) has Orb project its menu
   on a screen before you instead of Orbiters desktop's SteamVR overlay. A card's settings line up in one column. Needs
   Orbiters Toolkit 0.4.2.
+- A gallery item with a newer version shows Update on its line in Mixer's Hierarchy too (the same update as on its line
+  under On this avatar, in the background, the pill saying "Updating…" meanwhile).
+- The gallery's green buttons (Add, Update, Post review) have white text, like the progress bar that takes their place.
 
 ## 0.9.12 — 2026-10-21
 

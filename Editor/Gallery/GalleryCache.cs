@@ -51,6 +51,20 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             catch (Exception) { return null; }
         }
 
+        /// <summary>
+        /// The asset as last read for this avatar, without waiting: null before a first read ends. <paramref name="fresh"/>
+        /// is false when that read is older than a few minutes, failed or never was (<see cref="Asset"/> reads it again).
+        /// </summary>
+        internal static GalleryAsset Peek(MyAvatar avatar, int assetId, out bool fresh)
+        {
+            fresh = false;
+            var context = Known(avatar);
+            if (context == null || !assets.TryGetValue(assetId + "|" + context.Platform + "|" + context.BaseId, out var known) ||
+                known.task.Status != TaskStatus.RanToCompletion) return null;
+            fresh = DateTime.UtcNow - known.at < PageLife;
+            return known.task.Result;
+        }
+
         internal static Task<List<GalleryBase>> Bases()
         {
             if (bases == null || bases.IsFaulted || bases.IsCanceled || DateTime.UtcNow - basesAt > BasesLife)

@@ -11,10 +11,11 @@ namespace Orbiters.MyAvatar.Editor
     /// <summary>
     /// My Avatar in other views of the avatar's objects (Mixer's Hierarchy): a drop on the avatar root goes to its drop
     /// field, and an accessory it added whose fit is in question offers ReFit. Both are done by the avatar's own
-    /// Inspector, so they show and behave exactly as there.
+    /// Inspector, so they show and behave exactly as there. A gallery asset with a newer version offers its update, which
+    /// runs in the background as from its line in My Avatar's list.
     /// </summary>
     [InitializeOnLoad]
-    internal sealed class MyAvatarObjectTool : IAvatarObjectTool
+    internal sealed class MyAvatarObjectTool : IAvatarObjectTool, IAvatarObjectUpdates
     {
         // Seconds after which the avatar opens in an Inspector of its own (the selection showed it in none), and after which
         // what waits for an Inspector is given up: a drop never runs long after it was made.
@@ -33,12 +34,43 @@ namespace Orbiters.MyAvatar.Editor
 
         private static readonly List<Request> Waiting = new List<Request>();
         private static double nextLook;
+        // The step each gallery job was at when the views last heard of it: they refresh on a new step, not on progress.
+        private static readonly Dictionary<string, string> JobSteps = new Dictionary<string, string>();
 
         static MyAvatarObjectTool()
         {
-            AvatarObjectTools.Register(new MyAvatarObjectTool());
+            var tool = new MyAvatarObjectTool();
+            AvatarObjectTools.Register(tool);
+            AvatarObjectTools.RegisterUpdates(tool);
             AccessoryService.Changed += _ => AvatarObjectTools.NotifyChanged();
+            Gallery.GalleryUpdates.Read += AvatarObjectTools.NotifyChanged;
+            Gallery.GalleryJournal.Changed += job =>
+            {
+                if (job == null || (JobSteps.TryGetValue(job.id, out var step) && step == job.stage)) return;
+                JobSteps[job.id] = job.stage;
+                AvatarObjectTools.NotifyChanged();
+            };
             AssemblyReloadEvents.beforeAssemblyReload += () => GiveUp(Waiting.ToList(), "scripts reloaded before an Inspector showed the avatar");
+        }
+
+        public AvatarObjectUpdate UpdateOf(GameObject go)
+        {
+            var attachment = go ? go.GetComponent<OrbitersAttachment>() : null;
+            var installed = attachment ? attachment.gallery : null;
+            if (installed == null || !installed.Installed) return null;
+            var avatar = go.GetComponentInParent<MyAvatar>(true);
+            if (!avatar || EditorUtility.IsPersistent(avatar)) return null;
+            var job = Gallery.GalleryUpdates.Job(avatar, installed);
+            bool running = job != null && !job.Terminal, failed = job != null && job.stage == Gallery.GalleryJob.Failed;
+            var offered = Gallery.GalleryUpdates.Known(avatar, installed.assetId);
+            string newer = Gallery.GalleryUI.Newer(offered, installed);
+            if (newer == null && !running && !failed) return null;
+            return new AvatarObjectUpdate
+            {
+                Name = attachment.DisplayName, From = installed.version, To = newer ?? job.version,
+                Running = running, Failed = failed, Status = running ? job.status : failed ? job.error : null,
+                Start = () => Gallery.GalleryUpdates.Start(avatar, offered, installed),
+            };
         }
 
         private static MyAvatar AvatarOn(GameObject root) => root ? root.GetComponent<MyAvatar>() : null;
