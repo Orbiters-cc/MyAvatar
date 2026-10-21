@@ -1,5 +1,11 @@
 # My Avatar
 
+## 0.9.13 — 2026-10-21
+
+- A prop's own settings show on its card under On this avatar, as a small switch that moves on press: Orb's text slots
+  (4 or 8: 50 or 82 synced bits), so an orb fits an avatar with few free bits. The parameter count below the list
+  follows. Needs Orbiters Toolkit 0.4.2.
+
 ## 0.9.12 — 2026-10-21
 
 - The optimization estimate waits while a tool edits the avatar's meshes live (Mixer sculpting or painting): it took

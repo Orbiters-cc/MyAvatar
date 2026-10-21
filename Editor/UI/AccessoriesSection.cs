@@ -426,6 +426,7 @@ namespace Orbiters.MyAvatar.Editor
                 if (attachment.gallery != null && attachment.gallery.Installed) GalleryUpdate(top, attachment);
                 string description = AccessoryService.Describe(attachment);
                 var how = new Label(description) { tooltip = description }; how.AddToClassList("accessory-item__how"); body.Add(how);
+                foreach (var option in AttachmentHooks.Options(attachment.gameObject)) body.Add(OptionRow(option));
                 var item = attachment;
                 if (attachment.mode == OrbitersAttachment.AttachMode.Parent)
                     top.Add(Small("Bone ▾", () => BoneMenu(item)));
@@ -459,6 +460,34 @@ namespace Orbiters.MyAvatar.Editor
             var budget = Orbiters.Toolkit.Editor.VRChat.Parameters.AvatarParameterBudget.Estimate(avatar.gameObject);
             var cost = new Label(budget.VrcFuryPresent ? $"Menu toggles are VRCFury toggles under Accessories · {budget.TotalBeforeCompression} of 256 parameter bits used" : "Install VRCFury for menu toggles.");
             cost.AddToClassList("accessory-list__cost"); list.Add(cost);
+        }
+
+        // A setting the prop offers (Orb's text slots): its name and a small switch, which shows the new choice at once,
+        // then the parameter budget below the list follows.
+        private VisualElement OptionRow(AttachmentOption option)
+        {
+            var row = new VisualElement { tooltip = option.Tooltip }; row.AddToClassList("accessory-item__option");
+            var label = new Label(option.Label); label.AddToClassList("accessory-item__option-label"); row.Add(label);
+            SegmentedControl choices = null;
+            choices = new SegmentedControl(option.Choices.Select((c, i) => new SegmentedControl.Option(c, null, option.ChoiceTooltips?.ElementAtOrDefault(i))), index =>
+            {
+                if (index == option.Current) return;
+                // The switch moves on press; the change (its first time builds the prop's new controller) runs after that frame.
+                row.schedule.Execute(() =>
+                {
+                    try { option.Choose(index); option.Current = index; }
+                    catch (Exception e)
+                    {
+                        choices.SetIndex(option.Current);
+                        AccessoryService.Status(avatar, "Could not change " + option.Label.ToLowerInvariant() + ": " + e.Message, true, avatar.accessoryNotes);
+                        return;
+                    }
+                    Schedule();
+                }).StartingIn(30);
+            });
+            if (option.Current >= 0) choices.SetIndex(option.Current);
+            row.Add(choices);
+            return row;
         }
 
         private void BoneMenu(OrbitersAttachment attachment)
