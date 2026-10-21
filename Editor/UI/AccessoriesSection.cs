@@ -427,6 +427,7 @@ namespace Orbiters.MyAvatar.Editor
                 string description = AccessoryService.Describe(attachment);
                 var how = new Label(description) { tooltip = description }; how.AddToClassList("accessory-item__how"); body.Add(how);
                 foreach (var option in AttachmentHooks.Options(attachment.gameObject)) body.Add(OptionRow(option));
+                LineUpOptions(body);
                 var item = attachment;
                 if (attachment.mode == OrbitersAttachment.AttachMode.Parent)
                     top.Add(Small("Bone ▾", () => BoneMenu(item)));
@@ -460,6 +461,18 @@ namespace Orbiters.MyAvatar.Editor
             var budget = Orbiters.Toolkit.Editor.VRChat.Parameters.AvatarParameterBudget.Estimate(avatar.gameObject);
             var cost = new Label(budget.VrcFuryPresent ? $"Menu toggles are VRCFury toggles under Accessories · {budget.TotalBeforeCompression} of 256 parameter bits used" : "Install VRCFury for menu toggles.");
             cost.AddToClassList("accessory-list__cost"); list.Add(cost);
+        }
+
+        // A card's settings take the widest label's width, so their switches start in one column.
+        private static void LineUpOptions(VisualElement body)
+        {
+            var labels = body.Query<Label>(className: "accessory-item__option-label").ToList();
+            if (labels.Count < 2) return;
+            body.RegisterCallback<GeometryChangedEvent>(_ =>
+            {
+                float widest = Mathf.Ceil(labels.Max(l => l.layout.width));
+                foreach (var label in labels) if (Mathf.Abs(label.resolvedStyle.minWidth.value - widest) > .5f) label.style.minWidth = widest;
+            });
         }
 
         // A setting the prop offers (Orb's text slots): its name and a small switch, which shows the new choice at once,

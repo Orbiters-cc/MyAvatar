@@ -4,7 +4,9 @@
 
 - A prop's own settings show on its card under On this avatar, as a small switch that moves on press: Orb's text slots
   (4 or 8: 50 or 82 synced bits), so an orb fits an avatar with few free bits. The parameter count below the list
-  follows; a toggle adds Orb's Walk boost radial to its menu. Needs Orbiters Toolkit 0.4.2.
+  follows; a toggle adds Orb's Walk boost radial to its menu, another (Replace Orbiters overlay) has Orb project its menu
+  on a screen before you instead of Orbiters desktop's SteamVR overlay. A card's settings line up in one column. Needs
+  Orbiters Toolkit 0.4.2.
 
 ## 0.9.12 — 2026-10-21
 
