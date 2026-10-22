@@ -153,6 +153,8 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V1
 
         // ---- Materials ----
 
+        private static Color Clamped(Color c) => new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+
         private static void Materials(VrmModel model, List<Object> made)
         {
             var shader = Shader.Find("VRM10/MToon10");
@@ -180,10 +182,24 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V1
                             ShadeColorTexture = read.MainTexture,
                             NormalTexture = read.NormalTexture,
                             NormalTextureScale = read.NormalScale,
-                            ShadingShiftFactor = -.05f,
-                            ShadingToonyFactor = .9f,
-                            EmissiveFactorLinear = read.Emission.linear,
+                            // MToon 1.0: linearstep(-1 + toony, 1 - toony, N·L + shift).
+                            ShadingShiftFactor = Mathf.Clamp(-read.ShadeCenter, -1, 1),
+                            ShadingToonyFactor = Mathf.Clamp01(1 - read.ShadeWidth / 2),
+                            // glTF's emissive factor stays within 0 to 1.
+                            EmissiveFactorLinear = Clamped(read.Emission * read.EmissionStrength).linear,
                             EmissiveTexture = read.EmissionTexture,
+                            MatcapTexture = read.MatcapTexture,
+                            MatcapColorFactorSrgb = read.MatcapTexture != null ? Clamped(read.MatcapColor) : Color.black,
+                            ParametricRimColorFactorSrgb = Clamped(read.RimColor),
+                            ParametricRimFresnelPowerFactor = read.RimFresnelPower,
+                            ParametricRimLiftFactor = 0f,
+                            RimLightingMixFactor = read.RimLightingMix,
+                            // Metres in MToon 1.0, centimetres as lilToon and Poiyomi give it.
+                            OutlineWidthMode = read.OutlineWidth > 0 ? MToon10OutlineMode.World : MToon10OutlineMode.None,
+                            OutlineWidthFactor = Mathf.Clamp(read.OutlineWidth / 100f, 0f, .05f),
+                            OutlineWidthMultiplyTexture = read.OutlineWidthTexture,
+                            OutlineColorFactorSrgb = read.OutlineColor,
+                            OutlineLightingMixFactor = read.OutlineLighting,
                             TextureScale = read.Scale,
                             TextureOffset = read.Offset,
                         };

@@ -56,7 +56,8 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V0
                 {
                     var clip = ScriptableObject.CreateInstance<BlendShapeClip>(); made.Add(clip);
                     clip.Preset = expression.Preset is VrmPreset preset ? Preset(preset) : BlendShapePreset.Unknown;
-                    clip.BlendShapeName = expression.Name ?? clip.Preset.ToString();
+                    // VRM 0.x has no Surprised preset: a custom clip of that name.
+                    clip.BlendShapeName = expression.Name ?? (clip.Preset == BlendShapePreset.Unknown ? expression.Preset.ToString() : clip.Preset.ToString());
                     clip.Values = expression.Shapes.Select(s => (s, index: s.Renderer.sharedMesh.GetBlendShapeIndex(s.Shape))).Where(x => x.index >= 0)
                         .Select(x => new BlendShapeBinding { RelativePath = model.PathOf(x.s.Renderer.transform), Index = x.index, Weight = x.s.Weight * 100f }).ToArray();
                     clips.Clips.Add(clip);
@@ -171,8 +172,20 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V0
             if (model.Springs.Count == 0) return;
             var holder = new GameObject("secondary");
             holder.transform.SetParent(model.Root.transform, false);
-            foreach (var spring in model.Springs)
+            // UniVRM 0.x moves every bone under a root: a branch's chain or a PhysBone inside another's would move twice,
+            // and an ignored or humanoid bone would move (a PhysBone on the hips for a skirt would swing the legs). The
+            // first spring holding a bone moves it; roots go around ignored and humanoid bones.
+            var animator = model.Root.GetComponent<Animator>();
+            var humanoid = new HashSet<Transform>(Enum.GetValues(typeof(HumanBodyBones)).Cast<HumanBodyBones>()
+                .Where(b => b != HumanBodyBones.LastBone).Select(animator.GetBoneTransform).Where(t => t != null));
+            var moved = new List<Transform>();
+            foreach (var spring in model.Springs.OrderBy(s => s.Joints[0].GetComponentsInParent<Transform>(true).Length))
             {
+                var start = spring.Joints[0];
+                if (moved.Any(root => start.IsChildOf(root))) continue;
+                var roots = Roots(start, spring.Ignored, humanoid).ToList();
+                if (roots.Count == 0) continue;
+                moved.AddRange(roots);
                 var bone = holder.AddComponent<VRMSpringBone>();
                 bone.m_comment = spring.Name;
                 bone.m_stiffnessForce = spring.Stiffness;
@@ -180,9 +193,18 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V0
                 bone.m_gravityDir = spring.GravityDirection;
                 bone.m_dragForce = spring.Drag;
                 bone.m_hitRadius = spring.Radius;
-                bone.RootBones = new List<Transform> { spring.Joints[0] };
+                bone.RootBones = roots;
                 bone.ColliderGroups = spring.Colliders.Where(byCollider.ContainsKey).Select(c => byCollider[c]).Distinct().ToArray();
             }
+        }
+
+        // The bone itself when nothing under it is ignored or humanoid, else the roots of its children's parts that aren't.
+        internal static IEnumerable<Transform> Roots(Transform bone, List<Transform> ignored, HashSet<Transform> humanoid)
+        {
+            if (ignored.Any(i => i == bone || bone.IsChildOf(i))) yield break;
+            if (!humanoid.Contains(bone) && !ignored.Any(i => i.IsChildOf(bone)) && !humanoid.Any(h => h != bone && h.IsChildOf(bone))) { yield return bone; yield break; }
+            foreach (Transform child in bone)
+                foreach (var root in Roots(child, ignored, humanoid)) yield return root;
         }
 
         // ---- Materials ----
@@ -211,9 +233,21 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V0
             }
         }
 
+        /// <summary>MToon 0.x's shading from the model's: lit above <c>shift + (1 - shift)(1 - toony)</c> in N·L, shade below <c>shift</c>.</summary>
+        internal static (float shift, float toony) Shading(float center, float width)
+        {
+            float shift = Mathf.Clamp(center - width / 2, -1, 1);
+            return (shift, Mathf.Clamp01(1 - width / Mathf.Max(1e-4f, 1 - shift)));
+        }
+
+        // MToon 0.x draws its matcap untinted: one tinted much darker than white would be brighter in the file than as made.
+        private static bool MatcapFits(Color tint) => tint.maxColorComponent >= .75f;
+
         private static MToon.MToonDefinition Definition(VrmModel.Material read)
         {
             var main = read.MainTexture as Texture2D;
+            var (shift, toony) = Shading(read.ShadeCenter, read.ShadeWidth);
+            var emission = new Color(read.Emission.r * read.EmissionStrength, read.Emission.g * read.EmissionStrength, read.Emission.b * read.EmissionStrength, 1);
             return new MToon.MToonDefinition
             {
                 Meta = new MToon.MetaDefinition { Implementation = MToon.Utils.Implementation, VersionNumber = MToon.Utils.VersionNumber },
@@ -231,18 +265,24 @@ namespace Orbiters.MyAvatar.Editor.Vrm.V0
                 {
                     LitAndShadeMixing = new MToon.LitAndShadeMixingDefinition
                     {
-                        ShadingShiftValue = -.05f, ShadingToonyValue = .9f, ShadowReceiveMultiplierValue = 1f, LitAndShadeMixingMultiplierValue = 1f,
+                        ShadingShiftValue = shift, ShadingToonyValue = toony, ShadowReceiveMultiplierValue = 1f, LitAndShadeMixingMultiplierValue = 1f,
                     },
                     LightingInfluence = new MToon.LightingInfluenceDefinition { LightColorAttenuationValue = 0f, GiIntensityValue = .1f },
                     Normal = new MToon.NormalDefinition { NormalTexture = read.NormalTexture as Texture2D, NormalScaleValue = read.NormalScale },
                 },
-                Emission = new MToon.EmissionDefinition { EmissionColor = read.Emission, EmissionMultiplyTexture = read.EmissionTexture as Texture2D },
-                MatCap = new MToon.MatCapDefinition(),
-                Rim = new MToon.RimDefinition { RimColor = Color.black, RimLightingMixValue = 0f, RimFresnelPowerValue = 1f, RimLiftValue = 0f },
+                Emission = new MToon.EmissionDefinition { EmissionColor = emission, EmissionMultiplyTexture = read.EmissionTexture as Texture2D },
+                MatCap = new MToon.MatCapDefinition { AdditiveTexture = MatcapFits(read.MatcapColor) ? read.MatcapTexture as Texture2D : null },
+                Rim = new MToon.RimDefinition
+                {
+                    RimColor = read.RimColor, RimLightingMixValue = read.RimLightingMix, RimFresnelPowerValue = read.RimFresnelPower, RimLiftValue = 0f,
+                },
                 Outline = new MToon.OutlineDefinition
                 {
-                    OutlineWidthMode = MToon.OutlineWidthMode.None, OutlineScaledMaxDistanceValue = 1f, OutlineColorMode = MToon.OutlineColorMode.FixedColor,
-                    OutlineColor = Color.black, OutlineLightingMixValue = 1f,
+                    // Centimetres, as lilToon and Poiyomi give it.
+                    OutlineWidthMode = read.OutlineWidth > 0 ? MToon.OutlineWidthMode.WorldCoordinates : MToon.OutlineWidthMode.None,
+                    OutlineWidthValue = Mathf.Clamp(read.OutlineWidth, .01f, 1f), OutlineWidthMultiplyTexture = read.OutlineWidthTexture as Texture2D,
+                    OutlineScaledMaxDistanceValue = 1f, OutlineColorMode = MToon.OutlineColorMode.MixedLighting,
+                    OutlineColor = read.OutlineColor, OutlineLightingMixValue = read.OutlineLighting,
                 },
                 TextureOption = new MToon.TextureUvCoordsDefinition { MainTextureLeftBottomOriginScale = read.Scale, MainTextureLeftBottomOriginOffset = read.Offset },
             };

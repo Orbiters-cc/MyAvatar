@@ -49,8 +49,14 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             public float Stiffness, GravityPower, Drag, Radius;
             public Vector3 GravityDirection = Vector3.down;
             public readonly List<Collider> Colliders = new List<Collider>();
+            /// <summary>The PhysBone's ignored bones: VRM 0.x moves every bone under a spring's root, so its roots go around them.</summary>
+            public readonly List<Transform> Ignored = new List<Transform>();
         }
 
+        /// <summary>
+        /// A material as MToon (0.x and 1.0) draws it. Shading is said once for both: where lit meets shade, in N·L
+        /// (-1 to 1, 0 at a right angle to the light), and how wide the step between them is (in N·L, 0 a hard edge).
+        /// </summary>
         internal sealed class Material
         {
             public UnityEngine.Material Source;
@@ -58,8 +64,22 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             public Vector2 Scale = Vector2.one, Offset;
             public Color Color = Color.white, ShadeColor = new Color(.8f, .8f, .8f), Emission = Color.black;
             public float NormalScale = 1f, Cutoff = .5f;
+            /// <summary>The emission's strength over its colour (HDR: may pass 1).</summary>
+            public float EmissionStrength = 1f;
             public VrmAlpha Alpha;
             public bool DoubleSided;
+            public float ShadeCenter, ShadeWidth = .2f;
+            /// <summary>A rim light added at grazing angles: none while black.</summary>
+            public Color RimColor = Color.black;
+            public float RimFresnelPower = 3.5f, RimLightingMix = 1f;
+            /// <summary>A matcap added over the surface (its colour tints it; MToon 0.x draws it untinted).</summary>
+            public Texture MatcapTexture;
+            public Color MatcapColor = Color.white;
+            /// <summary>The outline's width in centimetres (0: none), its width mask, colour and how much light it takes.</summary>
+            public float OutlineWidth;
+            public Texture OutlineWidthTexture;
+            public Color OutlineColor = Color.black;
+            public float OutlineLighting = 1f;
         }
 
         public GameObject Root;
@@ -73,6 +93,16 @@ namespace Orbiters.MyAvatar.Editor.Vrm
         public readonly List<Spring> Springs = new List<Spring>();
         public readonly List<Collider> Colliders = new List<Collider>();
         public readonly Dictionary<UnityEngine.Material, Material> Materials = new Dictionary<UnityEngine.Material, Material>();
+        /// <summary>What reading made (a humanoid with the eyes): destroyed once the file is written.</summary>
+        public readonly List<Object> Made = new List<Object>();
+        /// <summary>
+        /// The face's shapes perfect sync found under another standard's name, and their ARKit name: the file names them so,
+        /// as Warudo looks them up on the mesh by ARKit's exact names (its clips are enough for VSeeFace and VNyan).
+        /// </summary>
+        private readonly Dictionary<SkinnedMeshRenderer, Dictionary<string, string>> arKitNames = new Dictionary<SkinnedMeshRenderer, Dictionary<string, string>>();
+        // Perfect sync needs every ARKit clip (VNyan, VSeeFace): a face with the eyes', the jaw's and half of the others gets
+        // the ones it lacks, empty.
+        private const float PerfectSyncShare = .5f;
 
         // VRChat's visemes in the descriptor's order; VRM keeps the five vowels.
         private static readonly (int Viseme, VrmPreset Preset)[] Vowels =
@@ -92,6 +122,7 @@ namespace Orbiters.MyAvatar.Editor.Vrm
         /// </summary>
         internal static VrmModel From(GameObject root, VrmExportSettings meta, string title, Texture2D thumbnail)
         {
+            meta = meta ?? new VrmExportSettings();
             var model = new VrmModel { Root = root, Meta = meta, Title = title, Thumbnail = thumbnail };
             var animator = root.GetComponent<Animator>();
             if (animator == null || animator.avatar == null || !animator.avatar.isHuman) throw new InvalidOperationException("The avatar has no humanoid rig: VRM needs one.");
@@ -114,14 +145,61 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                     if (model.RightEye == null && eyes.rightEye != null) model.RightEye = eyes.rightEye;
                 }
             }
+            if (model.LeftEye != null && model.RightEye != null && model.LeftEye != model.RightEye &&
+                (animator.GetBoneTransform(HumanBodyBones.LeftEye) == null || animator.GetBoneTransform(HumanBodyBones.RightEye) == null))
+                model.AddEyes(animator);
             model.ReadExpressions(root);
-            model.PruneShapes(root);
+            model.PruneShapes(root, meta.keepAllShapes);
             model.ReadColliders(root);
             model.ReadSprings(root);
             foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
                 foreach (var material in renderer.sharedMaterials)
                     if (material != null && !model.Materials.ContainsKey(material)) model.Materials[material] = Read(material);
             return model;
+        }
+
+        /// <summary>
+        /// The descriptor's eyes, which the humanoid rig lacks: the copy's humanoid is built again with them, so apps that
+        /// turn eye bones (VNyan's and Warudo's eye tracking, VRM 1.0's bone look-at) find them. Kept only when every other
+        /// bone still maps to the same object (a name twice in the copy could mislead Unity's builder).
+        /// </summary>
+        private void AddEyes(Animator animator)
+        {
+            var before = animator.avatar;
+            var bones = Enum.GetValues(typeof(HumanBodyBones)).Cast<HumanBodyBones>().Where(b => b != HumanBodyBones.LastBone)
+                .ToDictionary(b => b, animator.GetBoneTransform);
+            var description = before.humanDescription;
+            var human = description.human.Where(h => h.humanName != "LeftEye" && h.humanName != "RightEye").ToList();
+            human.Add(new HumanBone { humanName = "LeftEye", boneName = LeftEye.name, limit = new HumanLimit { useDefaultValues = true } });
+            human.Add(new HumanBone { humanName = "RightEye", boneName = RightEye.name, limit = new HumanLimit { useDefaultValues = true } });
+            description.human = human.ToArray();
+            // The rest pose is the rig's own; the eyes (and what holds them) join it as they stand.
+            var skeleton = description.skeleton.ToList();
+            var named = new HashSet<string>(skeleton.Select(b => b.name), StringComparer.Ordinal);
+            foreach (var eye in new[] { LeftEye, RightEye })
+                for (var t = eye; t != null && t != Root.transform; t = t.parent)
+                    if (named.Add(t.name)) skeleton.Add(new SkeletonBone { name = t.name, position = t.localPosition, rotation = t.localRotation, scale = t.localScale });
+            description.skeleton = skeleton.ToArray();
+            var built = AvatarBuilder.BuildHumanAvatar(Root, description);
+            if (built == null) return;
+            built.name = before.name + " (eyes)";
+            if (!built.isValid || !built.isHuman)
+            {
+                Object.DestroyImmediate(built);
+                return;
+            }
+            animator.avatar = built;
+            animator.Rebind();
+            bool same = bones.All(pair => pair.Key == HumanBodyBones.LeftEye || pair.Key == HumanBodyBones.RightEye || animator.GetBoneTransform(pair.Key) == pair.Value);
+            if (!same || animator.GetBoneTransform(HumanBodyBones.LeftEye) != LeftEye || animator.GetBoneTransform(HumanBodyBones.RightEye) != RightEye)
+            {
+                Debug.LogWarning("[My Avatar] VRM: the eyes could not be added to the humanoid (a bone name is used twice); the file has no eye bones.");
+                animator.avatar = before;
+                animator.Rebind();
+                Object.DestroyImmediate(built);
+                return;
+            }
+            Made.Add(built);
         }
 
         // Visemes and blink from the descriptor, then what the face's shape names give.
@@ -189,14 +267,25 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             if (!expression.Shapes.Any(s => s.Renderer == renderer && s.Shape == shape)) expression.Shapes.Add((renderer, shape, weight));
         }
 
-        // Every mesh keeps the shapes an expression sets.
-        private void PruneShapes(GameObject root)
+        // Every mesh keeps the shapes an expression sets (or all of them, for apps that make expressions of any), perfect
+        // sync's under their ARKit names.
+        private void PruneShapes(GameObject root, bool keepAll)
         {
             foreach (var renderer in root.GetComponentsInChildren<SkinnedMeshRenderer>(true))
             {
-                if (renderer.sharedMesh == null || renderer.sharedMesh.blendShapeCount == 0) continue;
-                var keep = new HashSet<string>(Expressions.SelectMany(e => e.Shapes).Where(s => s.Renderer == renderer).Select(s => s.Shape), StringComparer.Ordinal);
-                Toolkit.Editor.VRChat.BlendShapes.BlendShapePruning.Prune(root, renderer, keep);
+                var mesh = renderer.sharedMesh;
+                if (mesh == null || mesh.blendShapeCount == 0) continue;
+                var keep = keepAll ? new HashSet<string>(Enumerable.Range(0, mesh.blendShapeCount).Select(mesh.GetBlendShapeName), StringComparer.Ordinal)
+                    : new HashSet<string>(Expressions.SelectMany(e => e.Shapes).Where(s => s.Renderer == renderer).Select(s => s.Shape), StringComparer.Ordinal);
+                arKitNames.TryGetValue(renderer, out var rename);
+                if (Toolkit.Editor.VRChat.BlendShapes.BlendShapePruning.Prune(root, renderer, keep, rename) == null || rename == null) continue;
+                // The expressions follow the shapes renamed (those whose new name the mesh had already kept theirs).
+                foreach (var expression in Expressions)
+                    for (int i = 0; i < expression.Shapes.Count; i++)
+                    {
+                        var (r, shape, weight) = expression.Shapes[i];
+                        if (r == renderer && rename.TryGetValue(shape, out string to) && renderer.sharedMesh.GetBlendShapeIndex(shape) < 0) expression.Shapes[i] = (r, to, weight);
+                    }
             }
         }
 
@@ -236,12 +325,25 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             }
             // Perfect sync: a custom expression per ARKit shape the face has (under its own name or another standard's),
             // named as ARKit names it: VSeeFace, Warudo and VNyan drive them from an iPhone's face tracking.
+            var renames = new Dictionary<string, string>(StringComparer.Ordinal);
+            var found = new HashSet<string>(StringComparer.Ordinal);
             foreach (string arKit in FaceTrackingStandard.ARKit.Core)
             {
                 string name = FaceTrackingNames.Resolve(arKit, index);
-                if (name != null) Add(null, char.ToUpperInvariant(arKit[0]) + arKit.Substring(1), face, mesh.GetBlendShapeIndex(name));
+                if (name == null) continue;
+                found.Add(arKit);
+                Add(null, Clip(arKit), face, mesh.GetBlendShapeIndex(name));
+                if (name != arKit && !names.Contains(arKit) && !renames.ContainsKey(name)) renames[name] = arKit;
             }
+            if (renames.Count > 0) arKitNames[face] = renames;
+            if (found.Contains("eyeBlinkLeft") && found.Contains("eyeBlinkRight") && found.Contains("jawOpen") &&
+                found.Count >= FaceTrackingStandard.ARKit.Core.Length * PerfectSyncShare)
+                foreach (string arKit in FaceTrackingStandard.ARKit.Core.Where(a => !found.Contains(a)))
+                    Expressions.Add(new Expression { Name = Clip(arKit) });
         }
+
+        // Perfect sync's clip names: ARKit's with a capital first letter, as VSeeFace and VNyan look them up.
+        private static string Clip(string arKit) => char.ToUpperInvariant(arKit[0]) + arKit.Substring(1);
 
         // ---- Springs ----
 
@@ -274,10 +376,16 @@ namespace Orbiters.MyAvatar.Editor.Vrm
 
         /// <summary>
         /// Each PhysBone's chains: from its root through the first child of every bone, a branch starting a chain of its
-        /// own (VRM 1.0 turns each joint toward the next one, so a chain can't fork). Ignored bones are left out.
+        /// own (VRM 1.0 turns each joint toward the next one, so a chain can't fork). Ignored bones are left out, and so
+        /// are humanoid ones, which the app's tracking moves (a skirt's PhysBone on the hips: its chains start below).
         /// </summary>
         private void ReadSprings(GameObject root)
         {
+            var animator = root.GetComponent<Animator>();
+            var humanoid = new HashSet<Transform>(Enum.GetValues(typeof(HumanBodyBones)).Cast<HumanBodyBones>()
+                .Where(b => b != HumanBodyBones.LastBone).Select(animator.GetBoneTransform).Where(t => t != null));
+            // A bone two PhysBones reach (one inside the other's) moves with the first one only.
+            var taken = new HashSet<Transform>();
             foreach (var bone in root.GetComponentsInChildren<VRCPhysBoneBase>(true))
             {
                 if (!bone.enabled) continue;
@@ -287,8 +395,14 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                 var chains = new List<List<Transform>>();
                 void Walk(Transform t, List<Transform> chain)
                 {
-                    chain.Add(t);
                     var children = t.Cast<Transform>().Where(c => !Ignored(c)).ToList();
+                    if (humanoid.Contains(t))
+                    {
+                        if (chain.Count > 0) chains.Add(chain);
+                        foreach (var child in children) Walk(child, new List<Transform>());
+                        return;
+                    }
+                    chain.Add(t);
                     if (children.Count == 0) { chains.Add(chain); return; }
                     Walk(children[0], chain);
                     foreach (var other in children.Skip(1)) Walk(other, new List<Transform>());
@@ -296,6 +410,9 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                 if (!Ignored(start)) Walk(start, new List<Transform>());
                 float scale = Mathf.Abs(start.lossyScale.x);
                 var (stiffness, gravity, drag) = Behaviour(bone);
+                for (int i = 0; i < chains.Count; i++) chains[i] = chains[i].TakeWhile(j => !taken.Contains(j)).ToList();
+                chains.RemoveAll(c => c.Count == 0);
+                foreach (var chain in chains) taken.UnionWith(chain);
                 int n = 0;
                 foreach (var chain in chains)
                 {
@@ -305,6 +422,7 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                         Stiffness = stiffness, GravityPower = gravity, Drag = drag, Radius = bone.radius * scale,
                     };
                     spring.Joints.AddRange(chain);
+                    spring.Ignored.AddRange(ignored);
                     spring.End = End(bone, chain);
                     foreach (var source in bone.colliders ?? new List<VRCPhysBoneColliderBase>())
                         if (source != null && byCollider.TryGetValue(source, out var collider)) spring.Colliders.Add(collider);
@@ -337,34 +455,120 @@ namespace Orbiters.MyAvatar.Editor.Vrm
 
         // ---- Materials ----
 
-        /// <summary>What MToon needs from a material of any shader: colour, textures, alpha, faces drawn.</summary>
+        /// <summary>
+        /// What MToon needs from a material of any shader, read as the shader keeps it (<see cref="MaterialShaders"/>, which
+        /// knows lilToon's and Poiyomi's switches): colour, textures, emission, alpha, faces drawn; for lilToon and Poiyomi
+        /// also their toon shading (Multilayer Math's on Poiyomi), lilToon-style rim light, an added matcap and the outline.
+        /// </summary>
         internal static Material Read(UnityEngine.Material source)
         {
-            var read = new Material { Source = source };
-            if (source.HasProperty("_MainTex"))
+            var saved = SavedMaterial.Read(source);
+            var family = MaterialShaders.FamilyOf(source.shader);
+            if (family == ShaderFamily.Unknown) family = MaterialShaders.Detect(saved);
+            string shaderName = source.shader != null ? source.shader.name : "";
+            string lilToon = family != ShaderFamily.LilToon ? null
+                : shaderName.IndexOf("lilToon", StringComparison.Ordinal) >= 0 ? shaderName
+                : saved.ShaderGuid != null && MaterialShaders.LilToonShaders.TryGetValue(saved.ShaderGuid, out string known) ? known : "lilToon";
+            var mode = MaterialShaders.Mode(saved, family, lilToon);
+            var surface = MaterialShaders.Read(saved, family, lilToon, mode);
+            var read = new Material
             {
-                read.MainTexture = source.GetTexture("_MainTex");
-                read.Scale = source.GetTextureScale("_MainTex");
-                read.Offset = source.GetTextureOffset("_MainTex");
-            }
-            if (source.HasProperty("_Color")) read.Color = source.GetColor("_Color");
-            read.ShadeColor = new Color(read.Color.r * .8f, read.Color.g * .8f, read.Color.b * .82f, 1f);
-            if (source.HasProperty("_BumpMap")) read.NormalTexture = source.GetTexture("_BumpMap");
-            if (source.HasProperty("_BumpScale")) read.NormalScale = source.GetFloat("_BumpScale");
-            bool emits = source.IsKeywordEnabled("_EMISSION") || Flag(source, "_EnableEmission") || Flag(source, "_UseEmission");
-            if (emits && source.HasProperty("_EmissionColor"))
+                Source = source,
+                MainTexture = surface.Main.Texture, Scale = surface.Main.Scale, Offset = surface.Main.Offset,
+                Color = surface.Color,
+                NormalTexture = surface.Normal.Texture, NormalScale = surface.NormalScale,
+                Cutoff = surface.Cutoff,
+                Alpha = mode == SurfaceMode.Opaque ? VrmAlpha.Opaque : mode == SurfaceMode.Cutout ? VrmAlpha.Cutout : VrmAlpha.Transparent,
+                DoubleSided = Mathf.RoundToInt(surface.Cull) == 0,
+            };
+            if (surface.Emits)
             {
-                read.Emission = source.GetColor("_EmissionColor");
-                if (source.HasProperty("_EmissionMap")) read.EmissionTexture = source.GetTexture("_EmissionMap");
+                read.Emission = surface.Emission;
+                read.EmissionStrength = surface.EmissionStrength;
+                read.EmissionTexture = surface.EmissionMap.Texture;
             }
-            int queue = source.renderQueue;
-            read.Alpha = queue >= 2900 ? VrmAlpha.Transparent : queue >= 2450 ? VrmAlpha.Cutout : VrmAlpha.Opaque;
-            if (source.HasProperty("_Cutoff")) read.Cutoff = source.GetFloat("_Cutoff");
-            read.DoubleSided = source.HasProperty("_Cull") && Mathf.RoundToInt(source.GetFloat("_Cull")) == 0;
+            Shading(read, saved, family, surface);
+            if (family == ShaderFamily.LilToon || family == ShaderFamily.Poiyomi)
+            {
+                Rim(read, saved, surface);
+                Matcap(read, saved, family);
+                Outline(read, saved, family, lilToon);
+            }
             return read;
         }
 
-        private static bool Flag(UnityEngine.Material material, string property) => material.HasProperty(property) && material.GetFloat(property) > .5f;
+        // A plain darker shade for shaders without a toon shading of their own; lilToon's shadow (and Poiyomi's Multilayer
+        // Math, under lilToon's names): its colour over the base and its border and blur, which lilToon takes over half
+        // Lambert (0 to 1) and MToon over N·L (-1 to 1); flat lighting has no shade.
+        private static void Shading(Material read, SavedMaterial saved, ShaderFamily family, Surface surface)
+        {
+            var c = read.Color;
+            read.ShadeColor = new Color(c.r * .8f, c.g * .8f, c.b * .82f, 1f);
+            if (family != ShaderFamily.LilToon && family != ShaderFamily.Poiyomi) return;
+            if (surface.FlatLit)
+            {
+                read.ShadeColor = new Color(c.r, c.g, c.b, 1f);
+                return;
+            }
+            if (!surface.Shadows) return;
+            var shadow = Color.Lerp(Color.white, saved.Color("_ShadowColor", new Color(.82f, .76f, .85f)), saved.Float("_ShadowStrength", 1));
+            read.ShadeColor = new Color(c.r * shadow.r, c.g * shadow.g, c.b * shadow.b, 1f);
+            read.ShadeCenter = Mathf.Clamp(2 * saved.Float("_ShadowBorder", .5f) - 1, -1, 1);
+            read.ShadeWidth = Mathf.Clamp(2 * saved.Float("_ShadowBlur", .1f), 0, 2);
+        }
+
+        // lilToon-style rim light (lilToon's own, Poiyomi's LilToon style): its colour, as bright as its alpha says.
+        private static void Rim(Material read, SavedMaterial saved, Surface surface)
+        {
+            if (!surface.Rim) return;
+            var rim = saved.Color("_RimColor", new Color(.66f, .5f, .48f));
+            read.RimColor = new Color(rim.r * rim.a, rim.g * rim.a, rim.b * rim.a, 1f);
+            read.RimFresnelPower = Mathf.Clamp(saved.Float("_RimFresnelPower", 3.5f), .01f, 50f);
+            read.RimLightingMix = Mathf.Clamp01(saved.Float("_RimEnableLighting", 1));
+        }
+
+        // A matcap the shader adds (lilToon's Add or Screen, Poiyomi's Add part): MToon's matcap only adds.
+        private static void Matcap(Material read, SavedMaterial saved, ShaderFamily family)
+        {
+            if (family == ShaderFamily.LilToon)
+            {
+                int blend = Mathf.RoundToInt(saved.Float("_MatCapBlendMode"));
+                if (!saved.On("_UseMatCap") || (blend != 1 && blend != 2)) return;
+                read.MatcapTexture = saved.Texture("_MatCapTex").Texture;
+                read.MatcapColor = Scaled(saved.Color("_MatCapColor", Color.white), saved.Float("_MatCapBlend", 1));
+            }
+            else
+            {
+                float add = saved.Float("_MatcapAdd");
+                if (!saved.On("_MatcapEnable") || add <= 0) return;
+                read.MatcapTexture = saved.Texture("_Matcap").Texture;
+                read.MatcapColor = Scaled(saved.Color("_MatcapColor", Color.white), add * saved.Float("_MatcapIntensity", 1));
+            }
+            if (read.MatcapTexture == null) read.MatcapColor = Color.white;
+        }
+
+        // lilToon's outline shaders and Poiyomi's outlines: both give the width in centimetres, lit by the scene.
+        private static void Outline(Material read, SavedMaterial saved, ShaderFamily family, string lilToon)
+        {
+            if (family == ShaderFamily.LilToon)
+            {
+                if (lilToon == null || lilToon.IndexOf("Outline", StringComparison.Ordinal) < 0) return;
+                read.OutlineWidth = Mathf.Max(0, saved.Float("_OutlineWidth", .08f));
+                read.OutlineWidthTexture = saved.Texture("_OutlineWidthMask").Texture;
+                read.OutlineColor = saved.Color("_OutlineColor", new Color(.6f, .56f, .73f));
+                read.OutlineLighting = Mathf.Clamp01(saved.Float("_OutlineEnableLighting", 1));
+            }
+            else
+            {
+                if (!saved.On("_EnableOutlines")) return;
+                read.OutlineWidth = Mathf.Max(0, saved.Float("_LineWidth", 1));
+                read.OutlineWidthTexture = saved.Texture("_OutlineMask").Texture;
+                read.OutlineColor = saved.Color("_LineColor", Color.white);
+            }
+            read.OutlineColor.a = 1;
+        }
+
+        private static Color Scaled(Color color, float by) => new Color(color.r * by, color.g * by, color.b * by, 1f);
 
         /// <summary>The path of <paramref name="t"/> from the model's root, as VRM bindings name it.</summary>
         internal string PathOf(Transform t) => AnimationUtility.CalculateTransformPath(t, Root.transform);

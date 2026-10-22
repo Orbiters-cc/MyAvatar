@@ -468,6 +468,7 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static string Describe(OrbitersAttachment attachment, AttachmentPlan plan = null)
         {
+            if (attachment.stickToSkin && SkinStick.Find(attachment, out _) is SkinSpot spot) return "sticks to the skin: " + SkinStick.Describe(spot);
             switch (attachment.mode)
             {
                 case OrbitersAttachment.AttachMode.Configured: return "uses its creator's setup";

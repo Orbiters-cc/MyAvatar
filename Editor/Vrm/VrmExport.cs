@@ -6,6 +6,7 @@ using Orbiters.MyAvatar.Editor.Optimization;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.Vrm
 {
@@ -31,6 +32,24 @@ namespace Orbiters.MyAvatar.Editor.Vrm
 
         internal static IVrmWriter Writer(int version) => Writers.FirstOrDefault(w => w.Version == version);
 
+        /// <summary>
+        /// The folder Warudo lists its characters from (<c>Warudo_Data/StreamingAssets/Characters</c> of its Steam install),
+        /// made when Warudo is there without it; null when Warudo isn't installed.
+        /// </summary>
+        internal static string WarudoCharacters()
+        {
+            foreach (var install in Toolkit.Editor.Processes.InstalledApps.SteamApps("Warudo"))
+            {
+                string assets = Path.Combine(install, "Warudo_Data", "StreamingAssets");
+                if (!Directory.Exists(assets)) continue;
+                string characters = Path.Combine(assets, "Characters");
+                try { Directory.CreateDirectory(characters); }
+                catch (Exception) { continue; }
+                return characters;
+            }
+            return null;
+        }
+
         /// <summary>A running or finished export.</summary>
         internal sealed class Job
         {
@@ -39,6 +58,8 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             public string Error;
             public long Bytes;
             public bool Done;
+            /// <summary>Written to Warudo's characters folder (<see cref="WarudoCharacters"/>).</summary>
+            public bool Warudo;
             public event Action Completed;
             internal void Finish() { Done = true; try { Completed?.Invoke(); } catch (Exception ex) { Debug.LogException(ex); } }
         }
@@ -75,9 +96,12 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                     own.uploadOptimization.sharpFrom = sharpFrom;
                     own.uploadOptimization.polygonQuality = polygonQuality;
                 }
-                // The shapes the VRM's expressions set survive the build steps that remove unused ones.
+                // The shapes the VRM's expressions set (or all of them) survive the build steps that remove unused ones.
                 built = copy;
-                BlendShapePruning.Keep[copy] = VrmModel.Shapes(copy);
+                BlendShapePruning.Keep[copy] = settings.keepAllShapes
+                    ? new HashSet<string>(copy.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null)
+                        .SelectMany(r => Enumerable.Range(0, r.sharedMesh.blendShapeCount).Select(r.sharedMesh.GetBlendShapeName)), StringComparer.Ordinal)
+                    : VrmModel.Shapes(copy);
             });
             void Built()
             {
@@ -85,7 +109,9 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                 {
                     if (job.Build.Error != null) { job.Error = job.Build.Error; return; }
                     var model = VrmModel.From(job.Build.Copy, settings, title, thumbnail);
-                    var bytes = writer.Write(model);
+                    byte[] bytes;
+                    try { bytes = writer.Write(model); }
+                    finally { foreach (var made in model.Made) if (made != null) Object.DestroyImmediate(made); }
                     File.WriteAllBytes(path, bytes);
                     job.Bytes = bytes.LongLength;
                     Debug.Log("[My Avatar] Exported “" + title + "” to VRM " + (version == 0 ? "0.x" : "1.0") + ": " + path + " (" + VrcLoadingBar.Format(job.Bytes) + ").");

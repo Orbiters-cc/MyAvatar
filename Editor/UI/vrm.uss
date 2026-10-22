@@ -4,6 +4,8 @@
 .mcb-button.ft-tracker.vrm-version { flex-basis: 45%; height: 64px; min-height: 64px; }
 
 .vrm-form { margin-top: 12px; }
+.vrm-options { margin-top: 12px; }
+.vrm-options > .ft-feature { margin: 0; }
 .vrm-row { flex-direction: row; align-items: center; min-height: 30px; margin-top: 4px; }
 .vrm-row__label { width: 110px; flex-shrink: 0; margin: 0; padding: 0; color: #9a9a9a; font-size: 11px; }
 .vrm-field { flex-grow: 1; flex-shrink: 1; min-width: 80px; margin: 0; }
@@ -19,4 +21,5 @@
 .ft-feature.vrm-license { margin-top: 10px; background-color: #2f2a22; }
 
 .vrm-actions { flex-direction: row; align-items: center; margin-top: 12px; }
+.ft-note.vrm-apps { margin: 8px 0 0 0; white-space: normal; color: #7a7a7a; }
 .ft-note.vrm-status { flex-grow: 1; flex-shrink: 1; margin: 0; white-space: normal; }

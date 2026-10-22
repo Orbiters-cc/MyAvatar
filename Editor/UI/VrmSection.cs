@@ -22,7 +22,7 @@ namespace Orbiters.MyAvatar.Editor
 
         private static readonly (int Version, string Name, string Sub, string Tooltip)[] Versions =
         {
-            (0, "v0.x", "VSeeFace, most apps", "VRM 0.x: what most apps read (VSeeFace, VNyan, Warudo, cluster...). Springs collide with spheres only."),
+            (0, "v0.x", "VNyan, Warudo, VSeeFace", "VRM 0.x: what most apps read best (VNyan, Warudo, VSeeFace, cluster...). Springs collide with spheres only."),
             (1, "v1.0", "Current standard", "VRM 1.0: the current standard, for apps that read it. Springs per chain, capsule and plane colliders."),
         };
 
@@ -43,7 +43,7 @@ namespace Orbiters.MyAvatar.Editor
         private readonly MyAvatar avatar;
         private readonly VisualElement hero;
         private Label status;
-        private Button export;
+        private Button export, warudo;
         private IVisualElementScheduledItem poll;
 
         internal VrmSection(MyAvatar avatar) : base("Export to VRM", card: false)
@@ -91,6 +91,10 @@ namespace Orbiters.MyAvatar.Editor
                 tiles.Add(tile);
             }
 
+            var options = new VisualElement(); options.AddToClassList("vrm-options"); frame.Frame.Add(options);
+            Switch(options, "Keep every blendshape", "Not only those its expressions use: Warudo and VNyan make expressions of any of them. The file is larger.",
+                Settings.keepAllShapes, on => Change("My Avatar: VRM blendshapes", s => s.keepAllShapes = on));
+
             var form = new VisualElement(); form.AddToClassList("ft-custom"); form.AddToClassList("vrm-form"); frame.Frame.Add(form);
             var title = new Label("What the file says"); title.AddToClassList("opt-estimate__title"); form.Add(title);
             Field(form, "Name", Settings.title, TextureOptimization.AvatarRoot(avatar).name, v => Settings.title = v);
@@ -121,7 +125,18 @@ namespace Orbiters.MyAvatar.Editor
             export.AddToClassList("ft-primary");
             export.clicked += Export;
             actions.Add(export);
+            // Warudo lists the files of its characters folder: the export goes there directly.
+            string characters = VrmExport.WarudoCharacters();
+            warudo = MyAvatarEditor.Button("Send to Warudo", null);
+            warudo.AddToClassList("ft-ghost");
+            warudo.tooltip = characters != null ? "Writes it to Warudo's characters (" + characters + "): pick it in Warudo under Character › Source." : null;
+            warudo.clicked += () => SendToWarudo(characters);
+            warudo.style.display = characters != null ? DisplayStyle.Flex : DisplayStyle.None;
+            actions.Add(warudo);
             status = new Label(); status.AddToClassList("ft-note"); status.AddToClassList("vrm-status"); actions.Add(status);
+            var apps = new Label("VNyan: Load › Avatar in its menu, then pick the file." + (characters != null ? ""
+                : " Warudo: put it in Warudo_Data/StreamingAssets/Characters, or install Warudo from Steam to send it there in one click."));
+            apps.AddToClassList("ft-note"); apps.AddToClassList("vrm-apps"); frame.Frame.Add(apps);
             UpdateStatus();
         }
 
@@ -173,6 +188,7 @@ namespace Orbiters.MyAvatar.Editor
                 : !Settings.licenseAllows ? "Confirm the model's license allows VRM." : null;
             bool running = job != null && !job.Done;
             export.SetEnabled(missing == null && !running);
+            warudo?.SetEnabled(missing == null && !running);
             status.RemoveFromClassList("warning");
             if (running)
             {
@@ -183,6 +199,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             else if (missing != null) status.text = missing;
             else if (job?.Error != null) { status.text = "The export stopped: " + job.Error; status.AddToClassList("warning"); }
+            else if (job != null && job.Warudo) status.text = "In Warudo's characters: " + Path.GetFileName(job.Path) + " (" + VrcLoadingBar.Format(job.Bytes) + "). Pick it under Character › Source.";
             else if (job != null) status.text = "Saved " + Path.GetFileName(job.Path) + " (" + VrcLoadingBar.Format(job.Bytes) + ")";
             else status.text = "Builds a hidden copy first, as an upload does: VRCFury freezes the editor for a few seconds.";
             status.tooltip = job != null && job.Done && job.Error == null ? job.Path : null;
@@ -190,18 +207,38 @@ namespace Orbiters.MyAvatar.Editor
 
         private void Export()
         {
+            string path = EditorUtility.SaveFilePanel("Export to VRM", "", MakeFileName(Title()), "vrm");
+            if (!string.IsNullOrEmpty(path)) Run(path, toWarudo: false);
+        }
+
+        // Straight into Warudo's characters folder, asking before replacing a file of the same name there.
+        private void SendToWarudo(string characters)
+        {
+            if (characters == null) return;
+            string path = Path.Combine(characters, MakeFileName(Title()));
+            if (File.Exists(path) && !EditorUtility.DisplayDialog("Send to Warudo", Path.GetFileName(path) + " is already in Warudo's characters. Replace it?",
+                    "Replace", "Cancel")) return;
+            Run(path, toWarudo: true);
+        }
+
+        private string Title()
+        {
             var root = TextureOptimization.AvatarRoot(avatar);
-            string name = string.IsNullOrWhiteSpace(Settings.title) ? root.name : Settings.title;
-            string path = EditorUtility.SaveFilePanel("Export to VRM", "", MakeFileName(name), "vrm");
-            if (string.IsNullOrEmpty(path)) return;
+            return string.IsNullOrWhiteSpace(Settings.title) ? root.name : Settings.title;
+        }
+
+        private void Run(string path, bool toWarudo)
+        {
             // The press shows at once; the build starts on the next frame.
             export.SetEnabled(false);
+            warudo.SetEnabled(false);
             status.text = "Building the avatar…";
             schedule.Execute(() =>
             {
                 var job = VrmExport.Start(avatar, Settings.version, path);
+                job.Warudo = toWarudo;
                 Jobs[avatar.GetInstanceID()] = job;
-                job.Completed += () => { UpdateStatus(); if (job.Error == null) EditorUtility.RevealInFinder(job.Path); };
+                job.Completed += () => { UpdateStatus(); if (job.Error == null && !job.Warudo) EditorUtility.RevealInFinder(job.Path); };
                 UpdateStatus();
             });
         }

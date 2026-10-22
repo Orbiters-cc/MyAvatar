@@ -517,6 +517,14 @@ the avatar or moves bones into its armature: what attaches is applied to the bui
   chains) follow their parent.
 - **Props** (hats, hair, glasses, bracelets…) follow one bone, chosen from their name or
   position. Modelled far from it, they are placed on it; **Bone ▾** changes it.
+- **Small things on the skin** (a piercing, a stud, a gem: at most a tenth of the avatar's height, its closest part
+  within 1.5 % of it from the skin) get a **Stick to the skin** switch on their card. On, the accessory moves with the
+  skin under it instead of one bone: blended between the bones that move the skin there, as skinning does (a navel
+  piercing between the hips and the spine), and with the body's blendshapes there (muscles, flexing). Its line says
+  which bones and how much ("sticks to the skin: Hips 76 % · Spine 22 % · Chest 2 %"). Applied to the build copy with
+  one VRChat Parent Constraint, the way Haï's Skinned Mesh Constraint makes it; nothing changes in the scene, and the
+  posing preview blends the same bones. Moved off the skin later, it keeps its switch (to turn it off) and follows its
+  bone again.
 - Empty constraints named after avatar bones (`Head`, `Left wrist`) are wired to them
   and become VRChat constraints.
 - A saved VRCFury toggle under **Accessories/<name>** is added when the accessory has no
@@ -797,7 +805,15 @@ check again.
 
 **Export…** builds a hidden copy of the avatar the way an upload does (as **Check** does), then writes it as a .vrm file
 with UniVRM; the avatar, its assets and their import settings never change. The **v0.x** and **v1.0** tiles pick the VRM
-version: 0.x is what most apps read, 1.0 the current standard (springs per chain, capsule and plane colliders).
+version: 0.x is what most apps read best (VNyan, Warudo, VSeeFace), 1.0 the current standard (springs per chain, capsule
+and plane colliders).
+
+- **Warudo**: when Warudo is installed from Steam, **Send to Warudo** writes the file straight into its characters folder
+  (`Warudo_Data/StreamingAssets/Characters`, asking before replacing one of the same name): pick it in Warudo under
+  Character › Source. Without Warudo, put the file there yourself.
+- **VNyan**: load the file from VNyan's menu (Load › Avatar).
+- **Keep every blendshape** keeps the shapes no expression uses too, so Warudo and VNyan can make expressions of any of
+  them (a larger file).
 
 - **The build**: every VRChat build step runs (VRCFury, Modular Avatar, MCB, face tracking), with your Optimization
   level, without what only VRChat uses (short names, menu icons, crunch and Quest textures: VRM stores PNG and JPEG).
@@ -806,17 +822,29 @@ version: 0.x is what most apps read, 1.0 the current standard (springs per chain
   blink from its eyelids or the face's blink shape, one-eye blinks and the emotions (happy, angry, sad, relaxed,
   surprised) from the face's shape names, and **perfect sync**: an expression named after each of ARKit's 52 shapes the
   face has, found under ARKit's name or another face tracking standard's (Unified Expressions, SRanipal), which
-  VSeeFace, Warudo and VNyan drive from an iPhone. The build keeps those shapes even when nothing in VRChat animates
-  them; every other shape leaves the meshes (baked in at its weight), and morph targets store only the vertices they
-  move.
+  VSeeFace, Warudo and VNyan drive from an iPhone. A face with the eyes' and the jaw's and half of the others gets the
+  missing ones as empty expressions (VNyan and VSeeFace use perfect sync only with all 52), and its shapes found under
+  another standard's name take ARKit's in the file (Warudo looks them up on the mesh by ARKit's exact names). The build
+  keeps those shapes even when nothing in VRChat animates them; every other shape leaves the meshes (baked in at its
+  weight) unless **Keep every blendshape** is on, and morph targets store only the vertices they move. In 0.x, Surprised
+  (no 0.x preset) is a custom expression of that name.
 - **Springs**: each PhysBone becomes springs, one per chain (a branch starts a chain of its own, VRM 1.0 adds an end
-  node where the last bone points). There is no exact match between the two: pull and stiffness make VRM's stiffness
+  node where the last bone points). Humanoid bones never swing (a skirt's PhysBone on the hips starts its chains below
+  them), a bone two PhysBones reach moves with the first, and in 0.x, where a spring moves every bone under its root,
+  roots leave out branches another root holds and go around ignored bones, so nothing moves twice. There is no exact match between the two: pull and stiffness make VRM's stiffness
   (VRM's usual 1 for PhysBone's usual 0.2), spring (bounce) lowers the drag, gravity carries over, radius scales with the
   bone. Colliders follow (spheres; capsules as a row of spheres in 0.x; planes and inside colliders in 1.0 only).
-- **Materials**: each becomes MToon with its main texture and colour, a shade colour a little darker, its normal map,
-  emission when it is on, cutout or transparency from its render queue, and both sides drawn when it culls nothing.
-  Toon shading settings beyond that (rim, matcap, outlines) aren't carried over.
-- **The rest**: the T-pose UniVRM uses, the head's view point from the descriptor, look-at from the eye bones, the
+- **Materials**: each becomes MToon, read the way My Avatar's material repair reads shaders (lilToon's and Poiyomi's own
+  switches): its main texture and colour, its normal map (lilToon's only when it is on), emission at its strength,
+  cutout or transparency, and both sides drawn when it culls nothing. lilToon's shadow (and Poiyomi's Multilayer Math
+  shading, under the same names) keeps its colour, border and blur; flat lighting keeps no shade; other shaders get a
+  shade a little darker. lilToon-style rim light (lilToon's, Poiyomi's LilToon style), a matcap the shader adds
+  (lilToon's Add or Screen, Poiyomi's Add part; MToon 0.x draws it untinted, so a matcap tinted much darker is left out
+  there) and the outline (lilToon's outline shaders, Poiyomi's outlines: their width in centimetres, lit) carry over.
+  Poiyomi's own rim styles, a matcap that replaces or multiplies, decals and the rest of what those shaders draw don't.
+- **The rest**: the T-pose UniVRM uses, the head's view point from the descriptor, look-at from the eye bones (eyes
+  only the descriptor names join the humanoid in the file, so VNyan's and Warudo's eye tracking turns them; when a name
+  used twice in the built copy would map another bone wrong, the file goes without and the log says so), the
   thumbnail from the Thumbnail section, and UniVRM's checks and normalization. UniVRM's own exporter switches every
   texture it copies to uncompressed and leaves it so; My Avatar's reads copies instead.
 

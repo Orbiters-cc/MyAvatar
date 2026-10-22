@@ -235,6 +235,10 @@ namespace Orbiters.MyAvatar
         public bool violentUse, sexualUse, commercialUse, redistribution, modification;
         /// <summary>The exporter confirmed the model's license allows converting it to VRM.</summary>
         public bool licenseAllows;
+        /// <summary>
+        /// Every blendshape stays in the file, not only those its expressions set: Warudo and VNyan make expressions of any.
+        /// </summary>
+        public bool keepAllShapes;
     }
 
     /// <summary>
