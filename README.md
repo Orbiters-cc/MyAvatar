@@ -18,6 +18,9 @@
   Blendshape Normals and mipmapped textures without Streaming Mip Maps are changed in their import settings as soon as
   My Avatar finds them, so the SDK panel's Review Any Alerts has nothing to say about them. A small **VRChat import
   settings** card says what changed ("Ask me first" or Orbiters settings to be asked instead).
+- An item's option can show what each choice looks like: Orb's **Look** shows a picture of its menu, Orbiters' own or
+  retro, under its switch, swapped on press and while the pointer is over the other choice. The option switches are
+  112 points wide, so "Modern" fits.
 
 ## 0.9.12 — 2026-10-21
 

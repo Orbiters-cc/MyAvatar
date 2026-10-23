@@ -476,7 +476,8 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // A setting the prop offers (Orb's text slots): its name and a small switch, which shows the new choice at once,
-        // then the parameter budget below the list follows.
+        // then the parameter budget below the list follows. A setting with pictures (Orb's look) shows the chosen one under
+        // its switch, and the other while the pointer is over that choice.
         private VisualElement OptionRow(AttachmentOption option)
         {
             var row = new VisualElement { tooltip = option.Tooltip }; row.AddToClassList("accessory-item__option");
@@ -499,9 +500,15 @@ namespace Orbiters.MyAvatar.Editor
                 row.Add(toggle);
                 return row;
             }
+            var pictures = option.ChoicePictures != null && option.ChoicePictures.Count == option.Choices.Count ? option.ChoicePictures : null;
+            Image picture = null;
+            int chosen = option.Current;
+            void Show(int index) { if (picture != null && index >= 0) picture.image = pictures[index]; }
             SegmentedControl choices = null;
             choices = new SegmentedControl(option.Choices.Select((c, i) => new SegmentedControl.Option(c, null, option.ChoiceTooltips?.ElementAtOrDefault(i))), index =>
             {
+                chosen = index;
+                Show(index);
                 if (index == option.Current) return;
                 // The switch moves on press; the change (its first time builds the prop's new controller) runs after that frame.
                 row.schedule.Execute(() =>
@@ -510,6 +517,8 @@ namespace Orbiters.MyAvatar.Editor
                     catch (Exception e)
                     {
                         choices.SetIndex(option.Current);
+                        chosen = option.Current;
+                        Show(chosen);
                         AccessoryService.Status(avatar, "Could not change " + option.Label.ToLowerInvariant() + ": " + e.Message, true, avatar.accessoryNotes);
                         return;
                     }
@@ -518,7 +527,21 @@ namespace Orbiters.MyAvatar.Editor
             });
             if (option.Current >= 0) choices.SetIndex(option.Current);
             row.Add(choices);
-            return row;
+            if (pictures == null) return row;
+            var group = new VisualElement(); group.AddToClassList("accessory-item__option-group");
+            group.Add(row);
+            picture = new Image { scaleMode = ScaleMode.ScaleToFit, pickingMode = PickingMode.Ignore };
+            picture.AddToClassList("accessory-item__option-picture");
+            group.Add(picture);
+            Show(Math.Max(chosen, 0));
+            var tabs = choices.Query(className: "orb-segmented__tab").ToList();
+            for (int i = 0; i < tabs.Count && i < pictures.Count; i++)
+            {
+                int index = i;
+                tabs[i].RegisterCallback<PointerEnterEvent>(_ => Show(index));
+            }
+            choices.RegisterCallback<PointerLeaveEvent>(_ => Show(Math.Max(chosen, 0)));
+            return group;
         }
 
         private void BoneMenu(OrbitersAttachment attachment)
