@@ -107,6 +107,8 @@ namespace Orbiters.MyAvatar.Editor
             results = new VisualElement(); results.AddToClassList("results"); content.Add(results);
             // Materials worth changing, folded under the drop zone.
             content.Add(new MaterialsSection(avatar));
+            // The import settings VRChat's SDK panel asks of the avatar's files, fixed by themselves.
+            content.Add(new ImportSettingsSection(avatar));
             // The way into the asset gallery; it hides while clothes and accessories are switched off.
             var hero = new Gallery.GalleryHero(avatar, OpenGallery);
             content.Add(hero);

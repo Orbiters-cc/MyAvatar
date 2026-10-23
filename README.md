@@ -14,6 +14,10 @@
 - Upload optimization leaves glyph and font atlases as they are (Orb's panel and screen, avatar text): they are read a
   letter's cell at a time, so their mesh says nothing of how sharp they must be. Orb's atlas went up at 64 × 128 and its
   letters showed as blobs.
+- VRChat's import alerts fix themselves: models without Read/Write, calculated blendshape normals without Legacy
+  Blendshape Normals and mipmapped textures without Streaming Mip Maps are changed in their import settings as soon as
+  My Avatar finds them, so the SDK panel's Review Any Alerts has nothing to say about them. A small **VRChat import
+  settings** card says what changed ("Ask me first" or Orbiters settings to be asked instead).
 
 ## 0.9.12 — 2026-10-21
 
@@ -912,6 +916,17 @@ and assigned to this avatar's renderers only. Fixing again after an Undo uses th
 same original (an original imported again since gets "name (old) 1.mat"), and the copy the Undo left unused; a fix that
 fails midway puts everything back and removes the files it made. The Console lists what changed. The `myavatar_materials` MCP tool
 (`inspect`, `fix`) does the same on any scene avatar, with or without My Avatar on it.
+
+## VRChat import settings
+
+VRChat's SDK panel asks three things of an avatar's files before an upload: models imported with **Read/Write**,
+skinned meshes whose calculated blendshape normals use **Legacy Blendshape Normals** (a much smaller upload), and
+mipmapped textures with **Streaming Mip Maps**. My Avatar checks them as the SDK does (skinned, filtered and particle
+meshes, the renderers' textures, nothing under an EditorOnly object) and changes those import settings by itself, each
+file imported again once: when its card looks at the avatar, and when the SDK panel shows an avatar it looks after. The
+**VRChat import settings** card below Materials says what changed; **Ask me first** (or "Fix VRChat's import alerts by
+itself" in Orbiters settings) lists them there instead, with a **Fix** button. Files inside a package are left as they
+are (the card counts them): the SDK panel can still list those.
 
 ## Thumbnail
 
