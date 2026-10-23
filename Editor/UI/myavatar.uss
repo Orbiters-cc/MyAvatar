@@ -216,7 +216,7 @@
 /* A prop's own setting (Orb's text slots): a compact switch as tall as the card's buttons. */
 .accessory-item__option { flex-direction: row; align-items: center; margin-top: 6px; }
 .accessory-item__option-label { min-width: 64px; margin: 0 8px 0 0; padding: 0; font-size: 11px; color: #9a9a9a; }
-.accessory-item__option .orb-segmented { width: 84px; height: 22px; padding: 2px; border-radius: 8px; }
+.accessory-item__option .orb-segmented { width: 112px; height: 22px; padding: 2px; border-radius: 8px; }
 .accessory-item__option .orb-segmented__indicator { top: 2px; bottom: 2px; border-radius: 6px; }
 .accessory-item__option .orb-segmented__tab { height: 18px; border-radius: 6px; }
 .accessory-item__option .orb-segmented__label { font-size: 11px; }
