@@ -34,6 +34,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             contexts.Clear(); pages.Clear(); assets.Clear();
         }
 
+        /// <summary>What the gallery offers each asset is read again at its next use; the last answer shows until then.</summary>
+        internal static void Expire()
+        {
+            foreach (var key in new List<string>(assets.Keys)) assets[key] = (assets[key].task, DateTime.MinValue);
+        }
+
         /// <summary>
         /// One asset as the gallery offers it to this avatar now (its newest compatible version), read again after a few
         /// minutes; null when Orbiters cannot be reached.

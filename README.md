@@ -7,6 +7,9 @@
 - The gallery knows the avatar's base when a tool on it names the base after its model (MCB's "MasculineCanine.v1.5"):
   the base registered with a model file of that name is chosen, where it said Unknown base. A mesh Mixer is editing
   counts as its original model too (Toolkit `WorkingMeshes`).
+- The gallery's reload button also reads again what the gallery offers the items on the avatar, so a version published
+  a moment ago shows at once on their lines under On this avatar and in Mixer's Hierarchy, which otherwise read it
+  again every two minutes.
 - A prop's own settings show on its card under On this avatar, as a small switch that moves on press: N4N0's text slots
   (4 or 8: 50 or 82 synced bits), so N4N0 fits an avatar with few free bits. The parameter count below the list
   follows; a toggle adds N4N0's Walk boost radial to its menu, another (Replace Orbiters overlay) has N4N0 project its menu

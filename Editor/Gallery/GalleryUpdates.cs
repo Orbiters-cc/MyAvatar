@@ -32,6 +32,22 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return offered;
         }
 
+        /// <summary>
+        /// Reads again what the gallery offers each of its assets on the avatar (the gallery's reload button), so its lines
+        /// in My Avatar and Mixer's Hierarchy show a version published a moment ago without waiting for their next read.
+        /// </summary>
+        internal static void ReadAgainNow(MyAvatar avatar)
+        {
+            GalleryCache.Expire();
+            var assetIds = new HashSet<int>();
+            foreach (var (receipt, _) in GalleryInstaller.Installed(avatar))
+            {
+                string key = avatar.GetInstanceID() + "|" + receipt.assetId;
+                if (assetIds.Add(receipt.assetId) && !reading.Contains(key))
+                    ReadAgain(avatar, receipt.assetId, key, Offered(GalleryCache.Peek(avatar, receipt.assetId, out _)));
+            }
+        }
+
         private static async void ReadAgain(MyAvatar avatar, int assetId, string key, string before)
         {
             reading.Add(key);

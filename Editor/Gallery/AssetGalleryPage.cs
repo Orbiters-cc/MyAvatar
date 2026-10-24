@@ -44,7 +44,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var header = GalleryUI.Box("gallery-page__header", this);
             header.Add(GalleryUI.IconButton(IconGlyph.Chevron, "Back to My Avatar", () => back(), "gallery-back", "gallery-back__icon"));
             GalleryUI.Text("Asset Gallery", "gallery-page__title", header);
-            var refresh = new Orbiters.Toolkit.Editor.IconButton(IconGlyph.Refresh, "", "Reload the gallery", () => Reload());
+            var refresh = new Orbiters.Toolkit.Editor.IconButton(IconGlyph.Refresh, "", "Reload the gallery", () =>
+            {
+                if (avatar) GalleryUpdates.ReadAgainNow(avatar);
+                Reload();
+            });
             refresh.AddToClassList("orb-icon-button--small"); header.Add(refresh);
             var publishButton = GalleryUI.Button("Publish", () => publish(), "gallery-publish");
             publishButton.tooltip = "Publish your own clothes and accessories in the gallery.";
