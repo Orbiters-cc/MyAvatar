@@ -55,8 +55,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             int chosen = EditorPrefs.GetInt(Key(avatar), 0);
             if (chosen > 0) Use(bases.FirstOrDefault(b => b.id == chosen), "chosen");
 
-            // A tool on the avatar (MCB) answers at once; its base is named after the model ("RexouiumRig1.6_V265").
-            if (!context.BaseId.HasValue) Use(Named(CustomBases.Describe(avatar.transform)?.BaseName) ?? Within(CustomBases.Describe(avatar.transform)?.BaseName, bases), "tool");
+            // A tool on the avatar (MCB) answers at once; its base is named after the model ("RexouiumRig1.6_V265"), which
+            // is also the name of a model file the base is registered with.
+            if (!context.BaseId.HasValue)
+            {
+                string toolBase = CustomBases.Describe(avatar.transform)?.BaseName;
+                Use(Named(toolBase) ?? ByModelName(toolBase, bases) ?? Within(toolBase, bases), "tool");
+            }
             var body = AttachmentPlanner.Body(avatar.transform);
             if (!context.BaseId.HasValue && body != null)
             {
@@ -82,7 +87,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private static GalleryBase ByProjectPaths(MyAvatar avatar, IReadOnlyList<GalleryBase> bases)
         {
             var paths = new HashSet<string>(avatar.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                .Select(r => r.sharedMesh ? AssetDatabase.GetAssetPath(r.sharedMesh) : null).Where(p => !string.IsNullOrEmpty(p))
+                .Select(r => r.sharedMesh ? AssetDatabase.GetAssetPath(WorkingMeshes.AssetOf(r.sharedMesh)) : null).Where(p => !string.IsNullOrEmpty(p))
                 .Select(Normalize), StringComparer.OrdinalIgnoreCase);
             if (paths.Count == 0) return null;
             return bases.FirstOrDefault(b => b.patterns?.paths?.pathsList?.Any(p => paths.Contains(Normalize(p))) == true);
@@ -91,8 +96,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         // The base's name in the avatar's or its body model's name ("Rexouium1.6 Default Setup").
         private static GalleryBase ByName(MyAvatar avatar, SkinnedMeshRenderer body, IReadOnlyList<GalleryBase> bases)
         {
-            string model = body && body.sharedMesh ? System.IO.Path.GetFileNameWithoutExtension(AssetDatabase.GetAssetPath(body.sharedMesh)) : "";
+            string model = body && body.sharedMesh ? System.IO.Path.GetFileNameWithoutExtension(AssetDatabase.GetAssetPath(WorkingMeshes.AssetOf(body.sharedMesh))) : "";
             return Within(avatar.name + " " + model, bases);
+        }
+
+        // A base registered with a model file of that name ("MasculineCanine.v1.5" for .../MasculineCanine.v1.5.fbx).
+        private static GalleryBase ByModelName(string model, IReadOnlyList<GalleryBase> bases)
+        {
+            if (string.IsNullOrWhiteSpace(model)) return null;
+            return bases.FirstOrDefault(b => b.patterns?.paths?.pathsList?.Any(p =>
+                string.Equals(System.IO.Path.GetFileNameWithoutExtension(Normalize(p)), model.Trim(), StringComparison.OrdinalIgnoreCase)) == true);
         }
 
         // The longest registered base name found in the text.

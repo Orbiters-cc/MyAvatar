@@ -4,6 +4,9 @@
 
 - Save's checkpoints, the Versioning card and the Tools tile use Mixer Git, which comes with Mixer 0.2 (Unit Git
   became part of Mixer): the optional dependency is Mixer, and the tile installs it when missing.
+- The gallery knows the avatar's base when a tool on it names the base after its model (MCB's "MasculineCanine.v1.5"):
+  the base registered with a model file of that name is chosen, where it said Unknown base. A mesh Mixer is editing
+  counts as its original model too (Toolkit `WorkingMeshes`).
 - A prop's own settings show on its card under On this avatar, as a small switch that moves on press: N4N0's text slots
   (4 or 8: 50 or 82 synced bits), so N4N0 fits an avatar with few free bits. The parameter count below the list
   follows; a toggle adds N4N0's Walk boost radial to its menu, another (Replace Orbiters overlay) has N4N0 project its menu
