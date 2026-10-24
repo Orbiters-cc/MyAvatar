@@ -1,7 +1,8 @@
 # My Avatar
 
-## 0.9.13 — 2026-10-21
+## 0.9.13 — 2026-10-24
 
+- Requires Orbiters Toolkit 0.4.3 (`WorkingMeshes`, Stick to the skin and the pictures of an option's choices).
 - Save's checkpoints, the Versioning card and the Tools tile use Mixer Git, which comes with Mixer 0.2 (Unit Git
   became part of Mixer): the optional dependency is Mixer, and the tile installs it when missing.
 - The gallery knows the avatar's base when a tool on it names the base after its model (MCB's "MasculineCanine.v1.5"):
