@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -92,6 +93,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(guid));
                     var row = GalleryUI.Box("creator-prefab", card);
                     GalleryUI.Text(prefab ? prefab.name : "Missing prefab", "creator-prefab__name", row);
+                    if (prefab) row.Add(SettingsButton(prefab, variant));
                     var id = guid;
                     row.Add(GalleryUI.Button("Remove", () => { variant.prefabGuids.Remove(id); variant.report = null; Build(); }, "gallery-link"));
                 }
@@ -121,6 +123,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 });
                 card.Add(picker);
                 card.Add(note);
+                var docs = GalleryUI.Button("Item settings: how they work ↗", () => Application.OpenURL(ItemSettingsDocs), "gallery-link");
+                docs.tooltip = "Switches and choices buyers set on the item's card in My Avatar, from a .settings.json file beside the prefab.";
+                docs.style.alignSelf = Align.FlexStart; docs.style.marginTop = 4;
+                card.Add(docs);
             }
 
             Label("Platforms", card);
@@ -199,6 +205,33 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Build();
         }
 
+        // Orbiters' documentation of item settings (alpha until Orbiters Toolkit 0.4.4 and My Avatar 0.9.14 are out).
+        private static string ItemSettingsDocs => OrbitersEnvironment.WebsiteUrl + "documentation/orbiters.myavatar.item-settings?stage=alpha";
+
+        // The prefab's item settings (Jacket.settings.json beside it), the switches and choices buyers get on the item's
+        // card: opens the file, or starts one with a first switch.
+        private VisualElement SettingsButton(GameObject prefab, GalleryVariantDraft variant)
+        {
+            string path = ItemSettings.PathFor(AssetDatabase.GetAssetPath(prefab));
+            bool exists = File.Exists(path);
+            var button = GalleryUI.Button(exists ? "Edit settings" : "Add settings", () =>
+            {
+                if (!File.Exists(path))
+                {
+                    File.WriteAllText(path, ItemSettings.Template(prefab));
+                    AssetDatabase.ImportAsset(path);
+                    variant.report = null;
+                }
+                var asset = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+                if (asset != null) { EditorGUIUtility.PingObject(asset); AssetDatabase.OpenAsset(asset); }
+                Build();
+            }, "gallery-link");
+            button.tooltip = exists
+                ? "Opens " + Path.GetFileName(path) + ", the settings buyers get on this item's card. Build the package again to check it."
+                : "Starts " + Path.GetFileName(path) + " beside the prefab with a first switch: settings buyers get on this item's card.";
+            return button;
+        }
+
         private void Report(VisualElement card, GalleryVariantDraft variant)
         {
             var report = variant.report;
@@ -207,6 +240,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Line($"{report.files} files · {GalleryUI.Size(report.bytes)} · {(report.parameterBits > 0 ? report.parameterBits + " bits of parameters" : "no synced parameters")}" +
                  (report.containsCode ? $" · {report.codeFiles.Count} code file{(report.codeFiles.Count == 1 ? "" : "s")}" : ""));
             if (report.containsCode) Line("Contains code: buyers are asked before it is imported, unless Orbiters marked you a trusted creator.", "muted");
+            foreach (string settings in report.settings) Line("Item settings · " + settings, "muted");
             if (report.dependencies.Count > 0) Line("Needs " + string.Join(", ", report.dependencies.Select(d => d.displayName + " " + d.range)) + ": My Avatar installs them for buyers.", "muted");
             foreach (string error in report.errors) Line(error, "error");
             foreach (string warning in report.warnings) Line(warning, "warning");

@@ -1,5 +1,14 @@
 # My Avatar
 
+## 0.9.14 — 2026-10-24
+
+- Requires Orbiters Toolkit 0.4.4.
+- Item settings on cards: an item whose prefab has a `.settings.json` beside it shows its switches and choices under
+  On this avatar, as N4N0 does (Orbiters Toolkit's `ItemSettings`).
+- Publishing to the gallery helps with them: each prefab has Add settings (a file beside it with a first switch) or
+  Edit settings, the package takes the file with the materials and pictures it uses, its problems block publishing
+  until fixed, the report lists the settings, and a link opens Orbiters' documentation of item settings.
+
 ## 0.9.13 — 2026-10-24
 
 - Requires Orbiters Toolkit 0.4.3 (`WorkingMeshes`, Stick to the skin and the pictures of an option's choices).

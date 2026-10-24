@@ -36,6 +36,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             public List<string> warnings = new List<string>();
             public List<string> errors = new List<string>();
             public List<GalleryDependency> dependencies = new List<GalleryDependency>();
+            /// <summary>Per prefab with item settings (its .settings.json), what buyers can set on its card.</summary>
+            public List<string> settings = new List<string>();
             /// <summary>Prefabs the package holds, by GUID, for the setups to choose from.</summary>
             public List<GallerySetupPrefab> prefabs = new List<GallerySetupPrefab>();
             [JsonIgnore] public bool Publishable => errors.Count == 0 && bytes > 0 && bytes <= MaxBytes;
@@ -50,7 +52,22 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var report = new Report();
             var roots = prefabs.Where(p => p != null).Select(AssetDatabase.GetAssetPath).Where(p => !string.IsNullOrEmpty(p)).Distinct().ToList();
             if (roots.Count == 0) { report.errors.Add("Choose at least one prefab from the project."); return report; }
-            var paths = AssetDatabase.GetDependencies(roots.ToArray(), true).Distinct().ToList();
+            // A prefab's item settings (Jacket.settings.json beside Jacket.prefab) go in, checked, with the materials and
+            // pictures they use: nothing in the prefab points at an option's other material.
+            var settings = new List<string>();
+            foreach (string root in roots)
+            {
+                string settingsPath = ItemSettings.PathFor(root);
+                if (!File.Exists(settingsPath)) continue;
+                var problems = new List<string>();
+                var definition = ItemSettings.Read(settingsPath, AssetDatabase.LoadAssetAtPath<GameObject>(root), problems);
+                report.errors.AddRange(problems);
+                if (definition == null) continue;
+                settings.Add(settingsPath);
+                settings.AddRange(ItemSettings.AssetsOf(settingsPath, definition));
+                report.settings.Add(Path.GetFileNameWithoutExtension(root) + ": " + string.Join(", ", definition.settings.Select(s => s.label)));
+            }
+            var paths = AssetDatabase.GetDependencies(roots.Concat(settings).ToArray(), true).Distinct().ToList();
             var kept = new List<string>();
             foreach (string path in paths)
             {
@@ -60,9 +77,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 if (reason != null) { report.excluded.Add(path + " · " + reason); continue; }
                 kept.Add(path);
             }
-            // Props Toolkit fits to the avatar (a drawing pen, a hand screen) need a Toolkit that knows them.
+            // Props Toolkit fits to the avatar (a drawing pen, a hand screen) and items with settings need a Toolkit that knows them.
             var toolkit = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(AttachmentHooks).Assembly);
-            if (toolkit != null && prefabs.Any(AttachmentHooks.Fits)) Depend(report, toolkit.assetPath);
+            if (toolkit != null && (prefabs.Any(AttachmentHooks.Fits) || settings.Count > 0)) Depend(report, toolkit.assetPath);
             CheckShaders(report, paths);
             if (report.errors.Count > 0) return report;
             Directory.CreateDirectory(Folder);
@@ -94,6 +111,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 if (reason != null) { report.excluded.Add(entry.Path + " · " + reason); continue; }
                 keep.Add(entry.Guid);
             }
+            // Item settings come as the creator wrote them: only a build from the project's prefabs checks them.
+            foreach (var entry in index.Entries.Where(e => keep.Contains(e.Guid) && e.Path.EndsWith(ItemSettings.Extension, StringComparison.OrdinalIgnoreCase)))
+                report.settings.Add(Path.GetFileName(entry.Path) + " (as written: build from the prefabs in the project to have it checked)");
             // Materials of the project with the same GUIDs tell which shaders they use.
             CheckShaders(report, index.Entries.Where(e => keep.Contains(e.Guid)).Select(e => AssetDatabase.GUIDToAssetPath(e.Guid)).Where(p => !string.IsNullOrEmpty(p)));
             if (report.errors.Count > 0) return report;
