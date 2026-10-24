@@ -205,8 +205,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Build();
         }
 
-        // Orbiters' documentation of item settings (alpha until Orbiters Toolkit 0.4.4 and My Avatar 0.9.14 are out).
-        private static string ItemSettingsDocs => OrbitersEnvironment.WebsiteUrl + "documentation/orbiters.myavatar.item-settings?stage=alpha";
+        // Orbiters' documentation of item settings.
+        private static string ItemSettingsDocs => OrbitersEnvironment.WebsiteUrl + "documentation/orbiters.myavatar.item-settings";
 
         // The prefab's item settings (Jacket.settings.json beside it), the switches and choices buyers get on the item's
         // card: opens the file, or starts one with a first switch.
