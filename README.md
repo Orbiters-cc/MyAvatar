@@ -2,23 +2,25 @@
 
 ## 0.9.13 — 2026-10-21
 
-- A prop's own settings show on its card under On this avatar, as a small switch that moves on press: Orb's text slots
-  (4 or 8: 50 or 82 synced bits), so an orb fits an avatar with few free bits. The parameter count below the list
-  follows; a toggle adds Orb's Walk boost radial to its menu, another (Replace Orbiters overlay) has Orb project its menu
-  on a screen before you in VR too, instead of Orbiters desktop's SteamVR overlay (in desktop mode it always does). A
+- Save's checkpoints, the Versioning card and the Tools tile use Mixer Git, which comes with Mixer 0.2 (Unit Git
+  became part of Mixer): the optional dependency is Mixer, and the tile installs it when missing.
+- A prop's own settings show on its card under On this avatar, as a small switch that moves on press: N4N0's text slots
+  (4 or 8: 50 or 82 synced bits), so N4N0 fits an avatar with few free bits. The parameter count below the list
+  follows; a toggle adds N4N0's Walk boost radial to its menu, another (Replace Orbiters overlay) has N4N0 project its menu
+  on a screen before you in VR too, instead of Orbiters - N4N0's SteamVR overlay (in desktop mode it always does). A
   card's settings line up in one column. They stay as set after an upload, and an update from the gallery keeps them.
   Needs Orbiters Toolkit 0.4.2.
 - A gallery item with a newer version shows Update on its line in Mixer's Hierarchy too (the same update as on its line
   under On this avatar, in the background, the pill saying "Updating…" meanwhile).
 - The gallery's green buttons (Add, Update, Post review) have white text, like the progress bar that takes their place.
-- Upload optimization leaves glyph and font atlases as they are (Orb's panel and screen, avatar text): they are read a
-  letter's cell at a time, so their mesh says nothing of how sharp they must be. Orb's atlas went up at 64 × 128 and its
+- Upload optimization leaves glyph and font atlases as they are (N4N0's panel and screen, avatar text): they are read a
+  letter's cell at a time, so their mesh says nothing of how sharp they must be. N4N0's atlas went up at 64 × 128 and its
   letters showed as blobs.
 - VRChat's import alerts fix themselves: models without Read/Write, calculated blendshape normals without Legacy
   Blendshape Normals and mipmapped textures without Streaming Mip Maps are changed in their import settings as soon as
   My Avatar finds them, so the SDK panel's Review Any Alerts has nothing to say about them. A small **VRChat import
   settings** card says what changed ("Ask me first" or Orbiters settings to be asked instead).
-- An item's option can show what each choice looks like: Orb's **Look** shows a picture of its menu, Orbiters' own or
+- An item's option can show what each choice looks like: N4N0's **Look** shows a picture of its menu, Orbiters' own or
   retro, under its switch, swapped on press and while the pointer is over the other choice. The option switches are
   112 points wide, so "Modern" fits.
 
@@ -482,7 +484,7 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing,
 ## Get started
 
 1. Install **My Avatar** from the Orbiters VPM repository. Orbiters Toolkit
-   is a required dependency; Unit Git 0.1.3 or newer is optional. The VRChat avatar SDK removes this editor-only
+   is a required dependency; Mixer 0.2 or newer (for Mixer Git) is optional. The VRChat avatar SDK removes this editor-only
    component when uploading an avatar.
 2. Select the avatar root in an open scene. Add **Orbiters > My Avatar** using
    Add Component or the GameObject menu.
@@ -499,9 +501,9 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing,
    brings them back.
 5. **Undo** restores the materials from before the set (then reads **Redo**),
    including after a scene reload. Save your scene to retain the component data.
-6. **Save** saves the current avatar scene and generated assets. When Unit Git is
+6. **Save** saves the current avatar scene and generated assets. When Mixer Git is
    installed it also creates a local commit named `texture change` once the
-   project's Git repository is initialized in Unit Git. The checkpoint includes the current scene (including its other pending
+   project's Git repository is initialized in Mixer Git. The checkpoint includes the current scene (including its other pending
    changes), generated textures/materials and their metadata. Unrelated project
    paths and staged changes are excluded. Ignored checkpoint files must be
    unignored first. Saving unchanged files succeeds without making an empty commit. Nothing is pushed.
@@ -1020,7 +1022,7 @@ Buttons for tools that go with My Avatar, each marked **Install** until it is in
 
 - **Gesture Manager** (VRChat curated repository): installs the latest version when missing,
   then puts its Gesture Manager object at the scene root, or selects the one already there.
-- **Unit Git**: opens Unit Git, after installing it when missing.
+- **Mixer Git**: opens Mixer Git, after installing Mixer (which carries it) when missing.
 
 An install shows what it downloads first (each package, and the VPM repositories it adds to your Creator Companion,
 which every project uses), then goes through VPM once you accept; the tool opens once Unity has reloaded.
@@ -1089,7 +1091,7 @@ follows the avatar live: change a toggle or a menu asset and it updates.
   is and changed with VRCFury's own Move Menu Item, Set Icon, Reorder Menu Item and Override Menu Settings, on one
   object at the end of the avatar, **Menu edits (My Avatar)**, rewritten at every Save.
 
-Then, like the texture Save, it saves the assets and the avatar's scene (with Unit Git, also a local "menu change"
+Then, like the texture Save, it saves the assets and the avatar's scene (with Mixer Git, also a local "menu change"
 checkpoint; nothing is pushed). Ctrl+Z still puts the menu back as it was.
 
 Left-out items and **Remove default menu** are kept on the My Avatar component; the menu assets don't change. Each
@@ -1295,6 +1297,6 @@ controls, animated glow rendering, SVG logo drawing, the photoshoot panel, the
 shared controls (segmented control, scrub dial, icons, switch, stage badge, support footer),
 feature flags, VPM dependency prompts, bone matching, accessory attachment and its build step,
 symmetry and accessory posing, the parameter estimate and hair/tail/toe PhysBone
-editing. Orbiters Toolkit draws and picks bones. Unit Git, when installed, owns Git
+editing. Orbiters Toolkit draws and picks bones. Mixer Git, when installed, owns Git
 execution and scoped index handling; the `MYAVATAR_UNITGIT` version define enables
 the commit step. My Avatar does not depend on MCB.

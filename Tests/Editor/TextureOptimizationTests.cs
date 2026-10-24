@@ -81,8 +81,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.IsNotNull(TextureOptimization.Exclusion("Assets/strip.png", "strip", "_MainTex Main", 256, 8));
             Assert.IsNotNull(TextureOptimization.Exclusion("Assets/strip.png", "strip", "_MainTex Main", 1024, 32));
             Assert.IsNotNull(TextureOptimization.Exclusion("Assets/Glow.exr", "Glow", "_EmissionMap Emission", 1024, 1024));
-            // Glyph and font atlases (Orb's panel, avatar text): read a letter at a time, never shrunk.
-            Assert.IsNotNull(TextureOptimization.Exclusion("Assets/Orb text.png", "Orb text", "_MainTex Glyph atlas", 1024, 2048));
+            // Glyph and font atlases (N4N0's panel, avatar text): read a letter at a time, never shrunk.
+            Assert.IsNotNull(TextureOptimization.Exclusion("Assets/N4N0 text.png", "N4N0 text", "_MainTex Glyph atlas", 1024, 2048));
             Assert.IsNotNull(TextureOptimization.Exclusion("Assets/KAT.png", "KAT", "_Font_0x0000_0x1FFF Font", 2048, 2048));
             Assert.IsNull(TextureOptimization.Exclusion("Assets/Body_Atlas.png", "Body_Atlas", "_MainTex Atlas", 2048, 2048));
             // Words containing "lut" are not lookup tables.

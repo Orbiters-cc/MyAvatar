@@ -263,7 +263,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             actions.Add(cancel);
             save = MyAvatarEditor.Button("Save", null); save.AddToClassList("me-save");
             save.tooltip = "Write the changes into the avatar's menu (one Undo step), then save its scene and assets" +
-                           (TextureChanges.Commits ? " and record a “menu change” checkpoint in Unit Git, like My Avatar's texture Save. Nothing is pushed." : ".");
+                           (TextureChanges.Commits ? " and record a “menu change” checkpoint in Mixer Git, like My Avatar's texture Save. Nothing is pushed." : ".");
             ButtonInteraction.RegisterImmediateClick(save, () =>
             {
                 // The press shows at once; the save runs on the next frame.
@@ -1487,7 +1487,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return saved;
         }
 
-        // Like My Avatar's texture Save: the assets and the avatar's scene go to disk (with Unit Git, a "menu change"
+        // Like My Avatar's texture Save: the assets and the avatar's scene go to disk (with Mixer Git, a "menu change"
         // checkpoint too). Ctrl+Z still undoes the save in the editor.
         private async void WriteToDisk(string summary, IEnumerable<string> touched)
         {

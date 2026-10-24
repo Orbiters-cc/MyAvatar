@@ -97,8 +97,8 @@ namespace Orbiters.MyAvatar.Editor
                 note = await TextureChanges.SaveAsync(avatar); noteWarning = false;
                 saved = true;
             }, false));
-            save.tooltip = TextureChanges.Commits ? "Save the scene and generated assets, and record a “texture change” checkpoint in Unit Git. Nothing is pushed."
-                : "Save the scene and the generated textures and materials. Install Unit Git to also record a local checkpoint.";
+            save.tooltip = TextureChanges.Commits ? "Save the scene and generated assets, and record a “texture change” checkpoint in Mixer Git. Nothing is pushed."
+                : "Save the scene and the generated textures and materials. Install Mixer Git to also record a local checkpoint.";
             save.AddToClassList("mcb-button--primary");
             undo.AddToClassList("drop-zone__undo"); save.AddToClassList("drop-zone__save");
             zone = new DropZone(AccessoriesSection.Enabled ? DropZone.Anything : DropZone.Textures, Drop,

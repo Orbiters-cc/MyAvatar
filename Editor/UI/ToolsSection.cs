@@ -11,12 +11,12 @@ using Orbiters.Toolkit.Editor.Vpm;
 namespace Orbiters.MyAvatar.Editor
 {
     // Tools that go with an avatar, one click each: Gesture Manager and AudioLink (added to the scene, or the one there
-    // selected), d4rkAvatarOptimizer and MCB (put on this avatar, or the one there selected) and Unit Git (its window).
+    // selected), d4rkAvatarOptimizer and MCB (put on this avatar, or the one there selected) and Mixer Git (its window).
     // A tool that is missing is installed first through VPM, once the plan of what that downloads (each package, and the
     // repositories added to the Creator Companion) was accepted; it opens once Unity has reloaded its scripts.
     internal sealed class ToolsSection : AvatarSection
     {
-        internal const string GestureManagerId = "vrchat.blackstartx.gesture-manager", UnitGitId = "orbiters.unitgit",
+        internal const string GestureManagerId = "vrchat.blackstartx.gesture-manager", UnitGitId = "orbiters.mixer",
             OptimizerId = "d4rkpl4y3r.d4rkavataroptimizer", McbId = "orbiters.mcb", AudioLinkId = "com.llealloo.audiolink";
         private const string PendingKey = "Orbiters.MyAvatar.PendingTool", PendingAvatarKey = "Orbiters.MyAvatar.PendingToolAvatar";
         private const string GestureManagerType = "BlackStartX.GestureManager.GestureManager", McbType = "MyCustomBase";
@@ -38,8 +38,8 @@ namespace Orbiters.MyAvatar.Editor
             row.Add(Tile(IconGlyph.Sound, "AudioLink", AudioLinkId,
                 "Test the avatar's audio-reactive materials: AudioLink's avatar prefab is added to the scene and selected; installed first when missing.\n" +
                 "My Avatar is not associated with AudioLink."));
-            row.Add(Tile(IconGlyph.Branch, "Unit Git", UnitGitId,
-                "Checkpoints and history for this project, with nothing pushed unless you ask. Installed first when missing."));
+            row.Add(Tile(IconGlyph.Branch, "Mixer Git", UnitGitId,
+                "Checkpoints and history for this project, with nothing pushed unless you ask. Comes with Mixer, installed first when missing."));
             plan = new VisualElement(); Body.Add(plan);
             note = new Label(); note.AddToClassList("avatar-section__note"); note.style.display = DisplayStyle.None; Body.Add(note);
         }
@@ -92,7 +92,7 @@ namespace Orbiters.MyAvatar.Editor
             switch (id)
             {
                 case UnitGitId:
-                    EditorApplication.ExecuteMenuItem("Tools/Orbiters/Unit Git");
+                    EditorApplication.ExecuteMenuItem("Tools/Orbiters/Mixer Git");
                     return null;
                 case AudioLinkId:
                     // AudioLink's own command: its avatar prefab in the scene (the one there when there is one), pinged.

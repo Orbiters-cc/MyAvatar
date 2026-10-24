@@ -475,8 +475,8 @@ namespace Orbiters.MyAvatar.Editor
             });
         }
 
-        // A setting the prop offers (Orb's text slots): its name and a small switch, which shows the new choice at once,
-        // then the parameter budget below the list follows. A setting with pictures (Orb's look) shows the chosen one under
+        // A setting the prop offers (N4N0's text slots): its name and a small switch, which shows the new choice at once,
+        // then the parameter budget below the list follows. A setting with pictures (N4N0's look) shows the chosen one under
         // its switch, and the other while the pointer is over that choice.
         private VisualElement OptionRow(AttachmentOption option)
         {

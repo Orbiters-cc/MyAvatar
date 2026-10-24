@@ -154,7 +154,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (!string.IsNullOrEmpty(job.updateOf))
             {
                 var olds = AttachmentInstaller.Installed(avatar.transform).Where(a => a && a.gallery?.installId == job.updateOf).ToList();
-                // The settings chosen on the older copy's card (Orb's text slots) carry over.
+                // The settings chosen on the older copy's card (N4N0's text slots) carry over.
                 for (int i = 0; i < olds.Count && i < attachments.Count; i++)
                 {
                     try { AttachmentHooks.CarryOptions(olds[i].gameObject, attachments[i].gameObject); }

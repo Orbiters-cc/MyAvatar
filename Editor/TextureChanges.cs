@@ -354,7 +354,7 @@ namespace Orbiters.MyAvatar.Editor
                 (gone == 0 ? "" : $" Skipped {gone} renderer{(gone == 1 ? "" : "s")} no longer on the avatar (replaced since, e.g. by a custom base version)."); Dirty(avatar);
         }
 
-        // Unit Git is optional: without it Save stores the scene and generated assets; with it, Save also records a local commit.
+        // Mixer Git is optional: without it Save stores the scene and generated assets; with it, Save also records a local commit.
 #if MYAVATAR_UNITGIT
         internal const bool Commits = true;
 #else
@@ -364,7 +364,7 @@ namespace Orbiters.MyAvatar.Editor
         internal static Task<string> SaveAsync(MyAvatar avatar) => SaveAsync(avatar.gameObject.scene, avatar, "texture change", null);
 
         /// <summary>
-        /// Saves the modified assets and <paramref name="scene"/>; with Unit Git, also records a local checkpoint named
+        /// Saves the modified assets and <paramref name="scene"/>; with Mixer Git, also records a local checkpoint named
         /// <paramref name="checkpoint"/> holding the scene, My Avatar's files for <paramref name="avatar"/> (when given) and
         /// the <paramref name="touched"/> assets.
         /// </summary>
@@ -376,7 +376,7 @@ namespace Orbiters.MyAvatar.Editor
 #if MYAVATAR_UNITGIT
             string root = Path.GetDirectoryName(Application.dataPath);
             if (!File.Exists(Path.Combine(root, ".git")) && !Directory.Exists(Path.Combine(root, ".git")))
-                return Task.FromResult("Saved. Initialize the project's Git repository in Unit Git to also record a checkpoint.");
+                return Task.FromResult("Saved. Initialize the project's Git repository in Mixer Git to also record a checkpoint.");
             return CommitAsync(CheckpointPaths(scene, avatar, touched), root, checkpoint);
 #else
             return Task.FromResult("Saved.");

@@ -4,7 +4,7 @@
   "references": [
     "Orbiters.MyAvatar",
     "Orbiters.Toolkit",
-    "orbiters.unitgit.Editor",
+    "Orbiters.Mixer.Git.Editor",
     "Orbiters.Toolkit.Editor",
     "Orbiters.Toolkit.VRChat",
     "Orbiters.Toolkit.Editor.VRChat",
@@ -19,8 +19,8 @@
   ],
   "versionDefines": [
     {
-      "name": "orbiters.unitgit",
-      "expression": "0.1.3",
+      "name": "orbiters.mixer",
+      "expression": "0.2.0",
       "define": "MYAVATAR_UNITGIT"
     },
     {

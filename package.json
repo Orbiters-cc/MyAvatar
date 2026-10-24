@@ -3,7 +3,7 @@
   "displayName": "My Avatar",
   "version": "0.9.13",
   "unity": "2022.3",
-  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, edit its VRChat menu as it will look in game, pose it with symmetry and a clothing preview, and set who can grab, pose and stretch its hair, tail and toes. Save also records a Unit Git checkpoint when Unit Git is installed.",
+  "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, edit its VRChat menu as it will look in game, pose it with symmetry and a clothing preview, and set who can grab, pose and stretch its hair, tail and toes. Save also records a Mixer Git checkpoint when Mixer is installed.",
   "author": {
     "name": "Orbiters",
     "url": "https://orbiters.cc",
@@ -41,7 +41,7 @@
         "packages": [
           "orbiters.mcb",
           "orbiters.refit",
-          "orbiters.unitgit"
+          "orbiters.mixer"
         ]
       },
       {
@@ -98,10 +98,10 @@
         "displayName": "Gesture Manager",
         "reason": "Tests gestures, the expression menu and animations of the avatar in Play Mode."
       },
-      "orbiters.unitgit": {
-        "version": ">=0.2.0 <1.0.0",
-        "displayName": "Unit Git",
-        "reason": "Keeps checkpoints and the history of the project; Save also records one."
+      "orbiters.mixer": {
+        "version": ">=0.2.0 <0.3.0",
+        "displayName": "Mixer",
+        "reason": "Mixer Git keeps checkpoints and the history of the project; Save also records one."
       },
       "orbiters.mcb": {
         "version": ">=1.10.4 <2.0.0",

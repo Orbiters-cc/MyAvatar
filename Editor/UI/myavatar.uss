@@ -153,7 +153,7 @@
 .drop-zone__ai--on .drop-zone__ai-icon { --icon-color: #8a7dff; }
 /* Bottom toolbar, like MCB's */
 .myavatar-toolbar { margin: 0; height: 22px; flex-shrink: 0; }
-/* Versioning: Unit Git in miniature */
+/* Versioning: Mixer Git in miniature */
 .git-summary { flex-direction: row; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
 .git-summary__spacer { flex-grow: 1; }
 .git-summary__remote { font-size: 11px; color: #9a9a9a; margin: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
@@ -213,7 +213,7 @@
 .accessory-item__spacer { flex-grow: 1; min-width: 4px; }
 .accessory-item__name { font-size: 12px; -unity-font-style: bold; color: #ffffff; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .accessory-item__how { margin-top: 4px; font-size: 11px; color: #9a9a9a; white-space: normal; }
-/* A prop's own setting (Orb's text slots): a compact switch as tall as the card's buttons. */
+/* A prop's own setting (N4N0's text slots): a compact switch as tall as the card's buttons. */
 .accessory-item__option { flex-direction: row; align-items: center; margin-top: 6px; }
 .accessory-item__option-label { min-width: 64px; margin: 0 8px 0 0; padding: 0; font-size: 11px; color: #9a9a9a; }
 .accessory-item__option-group { flex-direction: column; }

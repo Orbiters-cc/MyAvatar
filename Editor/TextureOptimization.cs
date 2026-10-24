@@ -60,7 +60,7 @@ namespace Orbiters.MyAvatar.Editor
 
         // Ramps, lookup tables and gradients are read as data: resizing or block compression bands them. HDR sources lose range.
         private static readonly HashSet<string> DataWords = new HashSet<string> { "ramp", "lut", "lookup", "gradient", "gradation", "sdf" };
-        // Glyph and font atlases are read a letter's cell at a time, at coordinates the shader works out (Orb's panel and
+        // Glyph and font atlases are read a letter's cell at a time, at coordinates the shader works out (N4N0's panel and
         // screen, avatar text): their mesh says nothing of how sharp they must be, and any shrinking blurs the letters.
         private static readonly HashSet<string> GlyphWords = new HashSet<string> { "glyph", "glyphs", "font", "fonts" };
 
