@@ -1245,11 +1245,11 @@ SDK panel. **Put the ID back** restores it.
 
 ## Optional account and AI
 
-Connecting an account is optional; local matching always works. **Login with
-Discord** or **Login with Telegram** opens your browser on that login; Orbiters then
-asks you to confirm the connection once, showing the same four-letter code as Unity,
-and My Avatar is connected. The link works once and expires after ten minutes. The
-account is shared with the other Orbiters tools; logging out affects all of them.
+Connecting an account is optional; local matching always works. **Sign in** opens
+Orbiters in your browser: sign in there with Discord or Telegram if needed and choose
+**Connect**, and My Avatar is connected, with no code to type (with Orbiters Toolkit's
+new sign-in). The link works once and expires after ten minutes. The account is shared
+with the other Orbiters tools; logging out affects all of them.
 
 The robot in the corner of the drop field shows whether AI help is available: crossed
 out while you are not connected or AI is off. Once connected, click it to turn AI help
