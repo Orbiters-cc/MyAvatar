@@ -70,6 +70,16 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var visemes = FaceShapes.Fill(vrchat, FaceShapes.Vowels5(vrchat));
             Assert.That(visemes, Is.EqualTo(FaceShapes.Visemes.Select(v => "vrc.v_" + v.ToLowerInvariant())), "VRChat's own visemes, all 15, as they are");
             Assert.That(FaceShapes.Blink(vrchat), Is.EqualTo("vrc.blink"));
+
+            // Rexouium sorts its visemes first (AA_V_AA) and names E "EE"; a word ending in "ve" is no viseme.
+            var rexouium = new[] { "EarCurve", "AA_V_AA", "AA_V_CH", "AA_V_DD", "AA_V_EE", "AA_V_FF", "AA_V_IH", "AA_V_KK", "AA_V_NN", "AA_V_OH", "AA_V_OU", "AA_V_PP", "AA_V_RR",
+                "AA_V_Sil", "AA_V_SS", "AA_V_TH", "Blink" };
+            var found = FaceShapes.Fill(rexouium, FaceShapes.Vowels5(rexouium));
+            Assert.That(found[11], Is.EqualTo("AA_V_EE"));
+            Assert.That(found[0], Is.EqualTo("AA_V_Sil"));
+            Assert.That(found.Count(v => v != null), Is.EqualTo(15));
+            Assert.That(FaceShapes.Score(rexouium), Is.EqualTo(6), "Its five vowels by viseme name, and VRChat's own visemes");
+            Assert.That(FaceShapes.Viseme(new[] { "EarCurve", "Wave" }, 11), Is.Null);
         }
 
         [Test] public void FiveVowelsMakeTheVisemesAndAMissingVowelBorrowsTheClosest()
@@ -240,9 +250,10 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var a = Chain("A", bones["Head"], 3, new Vector3(-.03f, .05f, 0), Vector3.down * .05f);
             var b = Chain("B", bones["Head"], 3, new Vector3(.03f, .05f, 0), Vector3.down * .05f);
             var source = new VrmSource { Format = "VRM 1.0" };
+            // VRoid writes strands of one look a thousandth apart: they still share.
             foreach (var start in new[] { a, b })
             {
-                var spring = new VrmSource.Spring { Name = start.name, Chain = start.GetComponentsInChildren<Transform>().ToList() };
+                var spring = new VrmSource.Spring { Name = start.name, Chain = start.GetComponentsInChildren<Transform>().ToList(), Stiffness = start == a ? .85f : .852f };
                 spring.Roots.Add(start);
                 source.Springs.Add(spring);
             }

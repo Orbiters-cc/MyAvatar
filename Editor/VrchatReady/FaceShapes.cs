@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Orbiters.MyAvatar.Editor.FaceTracking;
 
 namespace Orbiters.MyAvatar.Editor.VrchatReady
 {
     /// <summary>
-    /// The face's blendshapes for VRChat's lip sync and blink, found by name: VRChat's own (vrc.v_aa...), VRoid's
+    /// The face's blendshapes for VRChat's lip sync and blink, found by name: VRChat's own (vrc.v_aa, AA_V_AA...), VRoid's
     /// (Fcl_MTH_A, Fcl_EYE_Close, with or without the mesh name before them), MMD's Japanese vowels (あいうえお) and common
     /// English ones (mouth_a, blink...). Names are compared as <see cref="FaceTrackingNames.Normalize"/> gives them:
     /// lower case, letters and digits only.
@@ -52,18 +53,13 @@ namespace Orbiters.MyAvatar.Editor.VrchatReady
         private static readonly string[] BlinkEndings = { "fcleyeclose", "eyeclose", "blink" };
 
         /// <summary>
-        /// The 15 visemes from VRChat's own names when the face has them (vrc.v_aa, v_aa), each missing one from the vowels;
+        /// The 15 visemes from VRChat's own names when the face has them (vrc.v_aa, v_aa, AA_V_AA), each missing one from the vowels;
         /// null entries stay empty. <paramref name="vowels"/> are the five vowels' shapes (A, I, U, E, O; null when unknown).
         /// </summary>
         internal static string[] Fill(IList<string> names, string[] vowels)
         {
-            var normalized = Index(names);
             var result = new string[Visemes.Length];
-            for (int v = 0; v < Visemes.Length; v++)
-            {
-                string own = Visemes[v].ToLowerInvariant();
-                result[v] = Find(normalized, new[] { "vrcv" + own, "v" + own }, null);
-            }
+            for (int v = 0; v < Visemes.Length; v++) result[v] = Viseme(names, v);
             var fromVowels = FromVowels(vowels);
             for (int v = 0; v < Visemes.Length; v++) if (result[v] == null) result[v] = fromVowels[v];
             return result;
@@ -83,8 +79,21 @@ namespace Orbiters.MyAvatar.Editor.VrchatReady
             return result;
         }
 
-        /// <summary>The face's shape for one vowel (<see cref="A"/>...), or null.</summary>
-        internal static string Vowel(IList<string> names, int vowel) => Find(Index(names), VowelNames[vowel], VowelEndings[vowel]);
+        // VRChat's viseme names as avatars write them: "vrc.v_aa", "v_aa", "AA_V_AA" (Rexouium sorts them first), "Viseme_aa";
+        // the E viseme is often "ee". The "v" must start a word: "Curve" isn't a viseme.
+        private static readonly Regex[] VisemePatterns = Visemes
+            .Select(v => new Regex(@"(?:^|[^a-z0-9])(?:vrc[._ -]?)?(?:v|viseme)[._ -]?(?:" + (v == "E" ? "ee?" : v.ToLowerInvariant()) + ")$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)).ToArray();
+
+        // The viseme each vowel is in VRChat's names: aa, ih, ou, E, oh.
+        private static readonly int[] VowelViseme = { 10, 12, 14, 11, 13 };
+
+        /// <summary>The face's shape named as VRChat's viseme <paramref name="viseme"/> (the descriptor's order), or null.</summary>
+        internal static string Viseme(IList<string> names, int viseme) =>
+            (names ?? Array.Empty<string>()).Where(n => n != null && VisemePatterns[viseme].IsMatch(n)).OrderBy(n => n.Length).FirstOrDefault();
+
+        /// <summary>The face's shape for one vowel (<see cref="A"/>...), or null: by a vowel's name, else by VRChat's viseme name.</summary>
+        internal static string Vowel(IList<string> names, int vowel) => Find(Index(names), VowelNames[vowel], VowelEndings[vowel]) ?? Viseme(names, VowelViseme[vowel]);
 
         /// <summary>The five vowels' shapes on this face (null for those it lacks).</summary>
         internal static string[] Vowels5(IList<string> names) => Enumerable.Range(0, 5).Select(v => Vowel(names, v)).ToArray();
@@ -95,9 +104,8 @@ namespace Orbiters.MyAvatar.Editor.VrchatReady
         /// <summary>How many of the five vowels this face has, plus one for VRChat's own visemes: picks the face mesh.</summary>
         internal static int Score(IList<string> names)
         {
-            var normalized = Index(names);
-            int score = Enumerable.Range(0, 5).Count(v => Find(normalized, VowelNames[v], VowelEndings[v]) != null);
-            if (normalized.ContainsKey("vrcvaa") || normalized.ContainsKey("vaa")) score++;
+            int score = Enumerable.Range(0, 5).Count(v => Vowel(names, v) != null);
+            if (Viseme(names, 10) != null) score++;
             return score;
         }
 

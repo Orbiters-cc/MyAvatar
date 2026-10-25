@@ -226,7 +226,7 @@ namespace Orbiters.MyAvatar.Editor.VrchatReady
             for (int v = 0; v < 5; v++) if (vowels[v] == null) vowels[v] = FaceShapes.Vowel(names, v);
             Visemes = FaceShapes.Fill(names, vowels);
             if (VisemesFrom == null)
-                VisemesFrom = Visemes[10] != null && FaceTrackingNames.Normalize(Visemes[10]).StartsWith("vrcv", StringComparison.Ordinal) ? "Its VRChat viseme shapes"
+                VisemesFrom = Visemes[10] != null && Visemes[10] == FaceShapes.Viseme(names, 10) ? "Its VRChat viseme shapes"
                     : "Its mouth shapes " + string.Join(", ", Enumerable.Range(0, 5).Where(v => vowels[v] != null).Select(v => "“" + vowels[v] + "”"));
             if (VisemeCount == 0) { Face = null; Visemes = null; VisemesFrom = "No mouth shapes found: lip sync stays off"; }
         }

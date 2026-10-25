@@ -524,6 +524,38 @@ Unity 2022.3 avatar setup: textures, clothes and accessories, thumbnail, posing,
    paths and staged changes are excluded. Ignored checkpoint files must be
    unignored first. Saving unchanged files succeeds without making an empty commit. Nothing is pushed.
 
+## Make it VRChat ready
+
+A VRM model (VRM 0.x or 1.0, imported with UniVRM), or any humanoid without VRChat's avatar descriptor, gets a **Make it
+VRChat ready** card at the top of My Avatar. It lists what one click does, read from the model without changing it, and
+does it all in one Undo step:
+
+- **The avatar descriptor** (and its pipeline manager), with VRChat's default animations and automatic colliders:
+  - **View point** between the eyes, a little in front of the eye bones (a VRM's first person point usually sits inside
+    the head: VRoid's is 6 cm above the head bone); the VRM's first person point when there are no eye bones.
+  - **Lip sync** from the VRM's A, I, U, E, O expressions or from the face's shape names (VRChat's vrc.v_aa or AA_V_AA..., VRoid's
+    Fcl_MTH_A..., MMD's あいうえお, mouth_a...). VRChat's own visemes are used as they are; otherwise each consonant takes
+    the vowel its mouth is closest to (F and S like I, D, N and TH like E, K like A, CH like U, R like O) and silence and
+    closed lips stay at rest. A vowel the face lacks borrows the closest one.
+  - **Eye look** from the VRM's look-at bones and how far it turns them (each eye its own way when looking aside), else
+    the rig's eyes or eye bones named so (Eye_L, LeftEye, VRoid's J_Adj_L_FaceEye), 10° each way. **Blink** from the
+    VRM's Blink expression or a blink shape (Blink, Fcl_EYE_Close, まばたき...).
+- **Spring bones → PhysBones** (VRM): strands hanging from one bone that feel the same (a VRoid head's hair, its skirt) share
+  one PhysBone there, which stays still; a lone strand gets its own, which swings as VRM swings it. They sit under a
+  "PhysBones" object; humanoid bones never move and a bone two springs reach moves with the first. How they feel is the
+  inverse of Export to VRM's mapping, so a round trip keeps the values: VRM's stiffness is shared by Pull and Stiffness
+  (VRM's usual 1 gives 0.17 each), Spring is the momentum VRM's drag leaves (VRoid's 0.4 gives 0.67), gravity carries
+  over. Colliders become PhysBone colliders on their bones (spheres; 1.0's capsules, planes and inside colliders).
+- **Expressions** (VRM): its emotions (0.x's joy, angry, sorrow, fun and surprised; 1.0's happy, angry, sad, relaxed and
+  surprised) and its own expressions, never perfect sync's ARKit ones, become VRCFury toggles under **Expressions** in
+  the menu, one at a time and not saved, each setting the expression's blend shapes. Needs VRCFury.
+- **VRM's components go**, VRChat doesn't allow them on an avatar, and so does the object that only held them
+  ("secondary"). VRM 1.0's node constraints aren't converted.
+
+A rig that isn't humanoid is explained instead (the model file's Rig › Animation Type: Humanoid). MToon works on PC:
+keep UniVRM in the project, its shaders draw it. Quest needs VRChat's mobile shaders. Once done, the card says what was
+made; Undo (Ctrl+Z) puts the avatar back as it was.
+
 ## Clothes and accessories (alpha)
 
 Turn it on in **Settings** (bottom toolbar) › Features › My Avatar. The **Drop anything** field then also

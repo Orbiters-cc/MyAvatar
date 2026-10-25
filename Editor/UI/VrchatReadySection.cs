@@ -109,11 +109,8 @@ namespace Orbiters.MyAvatar.Editor
             var vrm = plan.Vrm;
             if (!plan.CanConvert)
             {
+                // What to fix comes first: no button that can't be pressed.
                 var stuck = Hero(vrm != null ? vrm.Format.ToUpperInvariant() + " AVATAR · NOT HUMANOID" : "NOT READY FOR VRCHAT", "warning", "Make it VRChat ready", plan.Problem);
-                var button = MyAvatarEditor.Button("Make it VRChat ready", null);
-                button.AddToClassList("ft-primary");
-                button.SetEnabled(false);
-                stuck.Actions.Add(button);
                 if (plan.ModelFile != null)
                 {
                     var file = plan.ModelFile;

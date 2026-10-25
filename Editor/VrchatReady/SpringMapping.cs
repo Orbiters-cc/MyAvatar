@@ -131,13 +131,17 @@ namespace Orbiters.MyAvatar.Editor.VrchatReady
             return group;
         }
 
-        // What makes two springs one PhysBone: how they feel, how far they reach, their colliders and their kind (a VRM
-        // 0.x subtree gets a tip, a VRM 1.0 chain has its own).
-        private static string Signature(VrmSource.Spring spring) =>
-            string.Join("|", new[] { spring.Stiffness, spring.Drag, spring.GravityPower, spring.GravityDirection.x, spring.GravityDirection.y, spring.GravityDirection.z, spring.Radius }
-                .Select(v => Mathf.Round(v * 10000f).ToString(System.Globalization.CultureInfo.InvariantCulture))) +
-            "|" + (spring.Chain == null ? "tree" : "chain") + "|" +
-            string.Join(",", spring.Colliders.Where(c => c != null).Distinct().Select(c => c.GetHashCode()).OrderBy(h => h));
+        // What makes two springs one PhysBone: the PhysBone they become, to two decimals (VRoid writes strands of one look a
+        // thousandth apart), their reach to the millimetre, their colliders and their kind (a VRM 0.x subtree gets a tip, a
+        // VRM 1.0 chain has its own).
+        private static string Signature(VrmSource.Spring spring)
+        {
+            var (pull, momentum, stiffness, gravity) = Behaviour(spring.Stiffness, spring.Drag, spring.GravityPower, spring.GravityDirection);
+            return string.Join("|", new[] { Mathf.Round(pull * 100f), Mathf.Round(momentum * 100f), Mathf.Round(stiffness * 100f), Mathf.Round(gravity * 100f), Mathf.Round(spring.Radius * 1000f) }
+                       .Select(v => v.ToString(System.Globalization.CultureInfo.InvariantCulture))) +
+                   "|" + (spring.Chain == null ? "tree" : "chain") + "|" +
+                   string.Join(",", spring.Colliders.Where(c => c != null).Distinct().Select(c => c.GetHashCode()).OrderBy(h => h));
+        }
 
         private static Group Make(VrmSource.Spring spring, Transform root, bool still, Part[] parts)
         {
