@@ -1,5 +1,20 @@
 # My Avatar
 
+## 0.9.15 — 2026-10-26
+
+- Requires Orbiters Toolkit 0.4.6.
+- **Make it VRChat ready**: on a VRM avatar, or any avatar without a VRChat avatar descriptor, a card on top of My
+  Avatar adds the descriptor and fills it (view point, visemes from the face's shapes, eye look and blink), turns VRM
+  spring bones into PhysBones with their colliders and VRM expressions into VRCFury toggles, and removes the VRM
+  components VRChat refuses, in one Undo (see Make it VRChat ready below).
+- Clothes and accessories without a toggle from their creator get one showing their own picture (Orbiters Toolkit
+  0.4.6).
+- Big and Small optimization resize the avatar's textures again: one texture that could not take its planned size (N4N0's
+  point-filtered screen layout) stopped every texture from changing. Point-filtered textures are never resized or
+  compressed now, and a texture whose format cannot have its planned size keeps its own.
+- The upload's "[My Avatar] Optimization" log line says how long the structure step took and its slowest passes; the
+  texture swaps edit the build's animator controllers without rebuilding them at each change (much faster uploads).
+
 ## 0.9.14 — 2026-10-24
 
 - Requires Orbiters Toolkit 0.4.4.
