@@ -8,6 +8,7 @@ using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Optimization;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.Optimization
@@ -168,6 +169,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// </summary>
         internal static Texture2D Copy(TextureOptimization.TexturePlan change)
         {
+            // A size the format can't have (block compression needs whole blocks: 80 x 11 can't be BC7): uploads as it is,
+            // and the other textures still get their copies.
+            if (!Creatable(change)) return null;
             string file = CacheFile(change);
             var copy = Load(change, Read(file));
             if (copy == null)
@@ -211,6 +215,18 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         /// <summary>Where the copy is kept.</summary>
         internal static string CacheFile(TextureOptimization.TexturePlan change) => Path.Combine(CacheFolder, Key(change) + ".bin");
+
+        // Block-compressed formats hold whole blocks (4 x 4 texels), ASTC excepted (it pads its blocks).
+        private static bool Creatable(TextureOptimization.TexturePlan change)
+        {
+            var format = GraphicsFormatUtility.GetGraphicsFormat(change.format, !change.linear);
+            bool whole = change.width > 0 && change.height > 0 && (!GraphicsFormatUtility.IsCompressedFormat(format) || GraphicsFormatUtility.IsASTCFormat(format) ||
+                change.width % GraphicsFormatUtility.GetBlockWidth(format) == 0 && change.height % GraphicsFormatUtility.GetBlockHeight(format) == 0);
+            if (!whole && Unavailable.Add("size:" + Key(change)))
+                Debug.LogWarning("[My Avatar] Optimization: " + change.texture.name + " uploads as it is (" + change.format + " can't be " + change.width + " x " +
+                                 change.height + ").");
+            return whole;
+        }
 
         private static Texture2D Load(TextureOptimization.TexturePlan change, byte[] data)
         {

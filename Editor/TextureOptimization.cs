@@ -77,11 +77,13 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Only Default and Normal map importers hold plain images; sprites, cookies, lightmaps and single-channel data stay.
+        // So do point-filtered textures: pixel data read texel by texel (a lookup table, N4N0's screen layout) or pixel art,
+        // which resizing or block compression breaks.
         internal static bool Compressible(Texture texture, out TextureImporter importer)
         {
             importer = texture is Texture2D ? AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter : null;
             return importer != null && (importer.textureType == TextureImporterType.Default || importer.textureType == TextureImporterType.NormalMap) &&
-                Exclusion(importer.assetPath, "", "", 512, 512) == null;
+                importer.filterMode != FilterMode.Point && Exclusion(importer.assetPath, "", "", 512, 512) == null;
         }
 
         // BC5 keeps both normal channels at full precision; BC1 is half the size of BC7 when alpha is unused.
