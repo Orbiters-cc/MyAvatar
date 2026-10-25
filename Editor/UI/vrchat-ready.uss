@@ -1,0 +1,8 @@
+/* Make it VRChat ready: the face tracking frame (face-tracking.uss), the optimization badge (optimization.uss) and the
+   checks' panel and rows (checks.uss). It opens the page, so no section gap above it; green dots for what it does, amber
+   for what it can't, grey notes. */
+
+.vr-ready { margin-top: 0; margin-bottom: 4px; }
+.vr-ready .chk-issue__dot--ok { background-color: #00DA6D; }
+.vr-ready .opt-badge.vr-badge--warning { border-color: rgba(255, 176, 32, 0.5); background-color: rgba(255, 176, 32, 0.07); }
+.vr-ready .vr-badge--warning .opt-badge__icon { --icon-color: #ffb020; }

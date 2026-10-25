@@ -1,0 +1,13 @@
+{
+  "name": "Orbiters.MyAvatar.Editor.Tests.Vrm",
+  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "VRC.SDKBase", "VRC.SDK3A", "VRM", "VRM10", "UniGLTF", "UniHumanoid", "VrmLib"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll", "VRCSDK3A.dll", "VRC.Dynamics.dll", "VRC.SDK3.Dynamics.PhysBone.dll"],
+  "defineConstraints": ["MYAVATAR_UNIVRM", "MYAVATAR_VRM10"],
+  "versionDefines": [
+    { "name": "com.vrmc.univrm", "expression": "0.131.0", "define": "MYAVATAR_UNIVRM" },
+    { "name": "com.vrmc.vrm", "expression": "0.131.0", "define": "MYAVATAR_VRM10" }
+  ]
+}

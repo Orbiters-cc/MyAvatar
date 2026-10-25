@@ -1,0 +1,23 @@
+{
+  "name": "Orbiters.MyAvatar.Editor.VrchatReady.VRCFury",
+  "rootNamespace": "Orbiters.MyAvatar.Editor.VrchatReady.VRCFury",
+  "references": [
+    "Orbiters.MyAvatar.Editor",
+    "Orbiters.Toolkit.Editor.VRChat",
+    "com.vrcfury.api"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MYAVATAR_VRCFURY"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrcfury.vrcfury",
+      "expression": "1.1000.0",
+      "define": "MYAVATAR_VRCFURY"
+    }
+  ]
+}
