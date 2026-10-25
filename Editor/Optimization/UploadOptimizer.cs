@@ -25,6 +25,20 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         {
             public int HiddenObjects, DisabledComponents, IdlePhysBones, Colliders, StillPhysBones, BlendShapes, HiddenTriangles, MergedMeshes, StaticBones, BoneReferences, EndBones, MaterialSlots, Textures;
             public int ToggledMeshes, Polygons, Icons, ShortObjects, ShortParameters, DuplicateTextures, ResizedTextures, Bounds;
+            /// <summary>How long each change of the structure step took, in the order they ran.</summary>
+            public readonly List<(OptimizationPasses Pass, long Milliseconds)> Times = new List<(OptimizationPasses, long)>();
+
+            /// <summary>The structure step's time and its slowest changes, for the build log ("" when nothing was timed).</summary>
+            public string Took()
+            {
+                long total = Times.Sum(t => t.Milliseconds);
+                if (total <= 0) return "";
+                var slowest = Times.Where(t => t.Milliseconds >= 50).OrderByDescending(t => t.Milliseconds).Take(3)
+                    .Select(t => ObjectNames.NicifyVariableName(t.Pass.ToString()).ToLowerInvariant() + " " + Seconds(t.Milliseconds)).ToList();
+                return " in " + Seconds(total) + (slowest.Count > 0 ? " (" + string.Join(", ", slowest) + ")" : "");
+            }
+
+            private static string Seconds(long milliseconds) => (milliseconds / 1000f).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " s";
 
             public override string ToString()
             {
@@ -123,7 +137,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 if (!Plans.TryGetValue(avatar, out var plan)) return true;
                 Plans.Remove(avatar);
                 RunMaterials(avatar, plan.Passes, plan.Report, plan.Textures);
-                Debug.Log("[My Avatar] Optimization (" + plan.Level + "): " + plan.Report + ".");
+                Debug.Log("[My Avatar] Optimization (" + plan.Level + "): " + plan.Report + plan.Report.Took() + ".");
                 return true;
             }
         }
@@ -142,8 +156,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         internal static void RunStructure(GameObject root, OptimizationPasses passes, Report report, bool unbuilt = false, float polygonQuality = 1f,
             List<Object> temporary = null, Func<SkinnedMeshRenderer, ICollection<string>> shapes = null, int owner = 0)
         {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             using (var steps = StructureSteps(root, passes, report, unbuilt, polygonQuality, temporary, shapes, owner).GetEnumerator())
-                while (steps.MoveNext()) { }
+                while (steps.MoveNext())
+                {
+                    report.Times.Add((steps.Current, watch.ElapsedMilliseconds));
+                    watch.Restart();
+                }
         }
 
         /// <summary>

@@ -145,6 +145,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 .Where(t => t != null && !EditorUtility.IsPersistent(t)).Distinct();
             AttachmentAnimationBuild.Keep(root, textures.Cast<Object>().Concat(animated.OfType<Material>().Where(m => !EditorUtility.IsPersistent(m))).ToList());
             int done = 0;
+            using var edits = build.Edits();
             try
             {
                 foreach (var (clip, binding, _, after) in rewrites)
