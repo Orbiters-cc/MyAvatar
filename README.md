@@ -1,5 +1,16 @@
 # My Avatar
 
+## Unreleased
+
+- **Customize**: on a placed item whose creator made parts of it customizable (Orbiters Toolkit's `ItemParts`), its
+  card shows a row per part with the variant it uses; **Browse** opens that part's gallery (official variants first,
+  search, sort, a language filter for texts) and a click switches to one, with Undo. **+** makes your own with a form
+  for the part's kind (colours, numbers and pictures; a table of texts with their lengths; an FBX model with its
+  materials in the shaders the creator allows, checked live), a preview on the item and its thumbnail, then posts it
+  to the gallery. Only the files the creator allows, never scripts. N4N0's menu theme, model and language are the first
+  parts (Orbiters' documentation, "Customizable parts and variants").
+- Publishing to the gallery sends an item's parts with the release and posts its base variants as official ones.
+
 ## 0.9.15 — 2026-10-26
 
 - Requires Orbiters Toolkit 0.4.6.
