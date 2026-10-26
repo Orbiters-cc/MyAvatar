@@ -94,6 +94,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     var row = GalleryUI.Box("creator-prefab", card);
                     GalleryUI.Text(prefab ? prefab.name : "Missing prefab", "creator-prefab__name", row);
                     if (prefab) row.Add(SettingsButton(prefab, variant));
+                    if (prefab) row.Add(PartsButton(prefab, variant));
                     var id = guid;
                     row.Add(GalleryUI.Button("Remove", () => { variant.prefabGuids.Remove(id); variant.report = null; Build(); }, "gallery-link"));
                 }
@@ -127,6 +128,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 docs.tooltip = "Switches and choices buyers set on the item's card in My Avatar, from a .settings.json file beside the prefab.";
                 docs.style.alignSelf = Align.FlexStart; docs.style.marginTop = 4;
                 card.Add(docs);
+                var partsDocs = GalleryUI.Button("Customizable parts: how they work ↗", () => Application.OpenURL(PartsDocs), "gallery-link");
+                partsDocs.tooltip = "Parts of the item anyone can make variants of (colours, a model, texts), from a .parts.json file beside the prefab.";
+                partsDocs.style.alignSelf = Align.FlexStart; partsDocs.style.marginTop = 2;
+                card.Add(partsDocs);
             }
 
             Label("Platforms", card);
@@ -207,6 +212,32 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         // Orbiters' documentation of item settings.
         private static string ItemSettingsDocs => OrbitersEnvironment.WebsiteUrl + "documentation/orbiters.myavatar.item-settings";
+        // Orbiters' documentation of customizable parts and their variants.
+        private static string PartsDocs => OrbitersEnvironment.WebsiteUrl + "documentation/orbiters.myavatar.customizable-parts";
+
+        // The prefab's customizable parts (N4N0.parts.json beside it), which anyone can make variants of: opens the file,
+        // or starts one with a first colour.
+        private VisualElement PartsButton(GameObject prefab, GalleryVariantDraft variant)
+        {
+            string path = ItemParts.PathFor(AssetDatabase.GetAssetPath(prefab));
+            bool exists = File.Exists(path);
+            var button = GalleryUI.Button(exists ? "Edit parts" : "Add parts", () =>
+            {
+                if (!File.Exists(path))
+                {
+                    File.WriteAllText(path, ItemParts.Template(prefab));
+                    AssetDatabase.ImportAsset(path);
+                    variant.report = null;
+                }
+                var asset = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
+                if (asset != null) { EditorGUIUtility.PingObject(asset); AssetDatabase.OpenAsset(asset); }
+                Build();
+            }, "gallery-link");
+            button.tooltip = exists
+                ? "Opens " + Path.GetFileName(path) + ", the parts of this item anyone can make variants of. Build the package again to check it."
+                : "Starts " + Path.GetFileName(path) + " beside the prefab with a first colour: a part of this item anyone can make variants of.";
+            return button;
+        }
 
         // The prefab's item settings (Jacket.settings.json beside it), the switches and choices buyers get on the item's
         // card: opens the file, or starts one with a first switch.
@@ -241,6 +272,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                  (report.containsCode ? $" · {report.codeFiles.Count} code file{(report.codeFiles.Count == 1 ? "" : "s")}" : ""));
             if (report.containsCode) Line("Contains code: buyers are asked before it is imported, unless Orbiters marked you a trusted creator.", "muted");
             foreach (string settings in report.settings) Line("Item settings · " + settings, "muted");
+            foreach (string parts in report.parts ?? new List<string>()) Line("Customizable parts · " + parts, "muted");
             if (report.dependencies.Count > 0) Line("Needs " + string.Join(", ", report.dependencies.Select(d => d.displayName + " " + d.range)) + ": My Avatar installs them for buyers.", "muted");
             foreach (string error in report.errors) Line(error, "error");
             foreach (string warning in report.warnings) Line(warning, "warning");

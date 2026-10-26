@@ -428,6 +428,7 @@ namespace Orbiters.MyAvatar.Editor
                 var how = new Label(description) { tooltip = description }; how.AddToClassList("accessory-item__how"); body.Add(how);
                 foreach (var option in AttachmentHooks.Options(attachment.gameObject)) body.Add(OptionRow(option));
                 LineUpOptions(body);
+                Customize(body, attachment);
                 var item = attachment;
                 if (attachment.mode == OrbitersAttachment.AttachMode.Parent)
                     top.Add(Small("Bone ▾", () => BoneMenu(item)));

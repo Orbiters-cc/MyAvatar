@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Orbiters.Toolkit.Editor;
 using Orbiters.Toolkit.Editor.Net;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEngine;
 
@@ -182,10 +183,18 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     draft.Save();
                 }
                 progress("Publishing…");
-                // Exactly these packages: the version's others (renamed or removed here since) leave it first.
-                var answer = await GalleryApi.PublishReleaseAsync(draft.assetId, release, draft.publishListing, sent) ?? new Created();
+                // Exactly these packages: the version's others (renamed or removed here since) leave it first. Its
+                // customizable parts go with it.
+                string partsFile = draft.variants.Select(v => v.report?.partsFile).FirstOrDefault(f => !string.IsNullOrEmpty(f) && File.Exists(f));
+                var answer = await GalleryApi.PublishReleaseAsync(draft.assetId, release, draft.publishListing, sent, partsFile != null ? PartVariants.ReleaseParts(partsFile) : null) ?? new Created();
                 answer.id = draft.assetId; answer.version = draft.version;
                 published = true;
+                if (partsFile != null)
+                {
+                    string prefab = draft.variants.Select(v => v.report?.partsPrefab).FirstOrDefault(p => !string.IsNullOrEmpty(p));
+                    string missed = await PostBaseVariantsAsync(draft.assetId, prefab, partsFile, progress, cancellation);
+                    if (missed != null) Debug.LogWarning("[My Avatar] " + draft.name + " " + draft.version + " is published, but " + missed);
+                }
                 draft.End();
                 GalleryCache.Clear();
                 // On Orbiters now: the copies taken for this listing go (a file chosen elsewhere stays).
@@ -201,6 +210,31 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         }
 
         private static string Url(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        /// <summary>
+        /// Posts the parts' base variants (what the package ships) as the creator's official variants, once the version is
+        /// published; reposting one unchanged changes nothing. Null when all went, else what did not.
+        /// </summary>
+        internal static async Task<string> PostBaseVariantsAsync(int assetId, string prefabPath, string partsFile, Action<string> progress, CancellationToken cancellation)
+        {
+            var definition = ItemParts.Read(partsFile);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (definition == null || prefab == null) return "its parts file or prefab could not be read, so its base variants were not posted.";
+            var failed = new List<string>();
+            foreach (var part in definition.parts)
+            foreach (var variant in ItemParts.Bases(partsFile, part))
+            {
+                try
+                {
+                    progress?.Invoke("Posting " + part.Label.ToLowerInvariant() + " · " + variant.name + "…");
+                    var packed = await ItemParts.PackAsync(prefab, definition, prefabPath, partsFile, part, variant);
+                    var placed = new ItemParts.Placed { PrefabPath = prefabPath, PartsPath = partsFile, Definition = definition, Part = part };
+                    await PartVariants.PostAsync(assetId, placed, packed, true, null, cancellation);
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { failed.Add(part.Label + " › " + variant.name + " (" + ex.Message + ")"); }
+            }
+            return failed.Count == 0 ? null : "these base variants were not posted: " + string.Join("; ", failed);
+        }
 
         private static void DeleteFile(string path)
         {

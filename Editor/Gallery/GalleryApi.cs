@@ -164,9 +164,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         internal static Task<object> DeleteVariantAsync(int assetId, int releaseId, int variantId) =>
             Send<object>(Url(Release(assetId, releaseId) + $"/variants/{variantId}"), null, HttpMethod.Delete);
 
-        /// <summary>Publishes the version with exactly these packages: its others (renamed or removed since) are deleted first.</summary>
-        internal static Task<Created> PublishReleaseAsync(int assetId, int releaseId, bool publishListing, IReadOnlyCollection<int> variantIds) =>
-            Send<Created>(Url(Release(assetId, releaseId) + "/publish"), new { rightsConfirmed = true, publishListing, variantIds });
+        /// <summary>
+        /// Publishes the version with exactly these packages: its others (renamed or removed since) are deleted first.
+        /// <paramref name="parts"/>: its customizable parts (<see cref="PartVariantApi.ReleaseParts"/>), or null for none.
+        /// </summary>
+        internal static Task<Created> PublishReleaseAsync(int assetId, int releaseId, bool publishListing, IReadOnlyCollection<int> variantIds, object parts = null) =>
+            Send<Created>(Url(Release(assetId, releaseId) + "/publish"), parts == null
+                ? (object)new { rightsConfirmed = true, publishListing, variantIds }
+                : new { rightsConfirmed = true, publishListing, variantIds, parts });
 
         internal static Task<Created> WithdrawReleaseAsync(int assetId, int releaseId) => Send<Created>(Url(Release(assetId, releaseId) + "/withdraw"), new { });
 

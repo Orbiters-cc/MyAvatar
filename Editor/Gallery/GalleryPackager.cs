@@ -38,6 +38,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             public List<GalleryDependency> dependencies = new List<GalleryDependency>();
             /// <summary>Per prefab with item settings (its .settings.json), what buyers can set on its card.</summary>
             public List<string> settings = new List<string>();
+            /// <summary>Per prefab with customizable parts (its .parts.json), the parts buyers can switch.</summary>
+            public List<string> parts = new List<string>();
+            /// <summary>The parts file the version sends (one item of a package can have customizable parts), or null.</summary>
+            public string partsFile, partsPrefab;
             /// <summary>Prefabs the package holds, by GUID, for the setups to choose from.</summary>
             public List<GallerySetupPrefab> prefabs = new List<GallerySetupPrefab>();
             [JsonIgnore] public bool Publishable => errors.Count == 0 && bytes > 0 && bytes <= MaxBytes;
@@ -66,6 +70,23 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 settings.Add(settingsPath);
                 settings.AddRange(ItemSettings.AssetsOf(settingsPath, definition));
                 report.settings.Add(Path.GetFileNameWithoutExtension(root) + ": " + string.Join(", ", definition.settings.Select(s => s.label)));
+            }
+            // A prefab's customizable parts (N4N0.parts.json beside N4N0.prefab) go in, checked, with their base variants'
+            // files and pictures: the version sends their definition, then posts the base variants as the creator's own.
+            foreach (string root in roots)
+            {
+                string partsPath = ItemParts.PathFor(root);
+                if (!File.Exists(partsPath)) continue;
+                var problems = new List<string>();
+                var definition = ItemParts.Read(partsPath, AssetDatabase.LoadAssetAtPath<GameObject>(root), problems);
+                report.errors.AddRange(problems);
+                if (definition == null) continue;
+                if (report.partsFile != null) { report.errors.Add("Only one item of a package can have customizable parts: " + Path.GetFileName(report.partsFile) + " and " + Path.GetFileName(partsPath) + "."); continue; }
+                report.partsFile = partsPath;
+                report.partsPrefab = root;
+                settings.Add(partsPath);
+                settings.AddRange(ItemParts.AssetsOf(partsPath, definition));
+                report.parts.Add(Path.GetFileNameWithoutExtension(root) + ": " + string.Join(", ", definition.parts.Select(p => p.Label)));
             }
             var paths = AssetDatabase.GetDependencies(roots.Concat(settings).ToArray(), true).Distinct().ToList();
             var kept = new List<string>();
@@ -114,6 +135,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             // Item settings come as the creator wrote them: only a build from the project's prefabs checks them.
             foreach (var entry in index.Entries.Where(e => keep.Contains(e.Guid) && e.Path.EndsWith(ItemSettings.Extension, StringComparison.OrdinalIgnoreCase)))
                 report.settings.Add(Path.GetFileName(entry.Path) + " (as written: build from the prefabs in the project to have it checked)");
+            // Customizable parts need the prefabs in the project: a package file's are left as they are, without a gallery.
+            foreach (var entry in index.Entries.Where(e => keep.Contains(e.Guid) && e.Path.EndsWith(ItemParts.Extension, StringComparison.OrdinalIgnoreCase)))
+                report.parts.Add(Path.GetFileName(entry.Path) + " (not sent: build from the prefabs in the project to give its parts a gallery)");
             // Materials of the project with the same GUIDs tell which shaders they use.
             CheckShaders(report, index.Entries.Where(e => keep.Contains(e.Guid)).Select(e => AssetDatabase.GUIDToAssetPath(e.Guid)).Where(p => !string.IsNullOrEmpty(p)));
             if (report.errors.Count > 0) return report;

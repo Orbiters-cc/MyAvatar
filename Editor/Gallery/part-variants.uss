@@ -1,0 +1,82 @@
+/* A part's gallery of variants and its + form (PartGalleryWindow, PartVariantForm): the gallery's cards and the
+   publishing window's steps, with what is only theirs. */
+
+.parts-gallery__titles { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.parts-gallery__titles > .gallery-page__title { flex-grow: 0; }
+.parts-gallery__item { margin: 2px 0 0 0; padding: 0; font-size: 11px; color: #8f8f8f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-page__header .mcb-button.parts-gallery__make { background-color: #00DA6D; color: #06140c; -unity-font-style: bold; border-width: 0; }
+.gallery-page__header .mcb-button.parts-gallery__make:hover { background-color: #19e27d; }
+.parts-gallery__filters { flex-direction: row; align-items: center; margin: -4px 0 12px 0; }
+.parts-gallery__sort { width: 150px; height: 28px; padding: 2px; border-radius: 14px; flex-shrink: 0; }
+.parts-gallery__sort .orb-segmented__indicator { top: 2px; bottom: 2px; border-radius: 12px; }
+.parts-gallery__sort .orb-segmented__tab { height: 24px; border-radius: 12px; }
+.parts-gallery__sort .orb-segmented__label { font-size: 11px; }
+.parts-gallery__language { margin: 0 0 0 8px; width: 190px; flex-grow: 0; flex-shrink: 1; }
+.parts-gallery__language .unity-base-field__input { min-height: 28px; padding: 0 12px; border-radius: 14px; border-width: 0; background-color: #1f1f1f; color: #e6e6e6; font-size: 11px; }
+.parts-gallery__language .unity-base-field__input:hover { background-color: #262626; }
+.parts-gallery__message { margin: 0 0 12px 2px; font-size: 11px; color: #9a9a9a; }
+
+.orb-card.parts-card { cursor: link; }
+.orb-card.parts-card--pressed { scale: 0.98 0.98; background-color: #262626; }
+.orb-card.parts-card--current { background-color: #1a211d; }
+.parts-card--current .orb-card__media { border-bottom-width: 2px; border-color: #00DA6D; }
+.parts-card .gallery-chip--muted { color: #06140c; background-color: rgba(230, 255, 240, 0.92); }
+.gallery-progress.parts-card__progress { display: none; flex-grow: 0; flex-basis: auto; height: 6px; margin-top: 8px; border-radius: 3px; }
+.parts-card__progress > .gallery-progress__fill { border-radius: 3px; }
+
+/* The card on the avatar: its Customize rows. */
+.parts-section { margin-top: 8px; padding: 8px 8px 6px 8px; border-radius: 10px; background-color: #232323; }
+.parts-section__title { margin: 0 0 4px 0; padding: 0; font-size: 11px; color: #9a9a9a; }
+.parts-section__note { margin: 4px 0 0 0; padding: 0; font-size: 10px; color: #8a8a8a; white-space: normal; }
+.parts-row { flex-direction: row; align-items: center; min-height: 40px; margin-top: 4px; }
+.parts-row__picture { width: 36px; height: 36px; margin-right: 10px; flex-shrink: 0; border-radius: 8px; overflow: hidden; background-color: #1b1b1d; }
+.parts-row__text { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.parts-row__label { margin: 0; padding: 0; font-size: 10px; color: #8f8f8f; }
+.parts-row__name { margin: 1px 0 0 0; padding: 0; font-size: 11px; -unity-font-style: bold; color: #ffffff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parts-row__name--error { color: #ff7a7a; -unity-font-style: normal; white-space: normal; }
+.parts-row__progress { display: none; height: 4px; margin-top: 4px; border-radius: 2px; background-color: #333333; overflow: hidden; }
+.parts-row__fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background-color: #00DA6D; transition-property: width; transition-duration: 0.3s; }
+
+/* The + form. */
+.parts-form__field { flex-direction: row; align-items: center; min-height: 28px; margin-top: 4px; }
+.parts-form__field-label { min-width: 110px; margin: 0 10px 0 2px; padding: 0; font-size: 11px; color: #bdbdbd; flex-shrink: 0; }
+.parts-form__color { width: 120px; margin: 0; }
+.parts-form__color .unity-color-field__color { border-radius: 6px; }
+.parts-form__slider { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0; }
+.parts-form__slider .unity-base-slider__input { min-width: 60px; }
+.parts-form__slider .unity-base-slider__text-field { width: 52px; min-width: 52px; }
+.parts-form__choice { width: 180px; height: 26px; padding: 2px; border-radius: 9px; }
+.parts-form__choice .orb-segmented__indicator { top: 2px; bottom: 2px; border-radius: 7px; }
+.parts-form__choice .orb-segmented__tab { height: 22px; border-radius: 7px; }
+.parts-form__choice .orb-segmented__label { font-size: 11px; }
+.parts-form__file { margin: 0 6px 0 0; padding: 0; font-size: 11px; color: #9a9a9a; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accessory-button.parts-form__small { margin: 0 4px 0 0; }
+.parts-form__picture { width: 128px; height: 72px; margin: 6px 0 2px 120px; border-radius: 8px; background-color: #141414; }
+.parts-form__languages { margin: 0; }
+.parts-form__filter { margin-bottom: 6px; }
+.parts-form__table { border-radius: 10px; background-color: #1a1a1a; padding: 4px 8px; }
+.parts-form__text { flex-direction: row; align-items: flex-start; padding: 6px 0; border-bottom-width: 1px; border-color: #262626; }
+.parts-form__text--head { padding: 4px 0; }
+.parts-form__text--head > Label { font-size: 10px; color: #7f7f7f; margin: 0; padding: 0; }
+.parts-form__text-base { flex-basis: 0; flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 8px; }
+.parts-form__text-yours { flex-basis: 0; flex-grow: 1.2; flex-shrink: 1; min-width: 0; }
+.parts-form__text-key { margin: 0; padding: 0; font-size: 9px; color: #6f6f6f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parts-form__text-original { margin: 2px 0 0 0; padding: 0; font-size: 11px; color: #cfcfcf; white-space: normal; }
+.parts-form__count { margin: 2px 2px 0 0; padding: 0; font-size: 9px; color: #6f6f6f; -unity-text-align: middle-right; }
+.parts-form__count--over { color: #ff7a7a; }
+.parts-form__slot { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background-color: #1a1a1a; }
+.parts-form__slot-title { margin: 0 10px 0 2px; padding: 0; font-size: 12px; -unity-font-style: bold; color: #ffffff; min-width: 100px; }
+.parts-form__object, .parts-form__shader { flex-grow: 1; margin: 0; }
+.parts-form__object > .unity-base-field__input, .parts-form__shader > .unity-base-field__input { min-height: 24px; border-radius: 8px; border-width: 0; background-color: #2a2a2a; }
+.parts-form__material { margin-top: 8px; padding-top: 6px; border-top-width: 1px; border-color: #262626; }
+.parts-form__more { margin-top: 4px; }
+.parts-form__more .unity-foldout__text { font-size: 11px; color: #9a9a9a; }
+.parts-form__checks { margin-top: 10px; }
+.parts-form__fact { flex-direction: row; align-items: center; margin-top: 3px; }
+.parts-form__fact-dot { width: 7px; height: 7px; border-radius: 4px; margin: 0 8px 0 4px; background-color: #00DA6D; flex-shrink: 0; }
+.parts-form__fact-dot--bad { background-color: #ff6b6b; }
+.parts-form__fact-text { margin: 0; padding: 0; font-size: 11px; color: #cfcfcf; }
+.parts-form__pictures { flex-direction: row; flex-wrap: wrap; }
+.parts-form__thumbnail { width: 192px; height: 192px; margin: 0 10px 6px 0; border-radius: 12px; background-color: #212123; }
+.parts-form__problems { margin-top: 8px; }
+.parts-form__problem { margin: 2px 0 0 2px; padding: 0; font-size: 11px; color: #ffb020; white-space: normal; }
