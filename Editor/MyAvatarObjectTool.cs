@@ -100,7 +100,10 @@ namespace Orbiters.MyAvatar.Editor
             var attachment = item ? item.GetComponent<OrbitersAttachment>() : null;
             if (!attachment) return false;
             var avatar = item.GetComponentInParent<MyAvatar>(true);
-            return avatar && avatar.accessoryNotes != null && avatar.accessoryNotes.Any(n => n.accessory == attachment && AccessoryFit.IsQuestion(n));
+            // A question asked before the accessory was marked as not worn on the body is answered by that (the avatar's
+            // Inspector drops it when it next shows).
+            return avatar && avatar.accessoryNotes != null && avatar.accessoryNotes.Any(n => n.accessory == attachment && AccessoryFit.IsQuestion(n)) &&
+                   !AccessoryFit.NeverRefit(attachment);
         }
 
         public void Refit(GameObject item)

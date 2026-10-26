@@ -132,9 +132,12 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var (package, guid, path) = Package("Hat");
             Assert.That(AssetDatabase.GUIDToAssetPath(guid), Is.Empty.Or.Not.EqualTo(path).Or.EqualTo(path));
             var asset = Asset(9101, package, guid);
+            // Its creator says it is not worn on the body: the attachment never gets a fit question.
+            asset.fit.variants[0].manifest.setups[0].prefabs[0].attach = new GalleryAttach { refit = false };
             var job = GalleryInstaller.Start(avatar, asset, asset.fit.release, asset.fit.variants[0], null);
             yield return Until(() => Job(job.id).Terminal);
             Assert.That(Job(job.id).stage, Is.EqualTo(GalleryJob.Complete), Job(job.id).error);
+            Assert.That(avatar.GetComponentInChildren<OrbitersAttachment>(true).neverRefit, Is.True, "Never refit, as its gallery setup says.");
 
             var installed = GalleryInstaller.Installed(avatar);
             Assert.That(installed.Count, Is.EqualTo(1));

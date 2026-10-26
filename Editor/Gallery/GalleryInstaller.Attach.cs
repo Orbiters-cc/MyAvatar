@@ -118,6 +118,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     else if ((plan.Kind == AttachmentKind.Clothing || plan.Kind == AttachmentKind.Configured) && item.attach?.mode != "configured")
                         AttachmentFit.Fit(attachment, avatar.transform);
                     attachment.gallery = Receipt(job, setup);
+                    // Its creator says it is not worn on the body, or it is a prop this Toolkit fits itself (N4N0, the drawing
+                    // pen): never asked about a refit, also once later Toolkit versions no longer recognise this version of it.
+                    attachment.neverRefit = item.attach?.refit == false || AttachmentHooks.Fits(instance);
                     EditorUtility.SetDirty(attachment);
                     placed.Add(attachment);
                 }

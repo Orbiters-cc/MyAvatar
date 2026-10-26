@@ -159,6 +159,40 @@ namespace Orbiters.MyAvatar.Editor.Tests
         [UnityTest] public IEnumerator ClothingOnAKnownCustomBaseIsAskedWhetherItFits()
         {
             var (avatar, attachment) = Setup();
+            KnownBase(avatar);
+            var check = AccessoryFit.CheckAsync(avatar, attachment, CancellationToken.None);
+            yield return Wait(check);
+            var note = check.Result;
+            Assert.That(note, Is.Not.Null);
+            Assert.That(note.fit, Is.EqualTo(AccessoryFit.Ask));
+            Assert.That(note.accessory, Is.SameAs(attachment));
+            Assert.That(note.fitBase, Is.EqualTo("Muscle Orbit 1.0"));
+            Assert.That(note.fitKey, Is.EqualTo("test:14:1.0"));
+            Assert.That(note.fitShapes, Is.EqualTo(1));
+        }
+
+        // An accessory not worn on the body (a floating bot, a held prop: its creator's gallery setup or the user said so) is
+        // never asked about its fit, and a question asked before goes, in My Avatar and in Mixer's Hierarchy (no ReFit there).
+        [UnityTest] public IEnumerator AnAccessoryNotWornOnTheBodyIsNeverAskedAboutItsFit()
+        {
+            var (avatar, attachment) = Setup();
+            KnownBase(avatar);
+            attachment.neverRefit = true;
+            var check = AccessoryFit.CheckAsync(avatar, attachment, CancellationToken.None);
+            yield return Wait(check);
+            Assert.That(check.Result, Is.Null, "Lying on the arm skin, it is still not asked about.");
+
+            var question = new MyAvatar.AccessoryNote { accessory = attachment, fit = AccessoryFit.Ask, fitKey = "test:14:1.0" };
+            avatar.accessoryNotes.Add(question);
+            Assert.That(AccessoryFit.Stale(question, "test:14:1.0"), Is.True, "A question asked before goes.");
+            Assert.That(Orbiters.Toolkit.Editor.AvatarObjectTools.RefitQuestion(attachment.gameObject), Is.Null, "No ReFit in Mixer's Hierarchy.");
+            attachment.neverRefit = false;
+            Assert.That(AccessoryFit.Stale(question, "test:14:1.0"), Is.False);
+            Assert.That(Orbiters.Toolkit.Editor.AvatarObjectTools.RefitQuestion(attachment.gameObject), Is.Not.Null, "Worn on the body, its question shows.");
+        }
+
+        private void KnownBase(MyAvatar avatar)
+        {
             provider = new Provider
             {
                 Avatar = avatar.transform,
@@ -171,15 +205,6 @@ namespace Orbiters.MyAvatar.Editor.Tests
             };
             CustomBases.Register(provider);
             CustomBaseDetection.Invalidate(avatar.transform);
-            var check = AccessoryFit.CheckAsync(avatar, attachment, CancellationToken.None);
-            yield return Wait(check);
-            var note = check.Result;
-            Assert.That(note, Is.Not.Null);
-            Assert.That(note.fit, Is.EqualTo(AccessoryFit.Ask));
-            Assert.That(note.accessory, Is.SameAs(attachment));
-            Assert.That(note.fitBase, Is.EqualTo("Muscle Orbit 1.0"));
-            Assert.That(note.fitKey, Is.EqualTo("test:14:1.0"));
-            Assert.That(note.fitShapes, Is.EqualTo(1));
         }
 
         // Clothing made for the original base whose hips stand 2 cm above the original's: within the armature fit's

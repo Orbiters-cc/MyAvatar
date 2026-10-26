@@ -33,10 +33,15 @@ namespace Orbiters.MyAvatar.Editor
 
         /// <summary>
         /// A fit note no longer about this avatar: asked for another custom base than <paramref name="baseKey"/> (a version
-        /// switched or reset since), or reporting a refit that is gone. It goes, and the accessory is checked again.
+        /// switched or reset since), reporting a refit that is gone, or about an accessory no tool refits (not worn on the
+        /// body: <see cref="FitCheck.NeverRefit"/>). It goes, and the accessory is checked again.
         /// </summary>
         internal static bool Stale(MyAvatar.AccessoryNote note, string baseKey) =>
-            note != null && !string.IsNullOrEmpty(note.fit) && (note.fitKey != baseKey || note.fit == Done && !Refitted(note.accessory as OrbitersAttachment));
+            note != null && !string.IsNullOrEmpty(note.fit) && (note.fitKey != baseKey || note.fit == Done && !Refitted(note.accessory as OrbitersAttachment) ||
+                                                                note.fit != Done && NeverRefit(note.accessory as OrbitersAttachment));
+
+        /// <summary>The accessory is not worn on the body: it never gets a fit question (see <see cref="FitCheck.NeverRefit"/>).</summary>
+        internal static bool NeverRefit(OrbitersAttachment attachment) => attachment && FitCheck.NeverRefit(attachment.gameObject);
 
         internal static string DismissKey(OrbitersAttachment attachment, string baseKey) =>
             GlobalObjectId.GetGlobalObjectIdSlow(attachment) + "|" + baseKey;

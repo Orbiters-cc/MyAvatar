@@ -69,6 +69,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         /// <summary>auto | configured | merge | parent</summary>
         public string mode = "auto";
         public string bone;
+        /// <summary>
+        /// False: the prefab is not worn on the body (it floats, is held or stands apart), so My Avatar never offers to refit
+        /// it to a buyer's custom base (<see cref="Orbiters.Toolkit.VRChat.OrbitersAttachment.neverRefit"/>). Left out otherwise.
+        /// </summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public bool? refit;
     }
 
     internal sealed class GallerySetup

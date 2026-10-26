@@ -184,7 +184,7 @@ namespace Orbiters.MyAvatar.Editor.MCP
         private static object VariantSummary(GalleryCreatorDraft d, GalleryVariantDraft v) => new
         {
             v.label, v.source, prefabs = v.prefabGuids.Select(AssetDatabase.GUIDToAssetPath), v.packagePath, v.platforms, v.baseScope, v.baseIds,
-            setups = v.manifest.setups.Select(s => new { s.key, s.label, prefabs = s.prefabs.Select(x => new { x.path, attach = x.attach?.mode, x.attach?.bone }) }),
+            setups = v.manifest.setups.Select(s => new { s.key, s.label, prefabs = s.prefabs.Select(x => new { x.path, attach = x.attach?.mode, x.attach?.bone, x.attach?.refit }) }),
             built = v.report == null ? null : new
             {
                 publishable = v.report.Publishable, v.report.bytes, v.report.sha256, v.report.parameterBits, v.report.containsCode, v.report.codeFiles,

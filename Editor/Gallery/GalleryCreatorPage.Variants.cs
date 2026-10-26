@@ -334,6 +334,17 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     bone.RegisterValueChangedCallback(evt => { placed.attach.bone = evt.newValue; draft.Save(); });
                     row.Add(bone);
                 }
+                // Not worn on the body (it floats, is held or stands apart): buyers on a custom base are never asked to refit it.
+                var never = new Toggle { text = "Never refit", value = placed.attach?.refit == false };
+                never.AddToClassList("creator-prefab__refit");
+                never.tooltip = "Not worn on the body (it floats beside the avatar, is held or stands apart): My Avatar never offers to refit it to a buyer's custom base";
+                never.RegisterValueChangedCallback(evt =>
+                {
+                    if (placed.attach == null) placed.attach = new GalleryAttach();
+                    placed.attach.refit = evt.newValue ? false : (bool?)null;
+                    draft.Save();
+                });
+                row.Add(never);
             }
         }
 
