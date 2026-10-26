@@ -1,7 +1,12 @@
 # My Avatar
 
-## Unreleased
+## 0.9.16 — 2026-10-26
 
+- Requires Orbiters Toolkit 0.4.7 and, where VRCFury is installed, VRCFury 1.1434 or later (My Avatar offers the
+  update).
+- The menu editor shows VRCFury 1.1434's SPS items: Dual Mode is gone; Legacy Compatibility (a socket with a menu item
+  and lights) and Disable Depth Pass / Disable Realtime Shadows (a plug with SPS) are new; the Options folder shows only
+  when a socket has a menu item.
 - **Customize**: on a placed item whose creator made parts of it customizable (Orbiters Toolkit's `ItemParts`), its
   card shows a row per part with the variant it uses; **Browse** opens that part's gallery (official variants first,
   search, sort, a language filter for texts) and a click switches to one, with Undo. **+** makes your own with a form
