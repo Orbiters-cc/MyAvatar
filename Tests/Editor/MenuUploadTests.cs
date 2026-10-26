@@ -349,10 +349,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 try
                 {
                     Assert.True(new MenuUploadBuild.Capture().OnPreprocessAvatar(clone));
-                    var builder = AppDomain.CurrentDomain.GetAssemblies().Select(x => x.GetType("VF.Builder.VRCFuryBuilder")).First(t => t != null);
-                    var wrapper = AppDomain.CurrentDomain.GetAssemblies().Select(x => x.GetType("VF.Utils.VFGameObject")).First(t => t != null);
-                    var convert = wrapper.GetMethods(BindingFlags.Public | BindingFlags.Static).Single(m => m.Name == "op_Implicit" && m.ReturnType == wrapper && m.GetParameters()[0].ParameterType == typeof(GameObject));
-                    builder.GetMethod("RunMain", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new[] { convert.Invoke(null, new object[] { clone }) });
+                    VrcFury.RunMain(clone);
                     Assert.True(new MenuUploadBuild.Apply().OnPreprocessAvatar(clone));
 
                     var menu = clone.GetComponent<VRCAvatarDescriptor>().expressionsMenu;

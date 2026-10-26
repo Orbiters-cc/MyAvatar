@@ -91,12 +91,15 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         /// <summary>The socket's own name field; empty means a name made from its object's (<see cref="MenuBuild.SocketName"/>).</summary>
         public string Name;
         public bool AddMenuItem, EnableAuto;
+        /// <summary>Whether it also gives the legacy lights (DPS, TPS, SPS 1): VRCFury then adds a Legacy Compatibility toggle.</summary>
+        public bool UseLights;
         public Texture2D Icon;
     }
 
     /// <summary>
     /// VRCFury's services number their actions (the menu items they create sort by that number) in the order its injector
-    /// lists them: the same scan of its types into a hash set, enumerated, as VRCFuryInjectorBuilder does.
+    /// lists them: the same scans of its types (services, then action builders) into a hash set, enumerated, as
+    /// VRCFuryInjectorBuilder does.
     /// </summary>
     internal static class VrcFuryServices
     {
@@ -150,13 +153,16 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         public VRCExpressionsMenu Menu;
         /// <summary>VRCFury builds this avatar (it has VRCFury components): it merges, moves and pages the menu.</summary>
         public bool UsesVrcFury;
-        public bool HasSockets;
+        /// <summary>A socket adds a toggle to the SPS menu: VRCFury then puts its options in their own folder.</summary>
+        public bool HasSocketItems;
         public readonly List<MenuSpec> Specs = new List<MenuSpec>();
         /// <summary>The number of a feature added after all of the avatar's own.</summary>
         public int NextNumber = FirstFeatureNumber;
         /// <summary>VRCFury SPS sockets, in VRCFury's order, and whether a plug asks for the DPS tip light.</summary>
         public readonly List<SocketInput> Sockets = new List<SocketInput>();
         public bool TipLight;
+        /// <summary>A plug renders with SPS: VRCFury adds its depth pass and realtime shadow options.</summary>
+        public bool SpsPlugs;
         /// <summary>Modular Avatar's menu, built before VRCFury runs; null when Modular Avatar installs nothing.</summary>
         public MaMenu ModularAvatar;
 
@@ -197,16 +203,23 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     inputs.UsesVrcFury = true;
                     if (socketType != null && socketType.IsInstanceOfType(c))
                     {
-                        inputs.HasSockets = true;
-                        inputs.Sockets.Add(new SocketInput
+                        var socket = new SocketInput
                         {
                             // Before version 1 a name holding "D P S" was a placeholder: VRCFury empties it.
                             Component = c, Name = Older(c, 1) && (VrcFury.Field(c, "name") as string ?? "").Contains("D P S") ? "" : VrcFury.Field(c, "name") as string,
                             AddMenuItem = VrcFury.Field(c, "addMenuItem") as bool? ?? true, EnableAuto = VrcFury.Field(c, "enableAuto") as bool? ?? true,
+                            UseLights = VrcFury.Field(c, "useLights") as bool? ?? true,
                             Icon = Asset<Texture2D>(VrcFury.Field(c, "menuIcon")),
-                        });
+                        };
+                        inputs.Sockets.Add(socket);
+                        if (socket.AddMenuItem) inputs.HasSocketItems = true;
                     }
-                    if (plugType != null && plugType.IsInstanceOfType(c) && (VrcFury.Field(c, "addDpsTipLight") as bool? ?? false)) inputs.TipLight = true;
+                    if (plugType != null && plugType.IsInstanceOfType(c))
+                    {
+                        if (VrcFury.Field(c, "addDpsTipLight") as bool? ?? false) inputs.TipLight = true;
+                        // Before version 3 the setting was "configureSps".
+                        if (VrcFury.Field(c, Older(c, 3) ? "configureSps" : "enableSps") as bool? ?? true) inputs.SpsPlugs = true;
+                    }
                 }
 
             int number = FirstFeatureNumber;

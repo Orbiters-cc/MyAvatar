@@ -236,12 +236,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 clone = Object.Instantiate(root);
                 clone.name = root.name;
                 UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(clone, scene);
-                var builder = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("VF.Builder.VRCFuryBuilder")).First(t => t != null);
-                var wrapper = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("VF.Utils.VFGameObject")).First(t => t != null);
-                var convert = wrapper.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                    .Single(m => m.Name == "op_Implicit" && m.ReturnType == wrapper && m.GetParameters()[0].ParameterType == typeof(GameObject));
-                try { builder.GetMethod("RunMain", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new[] { convert.Invoke(null, new object[] { clone }) }); }
-                catch (TargetInvocationException ex) { throw ex.GetBaseException(); }
+                VrcFury.RunMain(clone);
                 var descriptor = clone.GetComponent<VRCAvatarDescriptor>();
                 return Dump(descriptor.customExpressions ? descriptor.expressionsMenu : null);
             }

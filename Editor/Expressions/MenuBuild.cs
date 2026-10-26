@@ -139,7 +139,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             var moves = new List<MoveSpec> { new MoveSpec { From = "Holes", To = spsPath }, new MoveSpec { From = "Sockets", To = spsPath } };
             if (spsPath != "SPS") moves.Add(new MoveSpec { From = "SPS", To = spsPath });
             var icons = new List<SetIconSpec> { new SetIconSpec { Path = spsPath, Icon = sps?.MenuIcon != null ? sps.MenuIcon : SpsIcon } };
-            if (inputs.HasSockets && SpsOptionsIcon != null) icons.Add(new SetIconSpec { Path = spsPath + "/<b>Options", Icon = SpsOptionsIcon });
+            if (inputs.HasSocketItems && SpsOptionsIcon != null) icons.Add(new SetIconSpec { Path = spsPath + "/<b>Options", Icon = SpsOptionsIcon });
             var extra = new HashSet<MenuSpec>(options.Extra ?? Array.Empty<MenuSpec>());
             icons.AddRange(specs.OfType<SetIconSpec>());
 
@@ -203,14 +203,15 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         /// <summary>
         /// The items VRCFury's SPS adds, in the order its services create them: the socket service's options (Auto Mode with
-        /// two automatic sockets, Stealth Mode, Dual Mode with two sockets) and a toggle per socket that asks for one, named
-        /// by the socket or after its object; the plug service's DPS Tip Light. Options go in "&lt;b&gt;Options" when there are
-        /// sockets.
+        /// two automatic sockets, Stealth Mode, Legacy Compatibility with a socket giving the legacy lights) and a toggle per
+        /// socket that asks for one, named by the socket or after its object; the plug service's Disable Depth Pass and
+        /// Disable Realtime Shadows (with a plug rendering with SPS) and DPS Tip Light. Options go in "&lt;b&gt;Options" when a
+        /// socket has a toggle.
         /// </summary>
         public static List<SpsItem> SpsItems(MenuInputs inputs, SpsOptionsSpec options)
         {
             string menuPath = SpsMenuPath(options);
-            string optionsPath = inputs.HasSockets ? menuPath + "/<b>Options" : menuPath;
+            string optionsPath = inputs.HasSocketItems ? menuPath + "/<b>Options" : menuPath;
             var socketItems = new List<SpsItem>();
             int sockets = VrcFuryServices.Sockets, plugs = VrcFuryServices.Plugs;
             void Socket(string path, string id, ControlType type = ControlType.Toggle, Texture2D icon = null, Component component = null) =>
@@ -220,14 +221,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 Socket(optionsPath + "/<b>Auto Mode<\\/b>\n<size=20>Activates hole nearest to a VRCFury plug", "sps:auto");
             if (withItem >= 1)
                 Socket(optionsPath + "/<b>Stealth Mode<\\/b>\n<size=20>Only local haptics,\nInvisible to others", "sps:stealth");
-            if (withItem >= 2)
-            {
-                string dual = optionsPath + "/<b>Dual Mode<\\/b>\n<size=20>Allows 2 active sockets";
-                Socket(dual + "/Enable Dual Mode", "sps:dual");
-                Socket(dual + "/<b>WARNING<\\/b>\n<size=20>Everyone else must use SPS or TPS - NO DPS!", "sps:dual.1", ControlType.Button);
-                Socket(dual + "/<b>WARNING<\\/b>\n<size=20>Nobody else can use a hole at the same time", "sps:dual.2", ControlType.Button);
-                Socket(dual + "/<b>WARNING<\\/b>\n<size=20>DO NOT ENABLE MORE THAN 2", "sps:dual.3", ControlType.Button);
-            }
+            if (inputs.Sockets.Any(s => s.AddMenuItem && s.UseLights))
+                Socket(optionsPath + "/<b>Legacy Compatibility<\\/b>\n<size=20>DPS \\/ TPS \\/ SPS1\nOne socket at a time", "sps:legacy");
             // Every socket takes a name, even one without an item: a later socket of the same name gets "1", "2"…
             var used = new HashSet<string>();
             foreach (var socket in inputs.Sockets)
@@ -238,6 +233,11 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 if (socket.AddMenuItem) Socket(menuPath + "/" + name, "sps:s" + socket.Component.GetInstanceID(), icon: socket.Icon, component: socket.Component);
             }
             var plugItems = new List<SpsItem>();
+            if (inputs.SpsPlugs)
+            {
+                plugItems.Add(new SpsItem { Number = plugs, Path = optionsPath + "/<b>Disable Depth Pass<\\/b>\n<size=20>(May fix 'ghost' plugs in some worlds)", Id = "sps:nodepth" });
+                plugItems.Add(new SpsItem { Number = plugs, Path = optionsPath + "/<b>Disable Realtime Shadows<\\/b>\n<size=20>(May fix 'ghost' plugs in some worlds)", Id = "sps:noshadows" });
+            }
             if (inputs.TipLight)
                 plugItems.Add(new SpsItem { Number = plugs, Path = optionsPath + "/<b>DPS Tip Light<\\/b>\n<size=20>Allows plugs to trigger old DPS animations", Id = "sps:tiplight" });
             return plugs < sockets ? plugItems.Concat(socketItems).ToList() : socketItems.Concat(plugItems).ToList();
