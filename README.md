@@ -1,7 +1,10 @@
 # My Avatar
 
-## Unreleased
+## 0.9.17 — 2026-10-26
 
+- Requires Orbiters Toolkit 0.4.8.
+- **Never refit**: the publishing page's setup rows have a "Never refit" switch per prefab; installs carry it, items
+  not worn on the body (and N4N0) are never asked about their fit, and Mixer's Hierarchy shows no ReFit for them.
 - **VRCLens** in one drop: drop Hirabiki's VRCLens package (or its folder or prefab once in the project) on the
   **Drop anything** field. My Avatar imports your copy when it is not in the project yet (VRCLens 1.10 and later need
   VRLabs' Avatars 3.0 Manager first: the field offers its download, then the drop goes on), then runs VRCLens's own
