@@ -165,7 +165,7 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var attachment in attachments)
                 {
                     if (source.IsCancellationRequested || !avatar) return;
-                    if (!attachment || avatar.accessoryNotes.Any(n => n.accessory == attachment && !string.IsNullOrEmpty(n.fit))) continue;
+                    if (!attachment || VrcLens.IsItem(attachment) || avatar.accessoryNotes.Any(n => n.accessory == attachment && !string.IsNullOrEmpty(n.fit))) continue;
                     if (!dropped && AccessoryFit.Refitted(attachment)) continue;
                     var note = await AccessoryFit.CheckAsync(avatar, attachment, source.Token);
                     if (note == null || !avatar || !attachment || source.IsCancellationRequested) continue;

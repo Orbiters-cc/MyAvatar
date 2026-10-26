@@ -264,7 +264,7 @@ namespace Orbiters.MyAvatar.Editor
             if (!avatar || !Enabled) { style.display = DisplayStyle.None; return; }
             // Keep an active drop's choices reachable, but leave no empty heading on an avatar.
             bool hasContent = AttachmentInstaller.Installed(avatar.transform).Count > 0 ||
-                AccessoryService.PendingOptions(avatar, out _).Count > 0;
+                AccessoryService.PendingOptions(avatar, out _).Count > 0 || VrcLens.AwaitsManager(avatar);
             style.display = hasContent ? DisplayStyle.Flex : DisplayStyle.None;
             if (AccessoryService.Busy(avatar)) return;
             if (AccessoryService.HasFollowUp(avatar)) schedule.Execute(ResumeFollowUp);
@@ -280,9 +280,25 @@ namespace Orbiters.MyAvatar.Editor
             RefreshNames();
         }
 
+        // A VRCLens drop waiting for Avatars 3.0 Manager: what it downloads, kept while it waits (its plan is read once).
+        private VisualElement managerPrompt;
+
         private void RefreshChoice()
         {
             choice.Clear();
+            if (VrcLens.AwaitsManager(avatar) && !VrcLens.Downloads.Waiting(avatar))
+            {
+                choice.style.display = DisplayStyle.Flex;
+                managerPrompt ??= new PackageSetupPrompt(VrcLens.Downloads, avatar, new[] { VrcLens.ManagerId }, "VRCLens", (note, warning) =>
+                {
+                    managerPrompt = null;
+                    if (note == null || warning) VrcLens.Forget(avatar);
+                    AccessoryService.Status(avatar, note ?? "Cancelled · VRCLens was not imported.", warning, avatar.accessoryNotes);
+                });
+                choice.Add(managerPrompt);
+                return;
+            }
+            managerPrompt = null;
             var options = AccessoryService.PendingOptions(avatar, out bool hands);
             choice.style.display = options.Count == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             if (options.Count == 0) return;
@@ -405,10 +421,12 @@ namespace Orbiters.MyAvatar.Editor
                 var row = new VisualElement(); row.AddToClassList("accessory-item"); entry.Add(row);
                 // What it looks like as worn (its refit included), rendered in the background and kept.
                 var worn = attachment.gameObject;
+                bool lens = VrcLens.IsItem(attachment);
                 string look = ModelThumbnails.KeyFor(attachment.variant) + "|" + attachment.name + "|" + string.Join(",",
                     attachment.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh ? r.sharedMesh.GetInstanceID() : 0)) + "|" + string.Join(",",
                     attachment.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials).Select(m => m ? m.GetInstanceID() : 0));
-                var picture = new AssetThumbnail(() => ModelThumbnails.Get(worn, look));
+                // VRCLens's camera shows only in game: its own camera model stands for it.
+                var picture = new AssetThumbnail(() => lens ? VrcLens.Picture() : ModelThumbnails.Get(worn, look));
                 picture.AddToClassList("accessory-item__picture"); row.Add(picture);
                 // Beside the picture: its name, fit and buttons, then how it is attached on a second line.
                 var body = new VisualElement(); body.AddToClassList("accessory-item__body"); row.Add(body);
@@ -444,11 +462,13 @@ namespace Orbiters.MyAvatar.Editor
                     entry.style.display = DisplayStyle.None;
                     // A gallery asset comes off with all its parts; its files stay for Cleanup.
                     if (item.gallery != null && item.gallery.Installed) { Gallery.GalleryInstaller.Remove(avatar, item.gallery.installId); return; }
-                    AttachmentInstaller.Remove(item);
+                    // VRCLens also left its pickups on the hands and head.
+                    if (lens) VrcLens.Remove(item);
+                    else AttachmentInstaller.Remove(item);
                     AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n.accessory != item).ToList());
                 }));
-                // Gallery assets come set up by their creator: no texture slots or material repair to offer.
-                if (item.gallery == null || !item.gallery.Installed) TextureCard(entry, item);
+                // Gallery assets come set up by their creator, VRCLens by its own setup: no texture slots or material repair to offer.
+                if ((item.gallery == null || !item.gallery.Installed) && !lens) TextureCard(entry, item);
                 var own = avatar.accessoryNotes.Where(n => n.accessory == item).ToList();
                 if (!own.Any(n => !string.IsNullOrEmpty(n.fit)))
                 {

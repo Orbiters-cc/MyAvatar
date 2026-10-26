@@ -48,7 +48,8 @@
         "url": "https://packages.vrchat.com/curated?download",
         "packages": [
           "vrchat.blackstartx.gesture-manager",
-          "com.llealloo.audiolink"
+          "com.llealloo.audiolink",
+          "dev.vrlabs.av3manager"
         ]
       },
       {
@@ -128,6 +129,10 @@
       "com.poiyomi.toon": {
         "displayName": "Poiyomi Toon",
         "reason": "Free toon shader many avatars are made with. My Avatar suggests it when materials made for it don't render."
+      },
+      "dev.vrlabs.av3manager": {
+        "displayName": "Avatars 3.0 Manager",
+        "reason": "VRLabs' animator merging, which VRCLens 1.10 and later need before their import: My Avatar downloads it when you drop VRCLens."
       }
     }
   },

@@ -42,6 +42,8 @@ namespace Orbiters.MyAvatar.Editor
             /// <summary>GUIDs of the prefabs and models the packages bring: found wherever Unity puts them.</summary>
             public List<string> guids = new List<string>();
             public int nextPackage;
+            /// <summary>What was dropped, as dropped: dropped again once a download it waited for is in (VRCLens).</summary>
+            public List<string> dropped = new List<string>();
         }
 
         [Serializable] private sealed class Jobs { public List<Job> list = new List<Job>(); }
@@ -85,7 +87,8 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static Task<List<Outcome>> DropAsync(MyAvatar avatar, string[] paths, Action<float, string> progress, CancellationToken cancellation) => Locked(avatar, async () =>
         {
-            var job = new Job { avatar = GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString(), instance = avatar.GetInstanceID(), batch = Guid.NewGuid().ToString("N").Substring(0, 12) };
+            var job = new Job { avatar = GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString(), instance = avatar.GetInstanceID(), batch = Guid.NewGuid().ToString("N").Substring(0, 12),
+                dropped = paths.ToList() };
             progress(.05f, "Opening the drop…");
             string root = AccessoryImport.ProjectRoot, staging = AccessoryImport.Staging, folder = Path.Combine(staging, job.batch);
             var keep = KeptStaging();
@@ -115,6 +118,9 @@ namespace Orbiters.MyAvatar.Editor
                 reviews.Add(review);
             }
             job.drop.packages.Clear();
+            // VRCLens 1.10 and later need a VPM package first, or the project stops compiling: nothing is imported before it.
+            string waiting = await VrcLens.CheckAsync(avatar, reviews, job.dropped, cancellation);
+            if (waiting != null) { Status(avatar, waiting, false, Notes(job)); return false; }
             string declined = Consent(reviews);
             if (declined != null) { Status(avatar, declined, false, Notes(job)); return false; }
             foreach (var review in reviews)
@@ -271,9 +277,19 @@ namespace Orbiters.MyAvatar.Editor
             if (!avatar) { AccessoryImport.ReleaseCopies(job.batch); return outcomes; }
             // Only the prefabs and models of the packages were kept: few paths to look up.
             var assets = job.drop.assets.Concat(job.guids.Select(AssetDatabase.GUIDToAssetPath).Where(p => !string.IsNullOrEmpty(p))).ToList();
+            var notes = Notes(job);
+            // VRCLens comes with its own setup: My Avatar runs it rather than placing one of its prefabs.
+            string lens = VrcLens.SetupPrefab(assets);
+            if (lens != null)
+            {
+                progress(.85f, "Setting up VRCLens…");
+                Release(avatar, job.drop.staging);
+                AccessoryImport.ReleaseCopies(job.batch);
+                VrcLens.Install(avatar, lens, notes);
+                return outcomes;
+            }
             progress(.75f, "Choosing what to put on…");
             var choice = AccessoryCandidates.Choose(assets);
-            var notes = Notes(job);
             if (choice.best == null)
             {
                 Status(avatar, job.drop.images.Count > 0 ? null : "Nothing to put on the avatar in this drop: no prefab or model with a mesh.", true, notes);
@@ -468,6 +484,7 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static string Describe(OrbitersAttachment attachment, AttachmentPlan plan = null)
         {
+            if (VrcLens.IsItem(attachment)) return VrcLens.Describe(attachment);
             if (attachment.stickToSkin && SkinStick.Find(attachment, out _) is SkinSpot spot) return "sticks to the skin: " + SkinStick.Describe(spot);
             switch (attachment.mode)
             {

@@ -1,5 +1,19 @@
 # My Avatar
 
+## Unreleased
+
+- **VRCLens** in one drop: drop Hirabiki's VRCLens package (or its folder or prefab once in the project) on the
+  **Drop anything** field. My Avatar imports your copy when it is not in the project yet (VRCLens 1.10 and later need
+  VRLabs' Avatars 3.0 Manager first: the field offers its download, then the drop goes on), then runs VRCLens's own
+  setup as its window's **Apply VRCLens** does: its Auto Arrange places the camera in the right hand (the left on
+  request), the focus pen in the other and the desktop camera by the head; its animator, menu and parameters are written
+  as VRCLens writes them, into a VRCLens instance of their own (its folder in VRCLens's `User` folder) that VRCFury
+  merges at build, the menu at the root of the Action Menu. The avatar's controllers, menu and parameters never change.
+  Its card shows VRCLens like an accessory: **Camera hand** (left or right), **Drone controls** (VRCLens's drone and
+  HUD puppets, 16 more synced bits; on by default when the avatar's parameters fit 256 bits with them) and **Remove**.
+  Dropping VRCLens again (a new version) sets it up again, its camera where it was. Requires VRCFury. VRCLens is a paid
+  asset: My Avatar only runs your own copy, and none of its files are copied anywhere else.
+
 ## 0.9.16 — 2026-10-26
 
 - Requires Orbiters Toolkit 0.4.7 and, where VRCFury is installed, VRCFury 1.1434 or later (My Avatar offers the
@@ -628,8 +642,9 @@ drop holding several different items lists them to pick from. Dropping something
 already on the avatar offers **Replace** and **Add another**.
 
 What My Avatar can't do for you is listed under the field with **Select**: a name that
-asks for a manual step ("Put me in armature"), a script of another tool (VRCLens has its
-own installer), a missing script, a bone matching nothing of the avatar. A package made
+asks for a manual step ("Put me in armature"), a script of another tool, a missing script,
+a bone matching nothing of the avatar. VRCLens is set up with its own setup, for you (see
+**VRCLens** below). A package made
 for Modular Avatar, and VRCFury itself, can be installed from there. `.blend`, `.max` and
 `.stl` sources are refused with a note; setup scenes are not supported yet.
 
@@ -640,6 +655,37 @@ The list shows each accessory with a picture of it as worn (made in the backgrou
 `Library/Orbiters/Thumbnails`), its fit, and how it is attached. With AI help on, each gets a short
 clean name there and in Posing (`Glowsticks_Body ultipaw Variant` reads **Glowsticks for Ultipaw**);
 its object keeps its own name, shown on hover.
+
+### VRCLens
+
+Dropping Hirabiki's VRCLens (its `.unitypackage`, or its folder or prefab once imported) sets it up on the avatar
+without opening VRCLens's window. VRCLens's own setup does the work, as its **Apply VRCLens** button would: its Auto
+Arrange places the camera at the index finger of the camera hand and the focus pen at the other, its setup puts its
+objects on the avatar (`VRCLens` under the root, its pickups under both hands and the head) and writes its animator, menu
+and parameters. My Avatar keeps the avatar's own controllers, menu and parameters out of VRCLens's way while it works, so
+VRCLens writes them as for an avatar without any, in `Hirabiki/VRCLens/User/<avatar> (My Avatar …)`; a VRCFury Full
+Controller on `VRCLens` merges them at build, with VRCLens's parameter names kept. VRCLens's states write defaults as
+the avatar's FX does (what VRCLens's window offers when they differ). The avatar stands at the origin while VRCLens works
+and goes back.
+
+- **Camera hand**: right by default (VRCLens's own default); switching sets VRCLens up again with its camera and pen
+  swapped to the other hands (VRCLens's Auto Swap).
+- **Drone controls**: VRCLens's drone and HUD puppets, 16 more synced bits (25 without). On by default when the avatar's
+  synced parameters fit VRChat's 256 bits with them, off otherwise (VRCFury would have to compress them).
+- Its menu goes at the root of the Action Menu, as VRCLens puts it by default; when that page is full, VRCFury adds it
+  to a Next page.
+- **Remove** takes off its objects and pickups (one Undo step); its files in VRCLens's `User` folder go once nothing uses
+  them.
+- Dropping VRCLens again (a new version, its package or its folder) sets it up again with that version, its camera,
+  pen and head camera where they were (VRCLens's Load Avatar Setup).
+- VRCLens 1.10 and later merge their animator with VRLabs' Avatars 3.0 Manager: when it is not in the project, nothing is
+  imported (VRCLens's scripts would not compile) and the field offers its download from VRChat's curated packages; the
+  drop then goes on by itself.
+- An avatar whose VRCLens was set up with VRCLens's own window (its layers in the avatar's FX) is left as it is: remove
+  it there first, then drop VRCLens.
+
+VRCLens is a paid asset. Its terms forbid redistributing it or putting it on public avatars: My Avatar only runs the
+copy you bought, in your project, and copies none of its files anywhere else.
 
 ### On a custom base
 
