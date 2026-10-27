@@ -238,5 +238,43 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(GalleryUI.CompareVersions("1.10.0", "1.9.2"), Is.GreaterThan(0));
             Assert.That(GalleryCreatorPage.NextVersion("1.4.9"), Is.EqualTo("1.4.10"));
         }
+
+        // An update's new copy takes the older copy's place: the bone it was moved to, where, hidden, its card's name;
+        // copies are paired by their prefab, whatever their order.
+        [Test] public void AnUpdateKeepsTheBoneThePlaceTheVisibilityAndTheName()
+        {
+            var avatar = Avatar();
+            var head = new GameObject("Head").transform; head.SetParent(avatar.transform, false);
+            var chest = new GameObject("Chest").transform; chest.SetParent(avatar.transform, false);
+            OrbitersAttachment Copy(string name, string source, Transform bone)
+            {
+                var go = new GameObject(name); go.transform.SetParent(avatar.transform, false);
+                var a = go.AddComponent<OrbitersAttachment>();
+                a.mode = OrbitersAttachment.AttachMode.Parent; a.parent = bone; a.source = source;
+                return a;
+            }
+            var oldHat = Copy("Hat", "aaa", head);
+            var oldPin = Copy("Pin", "bbb", chest);
+            oldHat.transform.localPosition = new Vector3(0.1f, 1.7f, 0.05f);
+            oldHat.transform.localRotation = Quaternion.Euler(0, 30, 0);
+            oldHat.transform.localScale = Vector3.one * 1.2f;
+            oldHat.displayName = "Party hat"; oldHat.displayNameFor = "Hat";
+            oldPin.gameObject.SetActive(false);
+            // The update's copies come in another order, the hat back on the prefab's own bone.
+            var newPin = Copy("Pin", "bbb", chest);
+            var newHat = Copy("Hat", "aaa", chest);
+
+            var pairs = GalleryInstaller.Pairs(new List<OrbitersAttachment> { oldHat, oldPin }, new List<OrbitersAttachment> { newPin, newHat });
+            Assert.That(pairs.Select(p => (p.old, p.now)), Is.EqualTo(new[] { (oldHat, newHat), (oldPin, newPin) }));
+            foreach (var (old, now) in pairs) GalleryInstaller.CarryPlacement(old, now);
+
+            Assert.That(newHat.parent, Is.EqualTo(head), "the bone it was moved to");
+            Assert.That(Vector3.Distance(newHat.transform.localPosition, oldHat.transform.localPosition), Is.LessThan(1e-5f), "where it was");
+            Assert.That(Quaternion.Angle(newHat.transform.localRotation, oldHat.transform.localRotation), Is.LessThan(0.01f));
+            Assert.That(newHat.transform.localScale.x, Is.EqualTo(1.2f).Within(1e-5f));
+            Assert.That(newHat.DisplayName, Is.EqualTo("Party hat"));
+            Assert.That(newPin.gameObject.activeSelf, Is.False, "hidden as it was");
+            Assert.That(newHat.gameObject.activeSelf, Is.True);
+        }
     }
 }

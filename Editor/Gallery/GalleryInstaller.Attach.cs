@@ -148,6 +148,59 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         // ---- Verify: the avatar wears it; only then is it "Installed" ----
 
+        /// <summary>
+        /// The older copies and the new ones of an update, each with the one of the same prefab (its source), else in
+        /// their order.
+        /// </summary>
+        internal static List<(OrbitersAttachment old, OrbitersAttachment now)> Pairs(List<OrbitersAttachment> olds, List<OrbitersAttachment> news)
+        {
+            var pairs = new List<(OrbitersAttachment, OrbitersAttachment)>();
+            var left = news.ToList();
+            var unmatched = new List<OrbitersAttachment>();
+            foreach (var old in olds)
+            {
+                var now = string.IsNullOrEmpty(old.source) ? null : left.FirstOrDefault(n => string.Equals(n.source, old.source, StringComparison.OrdinalIgnoreCase));
+                if (now == null) { unmatched.Add(old); continue; }
+                left.Remove(now);
+                pairs.Add((old, now));
+            }
+            for (int i = 0; i < unmatched.Count && i < left.Count; i++) pairs.Add((unmatched[i], left[i]));
+            return pairs;
+        }
+
+        /// <summary>
+        /// The new copy where the older one was: put on the same bone, at the same place (one attached to a bone keeps where
+        /// it was moved), shown or hidden as it was, with the name it was given on its card. A fitted garment is fitted again
+        /// (its fit follows the new version's meshes) and keeps only whether it shows and its name.
+        /// </summary>
+        internal static void CarryPlacement(OrbitersAttachment old, OrbitersAttachment now)
+        {
+            if (!old || !now) return;
+            if (old.mode == OrbitersAttachment.AttachMode.Parent && now.mode == OrbitersAttachment.AttachMode.Parent && old.parent != null)
+            {
+                if (now.parent != old.parent) AttachmentInstaller.Retarget(now, old.parent, snap: false);
+                if (now.transform.parent == old.transform.parent)
+                {
+                    Undo.RecordObject(now.transform, "Keep " + now.name + "'s place");
+                    now.transform.localPosition = old.transform.localPosition;
+                    now.transform.localRotation = old.transform.localRotation;
+                    now.transform.localScale = old.transform.localScale;
+                }
+            }
+            if (now.gameObject.activeSelf != old.gameObject.activeSelf)
+            {
+                Undo.RecordObject(now.gameObject, "Keep " + now.name + " shown or hidden");
+                now.gameObject.SetActive(old.gameObject.activeSelf);
+            }
+            if (!string.IsNullOrEmpty(old.displayName) && old.displayNameFor == old.name && string.IsNullOrEmpty(now.displayName))
+            {
+                Undo.RecordObject(now, "Keep " + now.name + "'s name");
+                now.displayName = old.displayName;
+                now.displayNameFor = now.name;
+            }
+            EditorUtility.SetDirty(now);
+        }
+
         private static void Verify(GalleryJob job, MyAvatar avatar)
         {
             var attachments = AttachmentInstaller.Installed(avatar.transform).Where(a => a && a.gallery != null && a.gallery.installId == job.id).ToList();
@@ -157,11 +210,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (!string.IsNullOrEmpty(job.updateOf))
             {
                 var olds = AttachmentInstaller.Installed(avatar.transform).Where(a => a && a.gallery?.installId == job.updateOf).ToList();
-                // The settings chosen on the older copy's card (N4N0's text slots) carry over.
-                for (int i = 0; i < olds.Count && i < attachments.Count; i++)
+                // Each new copy keeps what was chosen for the older copy of the same prefab: its card's settings (N4N0's
+                // text slots, an item's switches), the bone it was put on and where, whether it shows, the name it was given.
+                foreach (var (old, now) in Pairs(olds, attachments))
                 {
-                    try { AttachmentHooks.CarryOptions(olds[i].gameObject, attachments[i].gameObject); }
+                    try { AttachmentHooks.CarryOptions(old.gameObject, now.gameObject); }
                     catch (Exception ex) { Debug.LogWarning("[My Avatar] " + job.assetName + " was updated without its earlier settings (set them again on its card): " + ex.Message); }
+                    try { CarryPlacement(old, now); }
+                    catch (Exception ex) { Debug.LogWarning("[My Avatar] " + job.assetName + " was updated without its earlier place (put it back with Bone ▾): " + ex.Message); }
                 }
                 foreach (var old in olds) AttachmentInstaller.Remove(old);
                 GalleryLedger.MarkRemoved(job.updateOf);
