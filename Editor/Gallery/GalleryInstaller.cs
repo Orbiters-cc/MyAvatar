@@ -30,7 +30,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         /// <summary>Replaced in tests: the server's dependency catalog and the download.</summary>
         internal static Func<CancellationToken, Task<KnownCatalog>> KnownDependencies = GalleryApi.KnownDependenciesAsync;
         internal static Func<GalleryJob, string, Toolkit.Editor.Net.OrbitersTransfer.Progress, CancellationToken, Task<Toolkit.Editor.Net.OrbitersTransfer.Result>> Download =
-            (job, path, progress, cancellation) => GalleryApi.DownloadAsync(job.assetId, job.variantId, path, job.sha256, progress, cancellation);
+            (job, path, progress, cancellation) => GalleryApi.DownloadAsync(job.assetId, job.variantId, path, job.sha256, job.sizeBytes, progress, cancellation);
         /// <summary>Replaced in tests: whether Orbiters trusts the asset's creator now (null when it cannot be asked).</summary>
         internal static Func<GalleryJob, CancellationToken, Task<bool?>> CreatorTrustedNow = async (job, cancellation) =>
         {

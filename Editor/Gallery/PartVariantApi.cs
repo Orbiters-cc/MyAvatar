@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Orbiters.Toolkit.Editor.Net;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 
 namespace Orbiters.MyAvatar.Editor.Gallery
 {
@@ -38,9 +39,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         internal static Task<VariantInfo> VariantAsync(int id, CancellationToken cancellation) => Send<VariantInfo>(Url($"part-variants/{id}"), cancellation: cancellation);
 
-        /// <summary>GET /part-variants/:id/download: the variant's zip, checked against its published SHA-256.</summary>
+        /// <summary>
+        /// GET /part-variants/:id/download: the variant's zip, checked against its published SHA-256 and stopped past its
+        /// published size, never past the largest zip a variant may be.
+        /// </summary>
         internal static Task<OrbitersTransfer.Result> DownloadAsync(VariantInfo variant, string destination, OrbitersTransfer.Progress progress, CancellationToken cancellation) =>
-            OrbitersTransfer.DownloadFileAsync(Url($"part-variants/{variant.id}/download"), destination, GalleryApi.Token, progress, cancellation, variant.sha256);
+            OrbitersTransfer.DownloadFileAsync(Url($"part-variants/{variant.id}/download"), destination, GalleryApi.Token, progress, cancellation, variant.sha256,
+                maxBytes: variant.sizeBytes > 0 ? Math.Min(variant.sizeBytes, ItemParts.MaxZipBytes) : ItemParts.MaxZipBytes);
 
         /// <summary>
         /// POST /:assetId/parts/:part/variants: the zip (<c>variantFile</c>) and its metadata (<c>official</c> for a

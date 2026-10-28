@@ -87,10 +87,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             public List<RedeemCreator> Creators;
         }
 
-        /// <summary>Downloads a package the user may install, checked against its published SHA-256.</summary>
-        internal static Task<OrbitersTransfer.Result> DownloadAsync(int assetId, int variantId, string destination, string sha256,
+        /// <summary>
+        /// Downloads a package the user may install, checked against its published SHA-256 and stopped as soon as it
+        /// grows past its published size (<paramref name="sizeBytes"/>, when known).
+        /// </summary>
+        internal static Task<OrbitersTransfer.Result> DownloadAsync(int assetId, int variantId, string destination, string sha256, long sizeBytes,
             OrbitersTransfer.Progress progress, CancellationToken cancellation) =>
-            OrbitersTransfer.DownloadFileAsync(Url($"{assetId}/variants/{variantId}/download"), destination, Token, progress, cancellation, sha256);
+            OrbitersTransfer.DownloadFileAsync(Url($"{assetId}/variants/{variantId}/download"), destination, Token, progress, cancellation, sha256,
+                maxBytes: Math.Max(0, sizeBytes));
 
         // ---- Likes and reviews (the same as on the asset's website page) ----
 
