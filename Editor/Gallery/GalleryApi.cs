@@ -19,6 +19,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
     {
         private const string Failure = "Orbiters answered HTTP {0}. Check your connection and try again.";
         internal static string Token => AuthenticationService.GetAuth()?.token;
+
+        /// <summary>
+        /// The server and the account calls go to now ("http://127.0.0.1:4100/|12"): ids kept for later (an installation, a
+        /// publishing draft) belong to it, and are never sent to another.
+        /// </summary>
+        internal static string Context => OrbitersEnvironment.ApiUrl() + "|" + Toolkit.Editor.ContentTrust.SignedInUserId();
         private static string Url(string path) => OrbitersEnvironment.ApiUrl("avatar-assets/" + path.TrimStart('/'));
 
         private static Task<T> Send<T>(string url, object payload = null, HttpMethod method = null, CancellationToken cancellation = default) =>

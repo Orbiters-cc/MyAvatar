@@ -31,6 +31,15 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         internal static Func<CancellationToken, Task<KnownCatalog>> KnownDependencies = GalleryApi.KnownDependenciesAsync;
         internal static Func<GalleryJob, string, Toolkit.Editor.Net.OrbitersTransfer.Progress, CancellationToken, Task<Toolkit.Editor.Net.OrbitersTransfer.Result>> Download =
             (job, path, progress, cancellation) => GalleryApi.DownloadAsync(job.assetId, job.variantId, path, job.sha256, progress, cancellation);
+        /// <summary>Replaced in tests: whether Orbiters trusts the asset's creator now (null when it cannot be asked).</summary>
+        internal static Func<GalleryJob, CancellationToken, Task<bool?>> CreatorTrustedNow = async (job, cancellation) =>
+        {
+            try { return (await GalleryApi.DetailAsync(job.assetId, AvatarPlatform.Current, null, cancellation))?.creator?.trusted; }
+            catch (Exception ex) when (!(ex is OperationCanceledException)) { return null; }
+        };
+        // The jobs whose creator's trust was read from Orbiters by this editor, and when: a resumed job asks again.
+        private static readonly Dictionary<string, DateTime> TrustRead = new Dictionary<string, DateTime>();
+        private static readonly TimeSpan TrustLife = TimeSpan.FromMinutes(10);
 
         internal static bool Busy(MyAvatar avatar)
         {
@@ -61,7 +70,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 thumbnail = asset.thumbnail, sha256 = variant.sha256, sizeBytes = variant.sizeBytes, parameterBits = variant.parameterBits,
                 platforms = variant.platforms ?? new List<string>(), dependencies = variant.dependencies ?? new List<GalleryDependency>(),
                 manifest = variant.manifest ?? new GalleryManifest(), setupKey = setup?.key, setupLabel = setup?.label, updateOf = updateOf,
-                createdAt = DateTime.UtcNow.Ticks, status = "Starting…",
+                createdAt = DateTime.UtcNow.Ticks, status = "Starting…", context = GalleryApi.Context,
             };
             // A new install of the same asset replaces an old failed or cancelled one on this avatar.
             foreach (var old in GalleryJournal.All.Where(j => j.avatar == job.avatar && j.assetId == asset.id && j.Terminal).ToList()) GalleryJournal.Remove(old);
@@ -96,7 +105,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 creatorId = ContentTrust.SignedInUserId(), creatorTrusted = true, packagePath = packagePath, parameterBits = parameterBits,
                 platforms = new List<string> { AvatarPlatform.Current }, dependencies = dependencies ?? new List<GalleryDependency>(),
                 manifest = manifest ?? new GalleryManifest(), setupKey = setup?.key, setupLabel = setup?.label,
-                stage = GalleryJob.Validate, createdAt = DateTime.UtcNow.Ticks, status = "Checking the package…", progress = 0.4f,
+                stage = GalleryJob.Validate, createdAt = DateTime.UtcNow.Ticks, status = "Checking the package…", progress = 0.4f, context = GalleryApi.Context,
             };
             GalleryJournal.Save(job);
             _ = RunAsync(job);
@@ -139,7 +148,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         internal static void Retry(GalleryJob job)
         {
             if (job == null || job.stage != GalleryJob.Failed) return;
-            job.stage = job.placed.Count > 0 ? GalleryJob.Verify : job.imported ? GalleryJob.Attach : job.assetId > 0 ? GalleryJob.Download : GalleryJob.Validate;
+            // Once imported it goes on from Attach, which places only what is missing from the avatar.
+            job.stage = job.placed.Count > 0 || job.imported ? GalleryJob.Attach : job.assetId > 0 ? GalleryJob.Download : GalleryJob.Validate;
             job.error = null; job.cancelRequested = false;
             GalleryJournal.Save(job);
             _ = RunAsync(job);
@@ -168,6 +178,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                         break;
                     }
                     while (EditorApplication.isCompiling || EditorApplication.isUpdating) await Task.Delay(150, source.Token);
+                    // Until its files are imported it talks to the server it was started with, as that account: never another.
+                    if (BeforeImport(job.stage) && job.context != GalleryApi.Context)
+                    {
+                        Fail(job, "It was started with another Orbiters account or server (Development environment). Add it again from the gallery.");
+                        break;
+                    }
                     await Step(job, avatar, source.Token);
                 }
             }
@@ -175,7 +191,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             catch (Exception ex)
             {
                 Debug.LogWarning("[My Avatar] A Gallery installation stopped (the Gallery shows which): " + ex);
-                Fail(job, ex.Message);
+                if (!job.Terminal) Fail(job, ex.Message);
             }
             finally
             {
@@ -185,6 +201,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 AccessoryService.NotifyChanged(FindAvatar(job));
             }
         }
+
+        private static bool BeforeImport(string stage) => stage == GalleryJob.Queued || stage == GalleryJob.Download || stage == GalleryJob.Validate ||
+            stage == GalleryJob.Dependencies || stage == GalleryJob.Preview || stage == GalleryJob.Import;
 
         private static Task Step(GalleryJob job, MyAvatar avatar, CancellationToken cancellation)
         {
@@ -226,7 +245,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             job.stage = stage; job.status = status; job.waiting = null; job.importing = false; job.installingDependencies = false;
             if (stage != GalleryJob.Failed) DeleteStaged(job);
-            GalleryJournal.Save(job);
+            // A journal that cannot be written stops the job here; the card still shows how it ended until Unity reloads.
+            try { GalleryJournal.Save(job); }
+            catch (IOException ex)
+            {
+                Debug.LogWarning("[My Avatar] " + job.assetName + ": " + ex.Message + ".");
+                GalleryJournal.Notify(job);
+            }
         }
 
         // ---- Checks before anything is downloaded ----
@@ -276,7 +301,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (!result.Success) { Fail(job, result.Error); return; }
             // The download repeats whether the creator is trusted now: the card's answer may be older.
             string trusted = result.Header("X-Orbiters-Creator-Trusted");
-            if (!string.IsNullOrEmpty(trusted)) job.creatorTrusted = trusted == "true";
+            if (!string.IsNullOrEmpty(trusted)) { job.creatorTrusted = trusted == "true"; TrustRead[job.id] = DateTime.UtcNow; }
             job.packagePath = path;
             Move(job, GalleryJob.Validate, "Checking the package…", 0.4f);
         }
@@ -296,6 +321,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (setup == null || setup.prefabs.Count == 0 || setup.prefabs.Any(p => !guids.Contains(p.guid)))
             { Fail(job, "The package does not hold the prefabs its creator declared. Ask the creator to publish it again."); return; }
             var code = ContentTrust.PackageCode(index, AssetDatabase.GUIDToAssetPath);
+            // Code installs without asking only while Orbiters trusts its creator: a package kept from before (a resumed
+            // job, a reload) asks again, and an answer that can't be had counts as not trusted.
+            if (code.Count > 0 && job.creatorTrusted && job.assetId > 0 && (!TrustRead.TryGetValue(job.id, out var read) || DateTime.UtcNow - read > TrustLife))
+            {
+                job.creatorTrusted = await CreatorTrustedNow(job, cancellation) == true;
+                TrustRead[job.id] = DateTime.UtcNow;
+                GalleryJournal.Save(job);
+            }
             bool trusted = ContentTrust.IsTrusted(job.creatorTrusted, job.creatorId, ContentTrust.SignedInUserId());
             if (code.Count > 0 && !trusted && !job.accepted.Contains("code"))
             {

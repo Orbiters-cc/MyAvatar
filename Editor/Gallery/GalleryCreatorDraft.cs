@@ -35,6 +35,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public string idempotencyKey = NewKey();
         public string message;
         public bool messageError;
+        /// <summary>
+        /// The server and account its ids on Orbiters (the asset, the draft version, the packages and pictures sent) belong
+        /// to (<see cref="GalleryApi.Context"/>); null until it has any.
+        /// </summary>
+        public string context;
 
         /// <summary>The gallery takes this many pictures for an asset's page in one request, besides the card's.</summary>
         internal const int MaxPreviews = 8;
@@ -51,9 +56,32 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             try
             {
                 var draft = JsonConvert.DeserializeObject<GalleryCreatorDraft>(SessionState.GetString(Key, ""), Settings);
-                return draft != null && !Ended.Contains(draft.draftId) ? draft : new GalleryCreatorDraft();
+                if (draft == null || Ended.Contains(draft.draftId)) return new GalleryCreatorDraft();
+                draft.Bind(GalleryApi.Context);
+                return draft;
             }
             catch (JsonException) { return new GalleryCreatorDraft(); }
+        }
+
+        /// <summary>
+        /// Keeps the draft's ids on Orbiters only for the server and account they came from: with another one (the
+        /// Development environment switched, another account signed in) it forgets them, keeps what was written and chosen,
+        /// and says so. True when it had to.
+        /// </summary>
+        internal bool Bind(string now)
+        {
+            bool held = assetId > 0 || releaseId > 0 || picturesSent || variants.Any(v => v.uploadedId > 0);
+            if (context == now || !held) { context = now; return false; }
+            var asset = assetId;
+            assetId = releaseId = releaseAssetId = 0;
+            newAsset = true;
+            picturesSent = false;
+            foreach (var variant in variants) variant.ForgetUpload();
+            idempotencyKey = NewKey();
+            context = now;
+            message = "This draft was started with another Orbiters account or server" + (asset > 0 ? ": choose the asset again" : "") + " before publishing.";
+            messageError = true;
+            return true;
         }
 
         internal void Save()
@@ -86,6 +114,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             newAsset = asset == 0;
             if (asset == assetId) return;
             assetId = asset;
+            // An asset chosen now is one of this account's on this server.
+            context = GalleryApi.Context;
             releaseId = releaseAssetId = 0;
             picturesSent = false;
             foreach (var variant in variants) variant.ForgetUpload();

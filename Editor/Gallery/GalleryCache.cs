@@ -26,6 +26,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             AuthenticationService.Changed += Clear;
             OrbitersEnvironment.Changed += Clear;
+            // Another build target offers other packages.
+            EditorUserBuildSettings.activeBuildTargetChanged += Clear;
         }
 
         internal static void Clear()
@@ -103,10 +105,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             catch (Exception) { return false; }
         }
 
-        /// <summary>The avatar's context, detected once and reused for a few minutes (its parameter memory is measured again).</summary>
+        /// <summary>
+        /// The avatar's context for the platform the project builds for, detected once and reused for a few minutes (its
+        /// parameter memory is measured again).
+        /// </summary>
         internal static Task<GalleryAvatarContext> Context(MyAvatar avatar, bool refresh = false)
         {
-            string key = GalleryInstaller.AvatarId(avatar) + "|" + avatar.GetInstanceID();
+            string key = ContextKey(avatar);
             if (!refresh && contexts.TryGetValue(key, out var known) && !known.task.IsFaulted && DateTime.UtcNow - known.at < ContextLife)
                 return Remeasure(known.task, avatar);
             var task = Detect(avatar);
@@ -117,9 +122,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         /// <summary>The context when it is already known, without waiting.</summary>
         internal static GalleryAvatarContext Known(MyAvatar avatar)
         {
-            string key = GalleryInstaller.AvatarId(avatar) + "|" + avatar.GetInstanceID();
+            string key = ContextKey(avatar);
             return contexts.TryGetValue(key, out var known) && known.task.Status == TaskStatus.RanToCompletion ? known.task.Result : null;
         }
+
+        private static string ContextKey(MyAvatar avatar) => GalleryInstaller.AvatarId(avatar) + "|" + avatar.GetInstanceID() + "|" + Toolkit.Editor.AvatarPlatform.Current;
 
         private static async Task<GalleryAvatarContext> Detect(MyAvatar avatar) => await GalleryAvatarContext.DetectAsync(avatar, await Bases(), CancellationToken.None);
 

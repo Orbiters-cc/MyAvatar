@@ -163,7 +163,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (!fromIndex)
                 report.prefabs = prefabGuids.Select(g => new GallerySetupPrefab { guid = g, path = AssetDatabase.GUIDToAssetPath(g), name = Path.GetFileNameWithoutExtension(AssetDatabase.GUIDToAssetPath(g)) }).ToList();
             if (report.bytes > MaxBytes) report.errors.Add($"The package is {GalleryUI.Size(report.bytes)}; the gallery accepts up to {GalleryUI.Size(MaxBytes)} per package. Leave out unused textures or lower their sizes.");
-            report.parameterBits = ParameterCost(avatar, report.prefabs.Select(p => AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(p.guid))).Where(p => p != null).ToList());
+            try { report.parameterBits = ParameterCost(avatar, report.prefabs.Select(p => AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(p.guid))).Where(p => p != null).ToList()); }
+            catch (Exception ex)
+            {
+                // Published as free of parameters, it would never warn a buyer whose avatar is full.
+                report.parameterBits = 0;
+                report.errors.Add("Its parameter memory could not be measured (" + ex.Message + "). Fix what the console shows and build again.");
+            }
         }
 
         // Unity imports a .psd as a texture: one the package's content uses goes in like any texture. A .psb needs the 2D PSD
@@ -251,20 +257,24 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         }
 
         /// <summary>
-        /// Parameter memory the prefabs add: placed under the avatar for a moment, measured, and removed (outside Undo).
+        /// Parameter memory the prefabs add to the avatar, measured on a copy of it in a preview scene under an inactive
+        /// object (nothing of it wakes up, the avatar and its scene never change). Throws when it cannot be measured.
         /// </summary>
         internal static int ParameterCost(MyAvatar avatar, List<GameObject> prefabs)
         {
             if (!avatar || prefabs.Count == 0) return 0;
-            int before = AvatarParameterBudget.Estimate(avatar.gameObject).TotalBeforeCompression;
-            var placed = new List<GameObject>();
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.NewPreviewScene();
             try
             {
-                foreach (var prefab in prefabs) { var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, avatar.transform); instance.hideFlags = HideFlags.DontSave; placed.Add(instance); }
-                return Math.Max(0, AvatarParameterBudget.Estimate(avatar.gameObject).TotalBeforeCompression - before);
+                var holder = new GameObject("Parameter cost") { hideFlags = HideFlags.HideAndDontSave };
+                holder.SetActive(false);
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(holder, scene);
+                var copy = UnityEngine.Object.Instantiate(avatar.gameObject, holder.transform);
+                int before = AvatarParameterBudget.Estimate(copy).TotalBeforeCompression;
+                foreach (var prefab in prefabs) PrefabUtility.InstantiatePrefab(prefab, copy.transform);
+                return Math.Max(0, AvatarParameterBudget.Estimate(copy).TotalBeforeCompression - before);
             }
-            catch (Exception) { return 0; }
-            finally { foreach (var instance in placed) if (instance) UnityEngine.Object.DestroyImmediate(instance); }
+            finally { UnityEditor.SceneManagement.EditorSceneManager.ClosePreviewScene(scene); }
         }
 
         private static string Safe(string name)

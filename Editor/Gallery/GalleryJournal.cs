@@ -41,6 +41,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public string packagePath, importPath;
         public List<string> importGuids = new List<string>();
         public List<GalleryFile> preexisting = new List<GalleryFile>();
+        /// <summary>
+        /// The content each imported file has in the package (folders have none): a resumed or finished import is only
+        /// taken as done once the project's files are these.
+        /// </summary>
+        public List<GalleryFile> expected = new List<GalleryFile>();
+        /// <summary>The server and account the job was started with (<see cref="GalleryApi.Context"/>): it never goes on with another.</summary>
+        public string context;
         public List<string> placed = new List<string>();
         /// <summary>The installation this one updates: its objects are removed once the new ones are in place.</summary>
         public string updateOf;
@@ -85,7 +92,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var list = Load();
             job.updatedAt = DateTime.UtcNow.Ticks;
             if (!list.Contains(job)) { list.RemoveAll(j => j.id == job.id); list.Add(job); }
-            LibraryStore.Write(FileName, new Store { jobs = list });
+            // The next step may change the project: it only runs once this step is on disk.
+            LibraryStore.Commit(FileName, new Store { jobs = list });
             if (notify) Changed?.Invoke(job);
         }
 
@@ -93,7 +101,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             var list = Load();
             if (list.RemoveAll(j => j.id == job.id) == 0) return;
-            LibraryStore.Write(FileName, new Store { jobs = list });
+            LibraryStore.Commit(FileName, new Store { jobs = list });
             Changed?.Invoke(job);
         }
 
@@ -132,7 +140,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var store = LibraryStore.Read<Store>(FileName);
             store.entries.RemoveAll(e => e.installId == entry.installId);
             store.entries.Add(entry);
-            LibraryStore.Write(FileName, store);
+            LibraryStore.Commit(FileName, store);
         }
 
         /// <summary>The installation's objects were removed from its avatar; its files stay until Cleanup.</summary>
@@ -141,14 +149,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (string.IsNullOrEmpty(installId)) return;
             var store = LibraryStore.Read<Store>(FileName);
             foreach (var entry in store.entries.Where(e => e.installId == installId)) entry.removedAt = DateTime.UtcNow.Ticks;
-            LibraryStore.Write(FileName, store);
+            LibraryStore.Commit(FileName, store);
         }
 
         internal static void Forget(IEnumerable<string> installIds)
         {
             var ids = new HashSet<string>(installIds);
             var store = LibraryStore.Read<Store>(FileName);
-            if (store.entries.RemoveAll(e => ids.Contains(e.installId)) > 0) LibraryStore.Write(FileName, store);
+            if (store.entries.RemoveAll(e => ids.Contains(e.installId)) > 0) LibraryStore.Commit(FileName, store);
         }
 
         internal static string ProjectRoot => Path.GetDirectoryName(Application.dataPath);

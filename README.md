@@ -1,5 +1,32 @@
 # My Avatar
 
+## Unreleased
+
+- **Updates keep what you set**: updating an item from the gallery puts the new version where the older one was and
+  as it was: its card's settings (N4N0's choices, a creator's switches and choices of objects, materials and
+  blendshapes), its customizable parts' variants, the bone it was moved to with **Bone ▾** and its place there, its
+  name and whether it shows. The copies of a version built with new files pair with the older ones by prefab, then by
+  name. A fitted garment is fitted again to the new version's meshes.
+- Gallery installations are checked harder: an import interrupted by a reload or a restart is done only once the
+  project's files are the package's (else it imports again), every prefab of the setup has to be on the avatar, a prefab
+  its creator put on a bone the avatar doesn't have adds nothing, cancelling while another package imports stops the
+  installation before its import, the progress is saved before each step that changes the project (an installation
+  stops when it can't be), a package with code asks again whether its creator is still trusted when it was downloaded
+  earlier, and an installation goes on only with the Orbiters account and server it was started with. The files an
+  import brought are recorded at once, so Cleanup finds those of a failed or cancelled installation, and an update owns
+  the files the version before it brought (they no longer count as the project's own).
+- **Cleanup** checks the project again when you clean up (a file edited or used since the check stays), moves each
+  file with its .meta (never one without the other) and keeps the .meta of the folders it empties, so **Restore** gives
+  files and folders back their GUIDs; Restore never puts a file beside another .meta, and keeps in the quarantine what
+  it could not put back. Two cleanups in one second get batches of their own.
+- Publishing to the gallery keeps a draft's asset, version and uploads with the account and server they were made on:
+  with another one, the draft asks you to choose the asset again, and a publish stops when either changes midway. The
+  parameter memory of a package is measured on a hidden copy of the avatar (its scene never changes), and one that
+  can't be measured stops the package instead of showing as free.
+- Customizable parts: a kept variant is used only while it holds the bytes Orbiters published (its size read first),
+  and parts of one item apply one after the other. The gallery shows the right cards after a switch to Android or PC,
+  and pictures kept on disk load again after their texture was freed.
+
 ## 0.9.17 — 2026-10-26
 
 - Requires Orbiters Toolkit 0.4.8.

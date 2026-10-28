@@ -121,11 +121,25 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             }
         }
 
-        private void CleanUp()
+        // The shown report may be old: the project is checked again first, and only what is still free goes.
+        private async void CleanUp()
         {
             if (report == null || report.Reclaim.Count == 0) return;
-            var batch = GalleryCleanup.Quarantine(report);
-            Debug.Log($"[My Avatar] Moved {batch?.items.Count ?? 0} unused gallery files ({GalleryUI.Size(batch?.Bytes ?? 0)}) to {batch?.folder}.");
+            scanning?.Cancel();
+            var source = scanning = new CancellationTokenSource();
+            var shown = report;
+            body.Clear();
+            var card = Card("Checking again before cleaning up");
+            var label = GalleryUI.Text("Reading what the gallery installed…", "orb-settings__caption", card);
+            var track = GalleryUI.Box("gallery-progress", card); track.style.marginTop = 10; track.style.height = 8;
+            var fill = GalleryUI.Box("gallery-progress__fill", track);
+            var stayed = new System.Collections.Generic.List<GalleryCleanup.Item>();
+            GalleryCleanup.Batch batch;
+            try { batch = await GalleryCleanup.CleanUpAsync(shown, stayed, (value, text) => { label.text = text; fill.style.width = Length.Percent(value * 100f); }, source.Token); }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { label.text = "Nothing was cleaned up: " + ex.Message; return; }
+            Debug.Log($"[My Avatar] Moved {batch?.items.Count ?? 0} unused gallery files ({GalleryUI.Size(batch?.Bytes ?? 0)}) to {batch?.folder}." +
+                      (stayed.Count > 0 ? $" {stayed.Count} stayed, changed or used since the check: " + string.Join("; ", stayed.Take(10).Select(i => i.path + " (" + i.reason + ")")) : ""));
             Scan();
         }
 

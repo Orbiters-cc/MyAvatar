@@ -64,7 +64,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (Memory.TryGetValue(key, out var known) && known.Texture) { Touch(key); return Task.FromResult(known.Texture); }
             if (Loading.TryGetValue(key, out var running)) return running;
             var task = Fetch(url, key, face);
-            Loading[key] = task;
+            // A picture kept on disk loads before Fetch returns: it is no longer loading.
+            if (!task.IsCompleted) Loading[key] = task;
             return task;
         }
 
@@ -98,11 +99,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 Memory[key] = new Entry { Texture = texture, Bytes = bytesInMemory };
                 used += bytesInMemory;
                 Touch(key);
-                Trim();
+                // The picture just loaded is about to be shown: never the one trimmed.
+                Trim(key);
                 return texture;
             }
             catch (Exception) { return null; }
-            finally { Loading.Remove(key); }
+            finally { if (Loading.TryGetValue(key, out var loading) && loading.IsCompleted) Loading.Remove(key); }
         }
 
         // The picture's bytes, stopped as soon as they go over the limit; redirects are followed by hand, each one checked:
@@ -200,12 +202,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         }
 
         // The least recently shown go first, until memory is within budget; one an image still shows stays.
-        private static void Trim()
+        private static void Trim(string keep)
         {
             for (var node = Recent.First; node != null && used > MemoryBudget;)
             {
                 var next = node.Next;
-                if (Memory.TryGetValue(node.Value, out var entry) && !Shown(entry))
+                if (node.Value != keep && Memory.TryGetValue(node.Value, out var entry) && !Shown(entry))
                 {
                     Recent.Remove(node);
                     Memory.Remove(node.Value);

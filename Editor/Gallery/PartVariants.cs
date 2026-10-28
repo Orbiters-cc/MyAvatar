@@ -34,6 +34,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         }
 
         private static readonly Dictionary<(int, string), Job> Jobs = new Dictionary<(int, string), Job>();
+        // The last apply of each item: parts sharing a renderer draw from the item as it is, so applies to one item run one
+        // after the other (each from what the one before left).
+        private static readonly Dictionary<int, Task> ItemApplies = new Dictionary<int, Task>();
 
         /// <summary>A job started, moved on or ended: views showing that item's parts refresh.</summary>
         internal static event Action<Job> Changed;
@@ -79,8 +82,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             {
                 var variant = await load(job);
                 job.Cancel.Token.ThrowIfCancellationRequested();
-                Move(job, "Applying…", .65f);
-                var result = await ItemParts.ApplyAsync(placed, variant, text => Move(job, text, Mathf.Max(job.Progress, .7f)), job.Cancel.Token);
+                ItemParts.ApplyResult result = null;
+                await AfterItemApplies(job.Item, async () =>
+                {
+                    job.Cancel.Token.ThrowIfCancellationRequested();
+                    Move(job, "Applying…", .65f);
+                    result = await ItemParts.ApplyAsync(placed, variant, text => Move(job, text, Mathf.Max(job.Progress, .7f)), job.Cancel.Token);
+                });
                 if (!result.Applied) throw new InvalidOperationException(string.Join(" ", result.Problems.Take(4)));
                 job.Done = true;
                 Move(job, result.Note ?? "Applied. Undo (Ctrl+Z) puts back the earlier one.", 1);
@@ -97,25 +105,77 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             }
         }
 
-        /// <summary>A gallery variant's zip, downloaded once (kept by its hash in Library) and read as Toolkit checks it.</summary>
+        /// <summary>Runs <paramref name="apply"/> once the item's earlier applies ended (whatever their outcome).</summary>
+        internal static Task AfterItemApplies(int item, Func<Task> apply)
+        {
+            ItemApplies.TryGetValue(item, out var before);
+            var task = Chain(before, apply);
+            ItemApplies[item] = task;
+            _ = task.ContinueWith(_ => { if (ItemApplies.TryGetValue(item, out var last) && last == task) ItemApplies.Remove(item); }, TaskScheduler.FromCurrentSynchronizationContext());
+            return task;
+        }
+
+        private static async Task Chain(Task before, Func<Task> apply)
+        {
+            if (before != null)
+            {
+                try { await before; }
+                catch (Exception) { }
+            }
+            await apply();
+        }
+
+        /// <summary>
+        /// A gallery variant's zip, downloaded once (kept by its hash in Library) and read as Toolkit checks it. The copy
+        /// kept is used only while its bytes are still those Orbiters published (its whole SHA-256); a variant without one
+        /// is never applied.
+        /// </summary>
         internal static async Task<PartVariant> DownloadAsync(VariantInfo info, Action<string, float> progress, CancellationToken cancellation)
         {
-            string file = Path.Combine(Folder, info.id + "-" + (info.sha256 ?? "x").Substring(0, Math.Min(16, (info.sha256 ?? "x").Length)) + ".zip");
-            if (!File.Exists(file))
+            if (string.IsNullOrEmpty(info?.sha256) || info.sha256.Length < 64) throw new InvalidOperationException("Orbiters gave no checksum for this variant: it is not applied.");
+            string file = Path.Combine(Folder, info.id + "-" + info.sha256.Substring(0, 16) + ".zip");
+            byte[] bytes = Kept(file, info.sha256);
+            if (bytes == null)
             {
-                var result = await PartVariantApi.DownloadAsync(info, file, (bytes, total) => progress?.Invoke("Downloading · " + OrbitersTransfer.Describe(bytes, total), total > 0 ? (float)bytes / total : .3f), cancellation);
+                var result = await PartVariantApi.DownloadAsync(info, file, (sent, total) => progress?.Invoke("Downloading · " + OrbitersTransfer.Describe(sent, total), total > 0 ? (float)sent / total : .3f), cancellation);
                 if (!result.Success) throw result.Cancelled ? (Exception)new OperationCanceledException() : new InvalidOperationException(result.Error);
+                bytes = Kept(file, info.sha256);
+                if (bytes == null) throw new InvalidOperationException("The variant's file is not the one Orbiters published (" + ItemParts.MaxZipBytes / (1024 * 1024) + " MB at most). Try again.");
             }
             progress?.Invoke("Checking…", 1);
             var problems = new List<string>();
-            var variant = PartVariant.ReadZip(File.ReadAllBytes(file), problems);
+            var variant = PartVariant.ReadZip(bytes, problems);
             if (variant == null)
             {
-                try { File.Delete(file); } catch (IOException) { }
+                Forget(file);
                 throw new InvalidOperationException(string.Join(" ", problems));
             }
             variant.Id = info.id; variant.Official = info.official; variant.Author = info.author?.username;
             return variant;
+        }
+
+        // The zip kept at `file` when it is no larger than a variant may be and holds exactly `sha256`; null (and the file
+        // gone) otherwise. The size is read before the file is.
+        internal static byte[] Kept(string file, string sha256)
+        {
+            try
+            {
+                var info = new FileInfo(file);
+                if (!info.Exists) return null;
+                if (info.Length > ItemParts.MaxZipBytes) { Forget(file); return null; }
+                var bytes = File.ReadAllBytes(file);
+                if (string.Equals(PartVariant.Hash(bytes), sha256, StringComparison.OrdinalIgnoreCase)) return bytes;
+                Forget(file);
+                return null;
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { return null; }
+        }
+
+        private static void Forget(string file)
+        {
+            try { File.Delete(file); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         // ---- Posting ----

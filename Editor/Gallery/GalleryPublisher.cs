@@ -107,6 +107,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             string missing = Missing(draft);
             if (missing != null) throw new InvalidOperationException(missing);
             if (!draft.rights) throw new InvalidOperationException("Confirm that you own the rights to everything this version distributes.");
+            // Its ids belong to the server and account it was prepared with: never sent to another.
+            if (draft.Bind(GalleryApi.Context)) { draft.Save(); throw new InvalidOperationException(draft.message); }
+            string context = draft.context;
+            void Same() { if (GalleryApi.Context != context) throw new InvalidOperationException("The Orbiters account or server changed while publishing: publish again."); }
             Begin("Publishing");
             progress ??= _ => { };
             bool published = false;
@@ -119,6 +123,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     Created created;
                     try
                     {
+                        Same();
                         created = await GalleryApi.CreateAssetAsync(new
                         {
                             name = draft.name.Trim(), type = draft.type, shortDescription = draft.shortDescription, description = draft.description,
@@ -146,6 +151,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     if (join || pictures)
                     {
                         progress(join ? "Adding it to the gallery…" : "Sending its pictures…");
+                        Same();
                         var metadata = new Dictionary<string, object>();
                         if (join) metadata["type"] = draft.type;
                         if (pictures) metadata["replacePreviews"] = draft.replacePreviews;
@@ -157,6 +163,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 // earlier answer was lost. Either way it takes the draft's number, title, changelog and scope.
                 int release = draft.Release;
                 var changes = new { version = draft.version.Trim(), title = draft.title, changelog = draft.changelog, scope = draft.scope };
+                Same();
                 if (release <= 0)
                 {
                     progress("Creating version " + draft.version + "…");
@@ -175,6 +182,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     // Unchanged since it reached this version (and still its own package there): not sent again.
                     if (variant.UploadedTo(release) && !sent.Contains(variant.uploadedId)) { sent.Add(variant.uploadedId); continue; }
                     if (!File.Exists(variant.report.packagePath)) throw new InvalidOperationException(variant.Label + ": build its package again (the file is gone).");
+                    Same();
                     var uploaded = await GalleryApi.UploadVariantAsync(draft.assetId, release, variant.Metadata(), variant.report.packagePath,
                         (bytes, total) => progress($"Uploading {variant.Label} · {OrbitersTransfer.Describe(bytes, total)}"), cancellation);
                     if (uploaded == null || uploaded.id <= 0) throw new InvalidOperationException(variant.Label + ": Orbiters did not confirm the upload. Publish again.");
@@ -183,6 +191,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     draft.Save();
                 }
                 progress("Publishing…");
+                Same();
                 // Exactly these packages: the version's others (renamed or removed here since) leave it first. Its
                 // customizable parts go with it.
                 string partsFile = draft.variants.Select(v => v.report?.partsFile).FirstOrDefault(f => !string.IsNullOrEmpty(f) && File.Exists(f));

@@ -4,7 +4,8 @@ using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor
 {
-    // Small JSON files under Library/OrbitersMyAvatar. They are caches: failures never block applying textures.
+    // Small JSON files under Library/OrbitersMyAvatar. Caches (Write) never block anything when they fail; records that
+    // later steps rely on (Commit) say so.
     internal static class LibraryStore
     {
         internal static string Folder => Override ?? Path.Combine(Path.GetDirectoryName(Application.dataPath), "Library", "OrbitersMyAvatar");
@@ -24,7 +25,19 @@ namespace Orbiters.MyAvatar.Editor
             return new T();
         }
 
+        /// <summary>Writes a cache: a failure is ignored (the cache is only read again).</summary>
         internal static void Write<T>(string name, T value)
+        {
+            try { Commit(name, value); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        /// <summary>
+        /// Writes a record that later steps rely on (the gallery's installation journal and ledger): replaced whole, and an
+        /// <see cref="IOException"/> when it could not be saved, so the caller stops before changing the project.
+        /// </summary>
+        internal static void Commit<T>(string name, T value)
         {
             string path = Path.Combine(Folder, name), temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
@@ -33,8 +46,16 @@ namespace Orbiters.MyAvatar.Editor
                 File.WriteAllText(temp, Newtonsoft.Json.JsonConvert.SerializeObject(value));
                 if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path);
             }
-            catch (IOException) { }
-            finally { if (File.Exists(temp)) File.Delete(temp); }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                throw new IOException("Could not save " + name + " in Library (" + e.Message + ")", e);
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 }
