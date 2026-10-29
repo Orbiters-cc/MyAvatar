@@ -202,7 +202,7 @@
 .desktop-card__title { margin: 3px 0 0 0; padding: 0; font-size: 15px; -unity-font-style: bold; color: #ffffff; white-space: normal; }
 .desktop-card__line { margin: 4px 0 0 0; padding: 0; font-size: 11px; color: #b4c4ba; white-space: normal; }
 .desktop-card--failed .desktop-card__line { color: #e6c9a0; }
-.desktop-card__tile { width: 56px; height: 56px; flex-shrink: 0; padding: 11px 10px 12px 10px; border-radius: 16px; background-color: rgba(0, 218, 109, 0.12); align-items: center; justify-content: center; }
+.desktop-card__tile { width: 56px; height: 56px; flex-shrink: 0; padding: 8px; border-radius: 16px; background-color: rgba(0, 218, 109, 0.12); align-items: center; justify-content: center; }
 .desktop-card__tile .orb-n4n0-logo { flex-grow: 1; align-self: stretch; }
 .desktop-card--done .desktop-card__tile { background-color: #00DA6D; }
 .desktop-card__check { width: 26px; height: 26px; --icon-color: #06140c; }
