@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor;
 using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor.Tests
