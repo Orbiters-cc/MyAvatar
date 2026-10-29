@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Getting Orbiters - N4N0 is a card.** An avatar wearing N4N0 on a computer without Orbiters - N4N0 shows "Get N4N0's
+  desktop app" in Clothes and accessories, with **Install N4N0 desktop** and **What is it?** (orbiters.cc/n4n0). It
+  follows the install (its steps over a running light), says when the app is open, then goes; a failed install says why
+  with **Try again**.
+
 - **Updates keep what you set**: updating an item from the gallery puts the new version where the older one was and
   as it was: its card's settings (N4N0's choices, a creator's switches and choices of objects, materials and
   blendshapes), its customizable parts' variants, the bone it was moved to with **Bone ▾** and its place there, its
