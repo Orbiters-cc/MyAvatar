@@ -1,6 +1,6 @@
 # My Avatar
 
-## Unreleased
+## 0.9.18 — 2026-10-29
 
 - **Getting Orbiters - N4N0 is a card.** An avatar wearing N4N0 on a computer without Orbiters - N4N0 shows "Get N4N0's
   desktop app" in Clothes and accessories, with **Install N4N0 desktop** and **What is it?** (orbiters.cc/n4n0). It
