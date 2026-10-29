@@ -366,6 +366,7 @@ namespace Orbiters.MyAvatar.Editor
                 EditorUtility.SetDirty(avatar);
             foreach (var note in avatar.accessoryNotes.Where(n => !(n.accessory is OrbitersAttachment a && installed.Contains(a))))
                 AddNote(notes, note);
+            DesktopPrompt(notes, installed);
         }
 
         // Bound to an object that was destroyed since; a note bound to nothing is not.
