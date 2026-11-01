@@ -1,5 +1,14 @@
 # My Avatar
 
+## 0.9.19 — 2026-11-01
+
+- **My Avatar loads on VRChat SDK 3.7.x.** Its editor did not compile there (an avatar's My Avatar component showed no
+  inspector). The SDK panel's selected avatar goes through Toolkit's `VrcSdkAvatarBuilder`; offering the thumbnail to the
+  SDK needs 3.7.6; the head collider's prefab scale and Prevent Repeats in the face tracking test rig need 3.10.2.
+- N4N0's name everywhere (Toolkit 0.4.11's `N4N0Installer`); the menu editor's stale chips lose an unsupported
+  `border-style`.
+- Requires Orbiters Toolkit 0.4.11.
+
 ## 0.9.18 — 2026-10-29
 
 - **Getting Orbiters - N4N0 is a card.** An avatar wearing N4N0 on a computer without Orbiters - N4N0 shows "Get N4N0's
