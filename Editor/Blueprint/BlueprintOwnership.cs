@@ -243,7 +243,7 @@ namespace Orbiters.MyAvatar.Editor
                     return;
                 }
 
-                var avatar = builder.SelectedAvatar;
+                var avatar = Orbiters.Toolkit.Editor.VRChat.VrcSdkAvatarBuilder.Selected(builder);
                 var pipeline = avatar != null ? avatar.GetComponent<PipelineManager>() : null;
                 string id = pipeline != null ? pipeline.blueprintId : null;
                 if (string.IsNullOrWhiteSpace(id) || id == watched)

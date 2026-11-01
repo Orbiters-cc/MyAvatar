@@ -250,7 +250,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     {
                         int value, tries = 0, previous = Mathf.RoundToInt(Get(change.name));
                         do value = random.Next(Mathf.RoundToInt(change.valueMin), Mathf.RoundToInt(change.valueMax) + 1);
-                        while (change.preventRepeats && value == previous && change.valueMax > change.valueMin && ++tries < 8);
+                        while (PreventsRepeats(change) && value == previous && change.valueMax > change.valueMin && ++tries < 8);
                         Set(change.name, value);
                     }
                     else Set(change.name, Mathf.Lerp(change.valueMin, change.valueMax, (float)random.NextDouble()));
@@ -310,5 +310,13 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             if (graph.IsValid()) graph.Destroy();
             if (pose != null) Object.DestroyImmediate(pose);
         }
+
+        // Prevent Repeats came with VRChat SDK 3.10.2: before, a random int may repeat.
+        private static bool PreventsRepeats(VRC.SDKBase.VRC_AvatarParameterDriver.Parameter change) =>
+#if MYAVATAR_VRCSDK_3_10_2_OR_NEWER
+            change.preventRepeats;
+#else
+            false;
+#endif
     }
 }

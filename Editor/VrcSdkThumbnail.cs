@@ -48,7 +48,7 @@ namespace Orbiters.MyAvatar.Editor
             if (VRCSdkControlPanel.window == null || !VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var builder)) { if (lastSelected) revision++; lastSelected = null; return; }
             if (pendingSelection)
             {
-                if (Selected(builder) != pendingSelection) builder.SelectAvatar(pendingSelection);
+                if (Selected(builder) != pendingSelection) Orbiters.Toolkit.Editor.VRChat.VrcSdkAvatarBuilder.Select(builder, pendingSelection);
                 pendingSelection = null;
             }
             var selected = Selected(builder);
@@ -66,24 +66,28 @@ namespace Orbiters.MyAvatar.Editor
             // through every reload, including the one that brings the ID back.
             string key = path == null ? null : path + "|" + System.IO.File.GetLastWriteTimeUtc(path).Ticks + "|" + BlueprintId(selected);
             if (key == null || key == offered) return;
+#if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
             var block = VRCSdkControlPanel.window.rootVisualElement.Q<ThumbnailBlock>();
             // Wait until the builder finished loading this avatar's data. Loading may only start a few frames after the
             // switch, so the selection must also have settled.
             if (EditorApplication.timeSinceStartup - selectedAt < .75 || block?.Thumbnail == null || block.Thumbnail.Loading || block.OnNewThumbnailSelected == null) return;
             offered = key;
             Offer(builder, selected, avatar, block, path, key, ++revision);
+#endif
         }
 
         // The SDK's getter throws once the avatar it shows was destroyed (a build copy or a test avatar it picked up).
         // Thrown here every frame, it also stopped every update callback registered after this one.
         private static GameObject Selected(IVRCSdkAvatarBuilderApi builder)
         {
-            try { return builder.SelectedAvatar; }
+            try { return Orbiters.Toolkit.Editor.VRChat.VrcSdkAvatarBuilder.Selected(builder); }
             catch (MissingReferenceException) { return null; }
         }
 
         private static string BlueprintId(GameObject avatar) => avatar ? avatar.GetComponent<VRC.Core.PipelineManager>()?.blueprintId?.Trim() : null;
 
+#if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
+        // The builder's thumbnail block (VRChat SDK 3.7.6 and newer): before, the thumbnail is chosen in the SDK only.
         private static async void Offer(IVRCSdkAvatarBuilderApi builder, GameObject selected, MyAvatar avatar,
             ThumbnailBlock block, string path, string key, int request)
         {
@@ -120,6 +124,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             finally { block.OnNewThumbnailSelected -= changed; }
         }
+#endif
 
         internal static async Task<bool> AlreadyUploaded(string id, string path, CancellationToken token)
         {

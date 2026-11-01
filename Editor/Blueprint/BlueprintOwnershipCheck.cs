@@ -63,7 +63,7 @@ namespace Orbiters.MyAvatar.Editor
 
             try
             {
-                return builder.SelectedAvatar;
+                return Orbiters.Toolkit.Editor.VRChat.VrcSdkAvatarBuilder.Selected(builder);
             }
             catch (MissingReferenceException)
             {

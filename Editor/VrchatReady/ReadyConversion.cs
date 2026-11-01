@@ -166,7 +166,12 @@ namespace Orbiters.MyAvatar.Editor.VrchatReady
         private static void Colliders(VRCAvatarDescriptor d, Animator animator)
         {
             if (animator == null || !animator.isHuman) return;
+#if MYAVATAR_VRCSDK_3_10_2_OR_NEWER
             Set(ref d.collider_head, VRCAvatarDescriptor.CalcHeadCollider(animator, d.ViewPosition, 1f));
+#else
+            // Before VRChat SDK 3.10.2 the head collider had no prefab scale (it was always 1).
+            Set(ref d.collider_head, VRCAvatarDescriptor.CalcHeadCollider(animator, d.ViewPosition));
+#endif
             Set(ref d.collider_torso, VRCAvatarDescriptor.CalcTorsoCollider(animator));
             Set(ref d.collider_handL, VRCAvatarDescriptor.CalcPalmCollider(animator, true));
             Set(ref d.collider_handR, VRCAvatarDescriptor.CalcPalmCollider(animator, false));

@@ -196,7 +196,7 @@ namespace Orbiters.MyAvatar.Editor
             {
                 if (VRCSdkControlPanel.window == null || !OrbitersFeatures.IsEnabled(Feature) ||
                     !VRCSdkControlPanel.TryGetBuilder<IVRCSdkAvatarBuilderApi>(out var builder) || builder == null) return;
-                var selected = builder.SelectedAvatar;
+                var selected = Orbiters.Toolkit.Editor.VRChat.VrcSdkAvatarBuilder.Selected(builder);
                 if (selected == null) return;
                 var avatar = selected.GetComponentInChildren<MyAvatar>(true);
                 if (!avatar) return;

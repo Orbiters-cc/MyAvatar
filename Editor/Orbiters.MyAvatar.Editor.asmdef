@@ -27,6 +27,16 @@
       "name": "com.vrchat.core.vpm-resolver",
       "expression": "0.1.0",
       "define": "MYAVATAR_VPM"
+    },
+    {
+      "name": "com.vrchat.base",
+      "expression": "3.7.6",
+      "define": "MYAVATAR_VRCSDK_3_7_6_OR_NEWER"
+    },
+    {
+      "name": "com.vrchat.avatars",
+      "expression": "3.10.2",
+      "define": "MYAVATAR_VRCSDK_3_10_2_OR_NEWER"
     }
   ]
 }

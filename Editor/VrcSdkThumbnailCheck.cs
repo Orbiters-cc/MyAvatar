@@ -35,7 +35,7 @@ namespace Orbiters.MyAvatar.Editor
                 GameObject avatar;
                 try
                 {
-                    avatar = builder.SelectedAvatar;
+                    avatar = Orbiters.Toolkit.Editor.VRChat.VrcSdkAvatarBuilder.Selected(builder);
                 }
                 catch (MissingReferenceException)
                 {
