@@ -556,7 +556,7 @@ namespace Orbiters.MyAvatar.Editor
             picture.AddToClassList("accessory-item__option-picture");
             group.Add(picture);
             Show(Math.Max(chosen, 0));
-            var tabs = choices.Query(className: "orb-segmented__tab").ToList();
+            var tabs = choices.Query(className: "orbiters-segmented__tab").ToList();
             for (int i = 0; i < tabs.Count && i < pictures.Count; i++)
             {
                 int index = i;
@@ -627,7 +627,7 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var box = new VisualElement();
                 var text = new Label("Removing a gallery asset takes it off the avatar; its files stay in the project for other avatars. Cleanup frees those nothing uses any more.");
-                text.AddToClassList("orb-settings__caption"); box.Add(text);
+                text.AddToClassList("orbiters-settings__caption"); box.Add(text);
                 var cleanup = MyAvatarEditor.Button("Cleanup…", Gallery.GalleryCleanupWindow.Open);
                 cleanup.style.alignSelf = Align.FlexStart; cleanup.style.marginTop = 8;
                 box.Add(cleanup);

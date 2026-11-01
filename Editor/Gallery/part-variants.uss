@@ -8,18 +8,18 @@
 .gallery-page__header .mcb-button.parts-gallery__make:hover { background-color: #19e27d; }
 .parts-gallery__filters { flex-direction: row; align-items: center; margin: -4px 0 12px 0; }
 .parts-gallery__sort { width: 150px; height: 28px; padding: 2px; border-radius: 14px; flex-shrink: 0; }
-.parts-gallery__sort .orb-segmented__indicator { top: 2px; bottom: 2px; border-radius: 12px; }
-.parts-gallery__sort .orb-segmented__tab { height: 24px; border-radius: 12px; }
-.parts-gallery__sort .orb-segmented__label { font-size: 11px; }
+.parts-gallery__sort .orbiters-segmented__indicator { top: 2px; bottom: 2px; border-radius: 12px; }
+.parts-gallery__sort .orbiters-segmented__tab { height: 24px; border-radius: 12px; }
+.parts-gallery__sort .orbiters-segmented__label { font-size: 11px; }
 .parts-gallery__language { margin: 0 0 0 8px; width: 190px; flex-grow: 0; flex-shrink: 1; }
 .parts-gallery__language .unity-base-field__input { min-height: 28px; padding: 0 12px; border-radius: 14px; border-width: 0; background-color: #1f1f1f; color: #e6e6e6; font-size: 11px; }
 .parts-gallery__language .unity-base-field__input:hover { background-color: #262626; }
 .parts-gallery__message { margin: 0 0 12px 2px; font-size: 11px; color: #9a9a9a; }
 
-.orb-card.parts-card { cursor: link; }
-.orb-card.parts-card--pressed { scale: 0.98 0.98; background-color: #262626; }
-.orb-card.parts-card--current { background-color: #1a211d; }
-.parts-card--current .orb-card__media { border-bottom-width: 2px; border-color: #00DA6D; }
+.orbiters-card.parts-card { cursor: link; }
+.orbiters-card.parts-card--pressed { scale: 0.98 0.98; background-color: #262626; }
+.orbiters-card.parts-card--current { background-color: #1a211d; }
+.parts-card--current .orbiters-card__media { border-bottom-width: 2px; border-color: #00DA6D; }
 .parts-card .gallery-chip--muted { color: #06140c; background-color: rgba(230, 255, 240, 0.92); }
 .gallery-progress.parts-card__progress { display: none; flex-grow: 0; flex-basis: auto; height: 6px; margin-top: 8px; border-radius: 3px; }
 .parts-card__progress > .gallery-progress__fill { border-radius: 3px; }
@@ -46,9 +46,9 @@
 .parts-form__slider .unity-base-slider__input { min-width: 60px; }
 .parts-form__slider .unity-base-slider__text-field { width: 52px; min-width: 52px; }
 .parts-form__choice { width: 180px; height: 26px; padding: 2px; border-radius: 9px; }
-.parts-form__choice .orb-segmented__indicator { top: 2px; bottom: 2px; border-radius: 7px; }
-.parts-form__choice .orb-segmented__tab { height: 22px; border-radius: 7px; }
-.parts-form__choice .orb-segmented__label { font-size: 11px; }
+.parts-form__choice .orbiters-segmented__indicator { top: 2px; bottom: 2px; border-radius: 7px; }
+.parts-form__choice .orbiters-segmented__tab { height: 22px; border-radius: 7px; }
+.parts-form__choice .orbiters-segmented__label { font-size: 11px; }
 .parts-form__file { margin: 0 6px 0 0; padding: 0; font-size: 11px; color: #9a9a9a; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .accessory-button.parts-form__small { margin: 0 4px 0 0; }
 .parts-form__picture { width: 128px; height: 72px; margin: 6px 0 2px 120px; border-radius: 8px; background-color: #141414; }

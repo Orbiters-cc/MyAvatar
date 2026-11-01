@@ -65,9 +65,9 @@
 .gallery-link--danger, .gallery-link--danger:hover { background-color: rgba(255, 90, 90, 0.14); color: #ff8a8a; }
 
 /* ---- Cards (on top of Toolkit's gallery-card.uss) ---- */
-.orb-card.gallery-card { height: auto; margin-bottom: 12px; background-color: #1b1b1b; border-radius: 16px; transition-property: background-color, translate; transition-duration: 0.15s; }
-.orb-card.gallery-card:hover { background-color: #222222; translate: 0 -1px; }
-.gallery-card .orb-card__media { border-top-left-radius: 16px; border-top-right-radius: 16px; background-color: #141414; }
+.orbiters-card.gallery-card { height: auto; margin-bottom: 12px; background-color: #1b1b1b; border-radius: 16px; transition-property: background-color, translate; transition-duration: 0.15s; }
+.orbiters-card.gallery-card:hover { background-color: #222222; translate: 0 -1px; }
+.gallery-card .orbiters-card__media { border-top-left-radius: 16px; border-top-right-radius: 16px; background-color: #141414; }
 .gallery-card__image { position: absolute; left: 0; top: 0; right: 0; bottom: 0; opacity: 0; transition-property: opacity, scale; transition-duration: 0.35s; }
 .gallery-card__image.gallery-image--shown { opacity: 1; }
 .gallery-card:hover .gallery-card__image { scale: 1.04 1.04; }
@@ -111,12 +111,12 @@
 .gallery-card__status { margin: 6px 0 0 0; padding: 0; font-size: 10px; color: #9a9a9a; white-space: normal; }
 .gallery-card__status.warning { color: #ffb020; }
 .gallery-card__status.error { color: #ff7a7a; }
-.gallery-card--done .orb-card__media { border-bottom-width: 2px; border-color: #00DA6D; }
+.gallery-card--done .orbiters-card__media { border-bottom-width: 2px; border-color: #00DA6D; }
 .gallery-pop { scale: 1.06 1.06; }
 
 /* "Publish an asset" card for creators */
-.orb-card.gallery-create { background-color: #17151f; border-width: 1px; border-color: rgba(138, 125, 255, 0.25); }
-.orb-card.gallery-create:hover { background-color: #1e1b2b; }
+.orbiters-card.gallery-create { background-color: #17151f; border-width: 1px; border-color: rgba(138, 125, 255, 0.25); }
+.orbiters-card.gallery-create:hover { background-color: #1e1b2b; }
 .gallery-create__plus { font-size: 40px; color: #b9b1ff; -unity-font-style: bold; -unity-text-align: middle-center; margin: 0; }
 .gallery-create__label { margin: 0; padding: 0 10px; font-size: 12px; -unity-font-style: bold; color: #ffffff; white-space: normal; -unity-text-align: middle-center; }
 .gallery-create__hint { margin: 4px 0 0 0; padding: 0 12px; font-size: 10px; color: #9a94bd; white-space: normal; -unity-text-align: middle-center; }
@@ -256,8 +256,8 @@
 .creator-tester__name { flex-grow: 1; margin: 0; padding: 0; font-size: 11px; color: #e6e6e6; }
 
 /* Loading placeholders and the filter row */
-.orb-card.gallery-card--skeleton, .orb-card.gallery-card--skeleton:hover { background-color: #1d1d1d; translate: 0 0; }
-.gallery-card--skeleton .orb-card__media { background-color: #222222; }
+.orbiters-card.gallery-card--skeleton, .orbiters-card.gallery-card--skeleton:hover { background-color: #1d1d1d; translate: 0 0; }
+.gallery-card--skeleton .orbiters-card__media { background-color: #222222; }
 .gallery-skeleton__bar { height: 10px; margin-top: 4px; border-radius: 5px; background-color: #2a2a2a; }
 .gallery-skeleton__bar--small { height: 8px; margin-top: 8px; }
 .gallery-skeleton__button { height: 26px; margin-top: 12px; border-radius: 13px; background-color: #262626; }
@@ -285,12 +285,12 @@
 .license-form__question { margin: 0; padding: 0; font-size: 12px; -unity-font-style: bold; color: #ffffff; }
 
 /* ---- Cleanup window (on top of Toolkit's settings-window.uss) ---- */
-.gallery-cleanup .orb-settings__card { margin-bottom: 12px; }
+.gallery-cleanup .orbiters-settings__card { margin-bottom: 12px; }
 
 /* ---- Creator pictures: the card buyers see, the strip of pictures, and the photoshoot under them ---- */
 .creator-pictures { flex-direction: row; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
-.orb-card.gallery-card.creator-pictures__card { margin: 0 16px 10px 0; flex-shrink: 0; cursor: arrow; }
-.orb-card.gallery-card.creator-pictures__card:hover { translate: 0 0; }
+.orbiters-card.gallery-card.creator-pictures__card { margin: 0 16px 10px 0; flex-shrink: 0; cursor: arrow; }
+.orbiters-card.gallery-card.creator-pictures__card:hover { translate: 0 0; }
 .creator-pictures__side { flex-grow: 1; flex-shrink: 1; flex-basis: 220px; min-width: 200px; }
 .creator-pictures__strip { flex-direction: row; flex-wrap: wrap; }
 .creator-pictures__actions { margin-top: 2px; }

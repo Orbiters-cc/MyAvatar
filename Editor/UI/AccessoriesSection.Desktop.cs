@@ -31,7 +31,7 @@ namespace Orbiters.MyAvatar.Editor
         /// </summary>
         private void DesktopPrompt(VisualElement parent, IReadOnlyCollection<OrbitersAttachment> installed)
         {
-            if (!installed.Any(a => a && OrbInstaller.HasScreen(a.transform))) return;
+            if (!installed.Any(a => a && N4N0Installer.HasScreen(a.transform))) return;
             bool done = EditorApplication.timeSinceStartup - desktopDoneAt < DesktopDoneSeconds;
             if (!desktopInstalling && !done && DesktopInstalled() != null) { desktopStatus = null; return; }
 

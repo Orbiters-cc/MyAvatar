@@ -146,7 +146,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             grid = GalleryUI.Box("gallery-grid", this);
             CardGrid.Attach(grid, 150f, 12f, (card, width) =>
             {
-                var media = card.Q(className: "orb-card__media");
+                var media = card.Q(className: "orbiters-card__media");
                 if (media != null) media.style.height = width;
             });
             footer = GalleryUI.Box("gallery-footer", this);
@@ -199,7 +199,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             }
             CardGrid.Resize(grid, 150f, 12f, (card, width) =>
             {
-                var media = card.Q(className: "orb-card__media");
+                var media = card.Q(className: "orbiters-card__media");
                 if (media != null) media.style.height = width;
             });
         }
@@ -273,10 +273,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         internal PartVariantCard(ItemParts.Placed placed, PartVariant local, VariantInfo info, Action apply, string postedPicture = null)
         {
             this.placed = placed; this.local = local; this.info = info;
-            AddToClassList("orb-card");
+            AddToClassList("orbiters-card");
             AddToClassList("gallery-card");
             AddToClassList("parts-card");
-            var media = GalleryUI.Box("orb-card__media", this);
+            var media = GalleryUI.Box("orbiters-card__media", this);
             var image = new Image { scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Ignore };
             image.AddToClassList("gallery-card__image");
             media.Add(image);

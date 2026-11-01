@@ -546,9 +546,9 @@ namespace Orbiters.MyAvatar.Editor
                 text.RemoveFromHierarchy();
                 var prompt = new Orbiters.Toolkit.Editor.Vpm.DependencyPrompt(OptimizerPackage, Pitch, "orbiters.myavatar");
                 prompt.AddToClassList("optimize-suggestion__prompt"); row.Add(prompt);
-                prompt.Q(className: "orb-dependency__texts")?.Add(Note());
+                prompt.Q(className: "orbiters-dependency__texts")?.Add(Note());
                 var actions = new VisualElement(); actions.AddToClassList("optimize-suggestion__actions"); prompt.Add(actions);
-                var install = prompt.Q(className: "orb-dependency__install");
+                var install = prompt.Q(className: "orbiters-dependency__install");
                 if (install != null) actions.Add(install);
                 actions.Add(link);
 #else

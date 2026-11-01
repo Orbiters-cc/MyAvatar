@@ -32,7 +32,7 @@ namespace Orbiters.MyAvatar.Editor
         internal VersioningSection() : base("Versioning")
         {
             var refresh = new IconButton(IconGlyph.Refresh, "Refresh", "Read the history again", Load);
-            refresh.AddToClassList("orb-icon-button--small");
+            refresh.AddToClassList("orbiters-icon-button--small");
             Actions.Add(refresh);
             var open = MyAvatarEditor.Button("Open Mixer Git", UnitGitOverview.OpenWindow);
             open.AddToClassList("avatar-link");

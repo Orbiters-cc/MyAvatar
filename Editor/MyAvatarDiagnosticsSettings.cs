@@ -18,18 +18,18 @@ namespace Orbiters.MyAvatar.Editor
             var reporter = MyAvatarIssueReporter.Reporter;
             var box = new VisualElement();
             var row = new VisualElement();
-            row.AddToClassList("orb-settings__feature");
-            row.AddToClassList("orb-settings__feature--first");
+            row.AddToClassList("orbiters-settings__feature");
+            row.AddToClassList("orbiters-settings__feature--first");
             row.style.paddingTop = 0;
             box.Add(row);
             var texts = new VisualElement();
-            texts.AddToClassList("orb-settings__feature-texts");
+            texts.AddToClassList("orbiters-settings__feature-texts");
             row.Add(texts);
             var label = new Label("Share My Avatar diagnostics");
-            label.AddToClassList("orb-settings__feature-label");
+            label.AddToClassList("orbiters-settings__feature-label");
             texts.Add(label);
             var description = new Label(reporter.ConsentText);
-            description.AddToClassList("orb-settings__feature-description");
+            description.AddToClassList("orbiters-settings__feature-description");
             texts.Add(description);
 
             var level = new SegmentedControl(OrbitersIssueReporter.LevelNames, index => reporter.MinSeverityLevel = index + 1)
@@ -45,11 +45,11 @@ namespace Orbiters.MyAvatar.Editor
                 reporter.ShareIssueLogs = on;
                 level.SetEnabled(on);
             });
-            toggle.AddToClassList("orb-settings__feature-toggle");
+            toggle.AddToClassList("orbiters-settings__feature-toggle");
             row.Add(toggle);
 
             var from = new Label("Send from");
-            from.AddToClassList("orb-settings__caption");
+            from.AddToClassList("orbiters-settings__caption");
             from.style.marginTop = 2;
             box.Add(from);
             box.Add(level);

@@ -77,10 +77,10 @@ namespace Orbiters.MyAvatar.Editor
                 "Or install " + shader + ": " + (count == 1 ? "its material renders" : "its " + count + " materials render") + " exactly as made.", "orbiters.myavatar");
             prompt.AddToClassList("optimize-suggestion__prompt"); row.Add(prompt);
             // The prompt's error line takes its height even empty; it shows again when an install fails.
-            var error = prompt.Q<Label>(className: "orb-dependency__error");
+            var error = prompt.Q<Label>(className: "orbiters-dependency__error");
             if (error != null && string.IsNullOrEmpty(error.text)) error.style.display = DisplayStyle.None;
             var actions = new VisualElement(); actions.AddToClassList("optimize-suggestion__actions"); prompt.Add(actions);
-            var install = prompt.Q(className: "orb-dependency__install");
+            var install = prompt.Q(className: "orbiters-dependency__install");
             if (install != null) actions.Add(install);
             return row;
         }

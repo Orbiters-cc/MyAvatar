@@ -33,9 +33,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         internal GalleryCard(GalleryAsset asset, Action<GalleryCard> info, Action<GalleryCard> primary)
         {
             this.info = info; this.primary = primary;
-            AddToClassList("orb-card");
+            AddToClassList("orbiters-card");
             AddToClassList("gallery-card");
-            media = GalleryUI.Box("orb-card__media", this);
+            media = GalleryUI.Box("orbiters-card__media", this);
             image = new Image { scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Ignore };
             image.AddToClassList("gallery-card__image");
             media.Add(image);

@@ -49,7 +49,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 if (avatar) GalleryUpdates.ReadAgainNow(avatar);
                 Reload();
             });
-            refresh.AddToClassList("orb-icon-button--small"); header.Add(refresh);
+            refresh.AddToClassList("orbiters-icon-button--small"); header.Add(refresh);
             var publishButton = GalleryUI.Button("Publish", () => publish(), "gallery-publish");
             publishButton.tooltip = "Publish your own clothes and accessories in the gallery.";
             publishButton.style.display = DisplayStyle.None;
@@ -75,7 +75,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             grid = GalleryUI.Box("gallery-grid", this);
             CardGrid.Attach(grid, 150f, 12f, (card, width) =>
             {
-                var media = card.Q(className: "orb-card__media");
+                var media = card.Q(className: "orbiters-card__media");
                 if (media != null) media.style.height = width;
             });
             footer = GalleryUI.Box("gallery-footer", this);
@@ -241,7 +241,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 grid.Add(card);
             }
             if (creator && filter != 3) grid.Add(CreateCard());
-            CardGrid.Resize(grid, 150f, 12f, (card, width) => { var media = card.Q(className: "orb-card__media"); if (media != null) media.style.height = width; });
+            CardGrid.Resize(grid, 150f, 12f, (card, width) => { var media = card.Q(className: "orbiters-card__media"); if (media != null) media.style.height = width; });
             Empty(shown.Any());
             footer.Clear();
             var cleanup = GalleryUI.Button("Cleanup unused gallery files…", GalleryCleanupWindow.Open, "gallery-link");
@@ -251,8 +251,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private VisualElement CreateCard()
         {
-            var card = GalleryUI.Box("orb-card gallery-card gallery-create");
-            var media = GalleryUI.Box("orb-card__media orb-card__media--create", card);
+            var card = GalleryUI.Box("orbiters-card gallery-card gallery-create");
+            var media = GalleryUI.Box("orbiters-card__media orbiters-card__media--create", card);
             media.style.backgroundColor = new Color(0, 0, 0, 0);
             GalleryUI.Text("+", "gallery-create__plus", media);
             var body = GalleryUI.Box("gallery-card__body", card);
@@ -281,15 +281,15 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             grid.Clear();
             for (int i = 0; i < 3; i++)
             {
-                var card = GalleryUI.Box("orb-card gallery-card gallery-card--skeleton", grid);
-                var media = GalleryUI.Box("orb-card__media", card);
+                var card = GalleryUI.Box("orbiters-card gallery-card gallery-card--skeleton", grid);
+                var media = GalleryUI.Box("orbiters-card__media", card);
                 GalleryUI.Shimmer(media);
                 var body = GalleryUI.Box("gallery-card__body", card);
                 GalleryUI.Box("gallery-skeleton__bar", body).style.width = Length.Percent(70);
                 GalleryUI.Box("gallery-skeleton__bar gallery-skeleton__bar--small", body).style.width = Length.Percent(45);
                 GalleryUI.Box("gallery-skeleton__button", body);
             }
-            CardGrid.Resize(grid, 150f, 12f, (card, width) => { var media = card.Q(className: "orb-card__media"); if (media != null) media.style.height = width; });
+            CardGrid.Resize(grid, 150f, 12f, (card, width) => { var media = card.Q(className: "orbiters-card__media"); if (media != null) media.style.height = width; });
         }
 
         private void ShowMessage(string text)

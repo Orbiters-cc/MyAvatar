@@ -81,10 +81,10 @@
 .optimize-suggestion__actions { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 /* A suggestion here, not a missing requirement: the shared prompt without its warning frame. */
 .optimize-suggestion .optimize-suggestion__prompt { margin: 0; padding: 0; background-color: rgba(0, 0, 0, 0); border-width: 0; }
-.optimize-suggestion .orb-dependency { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
-.optimize-suggestion .orb-dependency__texts { flex-basis: auto; flex-grow: 0; min-width: 0; margin: 0; }
-.optimize-suggestion .orb-dependency__title { font-size: 11px; -unity-font-style: normal; color: #bdbdbd; }
-.optimize-suggestion .orb-dependency__install { margin: 0 6px 0 0; }
+.optimize-suggestion .orbiters-dependency { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+.optimize-suggestion .orbiters-dependency__texts { flex-basis: auto; flex-grow: 0; min-width: 0; margin: 0; }
+.optimize-suggestion .orbiters-dependency__title { font-size: 11px; -unity-font-style: normal; color: #bdbdbd; }
+.optimize-suggestion .orbiters-dependency__install { margin: 0 6px 0 0; }
 .mcb-button.optimize-suggestion__button { height: 24px; min-height: 24px; margin: 0 6px 0 0; padding: 0 10px; border-radius: 12px; font-size: 11px; flex-shrink: 0; }
 .mcb-button.optimize-suggestion__link { flex-shrink: 0; }
 
@@ -203,7 +203,7 @@
 .desktop-card__line { margin: 4px 0 0 0; padding: 0; font-size: 11px; color: #b4c4ba; white-space: normal; }
 .desktop-card--failed .desktop-card__line { color: #e6c9a0; }
 .desktop-card__tile { width: 56px; height: 56px; flex-shrink: 0; padding: 8px; border-radius: 16px; background-color: rgba(0, 218, 109, 0.12); align-items: center; justify-content: center; }
-.desktop-card__tile .orb-n4n0-logo { flex-grow: 1; align-self: stretch; }
+.desktop-card__tile .orbiters-n4n0-logo { flex-grow: 1; align-self: stretch; }
 .desktop-card--done .desktop-card__tile { background-color: #00DA6D; }
 .desktop-card__check { width: 26px; height: 26px; --icon-color: #06140c; }
 .desktop-card__actions { flex-direction: row; align-items: center; margin-top: 12px; }
@@ -218,7 +218,7 @@
 .accessory-entry { margin-top: 4px; border-radius: 12px; background-color: #2a2a2a; }
 .accessory-item { flex-direction: row; align-items: center; min-height: 30px; padding: 0 6px 0 10px; }
 .accessory-item__picture { width: 72px; height: 72px; margin: 6px 12px 6px -4px; flex-shrink: 0; border-radius: 12px; overflow: hidden; background-color: #212123; opacity: 0.35; transition-property: opacity; transition-duration: 0.3s; }
-.accessory-item__picture.orb-thumbnail--shown { opacity: 1; }
+.accessory-item__picture.orbiters-thumbnail--shown { opacity: 1; }
 .accessory-entry__notes { padding: 0 6px 6px 6px; }
 .accessory-textures { margin: 0 10px 8px 10px; color: #bcbcbc; }
 .accessory-textures__material { font-size: 10px; color: #969696; margin-top: 5px; margin-bottom: 3px; }
@@ -238,15 +238,15 @@
 .accessory-item__option-label { min-width: 64px; margin: 0 8px 0 0; padding: 0; font-size: 11px; color: #9a9a9a; }
 .accessory-item__option-group { flex-direction: column; }
 .accessory-item__option-picture { height: 108px; margin: 6px 0 2px 0; }
-.accessory-item__option .orb-segmented { width: 112px; height: 22px; padding: 2px; border-radius: 8px; }
-.accessory-item__option .orb-segmented__indicator { top: 2px; bottom: 2px; border-radius: 6px; }
-.accessory-item__option .orb-segmented__tab { height: 18px; border-radius: 6px; }
-.accessory-item__option .orb-segmented__label { font-size: 11px; }
+.accessory-item__option .orbiters-segmented { width: 112px; height: 22px; padding: 2px; border-radius: 8px; }
+.accessory-item__option .orbiters-segmented__indicator { top: 2px; bottom: 2px; border-radius: 6px; }
+.accessory-item__option .orbiters-segmented__tab { height: 18px; border-radius: 6px; }
+.accessory-item__option .orbiters-segmented__label { font-size: 11px; }
 .accessory-button { height: 22px; min-width: 0; padding: 0 8px; margin: 0 0 0 4px; font-size: 11px; flex-shrink: 0; }
 .accessory-choice__cards { flex-direction: row; flex-wrap: wrap; }
 .accessory-option { margin-top: 4px; margin-bottom: 4px; padding: 6px; border-radius: 12px; background-color: #232323; align-items: stretch; }
 .accessory-option__picture { height: 100px; border-radius: 10px; overflow: hidden; background-color: #212123; opacity: 0.35; transition-property: opacity; transition-duration: 0.3s; }
-.accessory-option__picture.orb-thumbnail--shown { opacity: 1; }
+.accessory-option__picture.orbiters-thumbnail--shown { opacity: 1; }
 .accessory-option__name { margin: 6px 2px 6px 2px; font-size: 11px; color: #ffffff; white-space: normal; -unity-text-align: middle-center; }
 .accessory-button.accessory-option__button { margin: 0; }
 .accessory-choice__actions { flex-direction: row; justify-content: flex-end; align-items: center; margin-top: 8px; }
@@ -254,7 +254,7 @@
 
 /* One corner radius for every frame of the window: 16 px for frames (sign-in, drop fields, cards, stages), 12 px for
    rows inside them. The shared sign-in card and photoshoot studio follow here. */
-.myavatar .orb-signin { border-radius: 16px; }
+.myavatar .orbiters-signin { border-radius: 16px; }
 .myavatar .ps-stage { border-radius: 16px; }
 
 /* Undo and Save fold away once the set is saved, and come back with the next change. */

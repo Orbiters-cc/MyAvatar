@@ -32,9 +32,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 var sheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(path);
                 if (sheet) rootVisualElement.styleSheets.Add(sheet);
             }
-            rootVisualElement.AddToClassList("orb-settings");
-            var scroll = new ScrollView(ScrollViewMode.Vertical); scroll.AddToClassList("orb-settings__scroll"); rootVisualElement.Add(scroll);
-            body = GalleryUI.Box("orb-settings__content gallery-cleanup", scroll);
+            rootVisualElement.AddToClassList("orbiters-settings");
+            var scroll = new ScrollView(ScrollViewMode.Vertical); scroll.AddToClassList("orbiters-settings__scroll"); rootVisualElement.Add(scroll);
+            body = GalleryUI.Box("orbiters-settings__content gallery-cleanup", scroll);
             rootVisualElement.RegisterCallback<DetachFromPanelEvent>(_ => scanning?.Cancel());
             Scan();
         }
@@ -45,7 +45,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var source = scanning = new CancellationTokenSource();
             body.Clear();
             var card = Card("Checking gallery files");
-            var label = GalleryUI.Text("Reading what the gallery installed…", "orb-settings__caption", card);
+            var label = GalleryUI.Text("Reading what the gallery installed…", "orbiters-settings__caption", card);
             var track = GalleryUI.Box("gallery-progress", card); track.style.marginTop = 10; track.style.height = 8;
             var fill = GalleryUI.Box("gallery-progress__fill", track);
             try
@@ -59,8 +59,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private VisualElement Card(string title)
         {
-            var card = GalleryUI.Box("orb-settings__card", body);
-            GalleryUI.Text(title, "orb-settings__title", card);
+            var card = GalleryUI.Box("orbiters-settings__card", body);
+            GalleryUI.Text(title, "orbiters-settings__title", card);
             return card;
         }
 
@@ -71,7 +71,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             GalleryUI.Text(report.Reclaim.Count == 0
                 ? "Every file the gallery imported is still in use, or was not the gallery's to remove."
                 : $"{report.Reclaim.Count} file{(report.Reclaim.Count == 1 ? "" : "s")} of removed gallery assets that nothing in the project or the open scenes uses. They move to a quarantine first: you can restore them below.",
-                "orb-settings__caption", summary);
+                "orbiters-settings__caption", summary);
             if (report.Reclaim.Count > 0)
             {
                 var list = GalleryUI.Box("gallery-sheet__list", summary);
@@ -94,7 +94,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (report.Kept.Count > 0)
             {
                 var kept = Card($"Kept · {report.Kept.Count} file{(report.Kept.Count == 1 ? "" : "s")}");
-                GalleryUI.Text("Files of removed gallery assets that stay, with the reason. When usage is uncertain, a file always stays.", "orb-settings__caption", kept);
+                GalleryUI.Text("Files of removed gallery assets that stay, with the reason. When usage is uncertain, a file always stays.", "orbiters-settings__caption", kept);
                 var list = GalleryUI.Box("gallery-sheet__list", kept);
                 foreach (var group in report.Kept.GroupBy(i => i.reason))
                 {
@@ -108,7 +108,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (batches.Count > 0)
             {
                 var quarantine = Card("Earlier cleanups");
-                GalleryUI.Text("Kept in the project's Library folder. Restore puts the files back where they were.", "orb-settings__caption", quarantine);
+                GalleryUI.Text("Kept in the project's Library folder. Restore puts the files back where they were.", "orbiters-settings__caption", quarantine);
                 foreach (var batch in batches)
                 {
                     var row = GalleryUI.Box("detail-dependency", quarantine);
@@ -130,7 +130,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var shown = report;
             body.Clear();
             var card = Card("Checking again before cleaning up");
-            var label = GalleryUI.Text("Reading what the gallery installed…", "orb-settings__caption", card);
+            var label = GalleryUI.Text("Reading what the gallery installed…", "orbiters-settings__caption", card);
             var track = GalleryUI.Box("gallery-progress", card); track.style.marginTop = 10; track.style.height = 8;
             var fill = GalleryUI.Box("gallery-progress__fill", track);
             var stayed = new System.Collections.Generic.List<GalleryCleanup.Item>();

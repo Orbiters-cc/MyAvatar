@@ -79,7 +79,7 @@
     transition-duration: 0.3s;
 }
 
-.fit-base__picture.orb-thumbnail--shown { opacity: 1; }
+.fit-base__picture.orbiters-thumbnail--shown { opacity: 1; }
 .fit-base__name { font-size: 10.5px; -unity-font-style: bold; color: #e6e6e6; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fit-base__version { margin-left: 5px; font-size: 10px; color: #00DA6D; }
 
@@ -97,9 +97,9 @@
     transition-duration: 0.12s, 0.1s;
 }
 
-.fit-card__close .orb-icon { width: 12px; height: 12px; --icon-color: #8c8c8c; }
+.fit-card__close .orbiters-icon { width: 12px; height: 12px; --icon-color: #8c8c8c; }
 .fit-card__close:hover { background-color: rgba(255, 255, 255, 0.08); }
-.fit-card__close:hover .orb-icon { --icon-color: #e6e6e6; }
+.fit-card__close:hover .orbiters-icon { --icon-color: #e6e6e6; }
 .fit-card__close.fit-pressed { scale: 0.88 0.88; }
 
 .fit-card__detail {

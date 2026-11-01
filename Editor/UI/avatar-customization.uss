@@ -25,10 +25,10 @@
 .custom__access-option { flex-grow: 1; margin: 0; padding: 0; border-width: 0; border-radius: 8px; background-color: rgba(0, 0, 0, 0); align-items: center; justify-content: center; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; transition-timing-function: ease-out, ease-out-back; }
 .custom__access-option:hover { background-color: rgba(255, 255, 255, 0.06); }
 .custom__access-option:active { scale: 0.9 0.9; }
-.custom__access-option .orb-icon { width: 15px; height: 15px; --icon-color: #7c7c7c; }
-.custom__access-option:hover .orb-icon { --icon-color: #d9d9d9; }
+.custom__access-option .orbiters-icon { width: 15px; height: 15px; --icon-color: #7c7c7c; }
+.custom__access-option:hover .orbiters-icon { --icon-color: #d9d9d9; }
 .custom__access-option--on, .custom__access-option--on:hover { background-color: rgba(0, 218, 109, 0.18); }
-.custom__access-option--on .orb-icon, .custom__access-option--on:hover .orb-icon { --icon-color: #00DA6D; }
+.custom__access-option--on .orbiters-icon, .custom__access-option--on:hover .orbiters-icon { --icon-color: #00DA6D; }
 .custom__access-option:disabled { opacity: 0.28; }
 .custom__access--mixed { border-width: 1px; border-color: rgba(255, 176, 32, 0.35); padding: 1px; }
 

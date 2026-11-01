@@ -411,7 +411,7 @@ namespace Orbiters.MyAvatar.Editor
                 featureRows.Add((feature, row, toggle, bits));
             }
             var budgetFrame = new VisualElement(); budgetFrame.AddToClassList("ft-budget"); featureSetting.Add(budgetFrame);
-            budget = new BudgetBar(); budget.AddToClassList("orb-budget--inline"); budgetFrame.Add(budget);
+            budget = new BudgetBar(); budget.AddToClassList("orbiters-budget--inline"); budgetFrame.Add(budget);
             budgetText = new Label(); budgetText.AddToClassList("ft-budget__text"); budgetFrame.Add(budgetText);
 
             // Expressive mouth

@@ -107,7 +107,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 yield return Wait(() => apply.IsCompleted, 180, "applying " + placed.Part.key);
                 Assert.That(apply.Result.Applied, Is.True, placed.Part.key + ": " + string.Join(" ", apply.Result.Problems));
             }
-            old.displayName = "Probe orb"; old.displayNameFor = old.name;
+            old.displayName = "Probe N4N0"; old.displayNameFor = old.name;
             old.gameObject.SetActive(false);
             var choices = Choices(old.gameObject);
             var parts = Parts(old.gameObject);
@@ -131,7 +131,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 if (!Choices(now[0].gameObject).TryGetValue(pair.Key, out var value) || value != pair.Value) problems.Add(pair.Key + ": " + pair.Value + " became " + (value ?? "(gone)"));
             foreach (var pair in parts)
                 if (!Parts(now[0].gameObject).TryGetValue(pair.Key, out var value) || value != pair.Value) problems.Add(pair.Key + ": " + pair.Value + " became " + (value ?? "(gone)"));
-            if (now[0].DisplayName != "Probe orb") problems.Add("name: " + now[0].DisplayName);
+            if (now[0].DisplayName != "Probe N4N0") problems.Add("name: " + now[0].DisplayName);
             if (now[0].gameObject.activeSelf) problems.Add("shown again");
             Debug.Log("[My Avatar live] " + now[0].gallery.version + " has: " + string.Join(", ", Choices(now[0].gameObject).Select(c => c.Key + " = " + c.Value)) + " · " + string.Join(", ", Parts(now[0].gameObject).Select(c => c.Key + " = " + c.Value)));
             Assert.That(problems, Is.Empty);
