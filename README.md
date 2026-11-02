@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The menu preview sorts an item's toggle where the build puts it.** An item placed on a bone moves under it just
+  before VRCFury builds, and VRCFury sorts its toggle from there: the menu editor now shows it at that place too
+  (found by the compatibility project on MasculineCanine; the preview and the real build agree at Off and Big).
 - **Checks: "Other tools".** What other avatar tools change in what Orbiters does (lilycalInventory's or FaceEmo's
   menus, which the menu editor shows only from a real build; VRCFury components that won't build), from Toolkit's
   `ToolConflicts`, read on the avatar itself.

@@ -226,7 +226,10 @@ namespace Orbiters.MyAvatar.Editor.Tests
             return Dump(built.VrcFury ? MenuBuild.Paginate(built.Root, built.NextText, built.NextIcon) : built.Root);
         }
 
-        /// <summary>What VRCFury's own build (its upload entry point) makes of a hidden copy of <paramref name="root"/>.</summary>
+        /// <summary>
+        /// What VRCFury's own build (its upload entry point) makes of a hidden copy of <paramref name="root"/>, after My
+        /// Avatar's items moved onto their bones as the upload moves them first.
+        /// </summary>
         public static string Build(GameObject root)
         {
             var scene = EditorSceneManager.NewPreviewScene();
@@ -236,6 +239,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 clone = Object.Instantiate(root);
                 clone.name = root.name;
                 UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(clone, scene);
+                Orbiters.Toolkit.Editor.VRChat.Attachments.AttachmentBuild.Apply(clone);
                 VrcFury.RunMain(clone);
                 var descriptor = clone.GetComponent<VRCAvatarDescriptor>();
                 return Dump(descriptor.customExpressions ? descriptor.expressionsMenu : null);

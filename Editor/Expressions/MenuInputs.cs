@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
@@ -224,7 +225,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 }
 
             int number = FirstFeatureNumber;
-            foreach (var component in root.GetComponentsInChildren(type, true))
+            foreach (var component in InBuildOrder(root, type))
             {
                 number++;
                 if (component == null || (skip != null && skip(component)) || Removed(component.transform) || InRagdoll(component.transform)) continue;
@@ -242,6 +243,35 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             }
             inputs.NextNumber = number + 1;
             return inputs;
+        }
+
+        // VRCFury reads its components in hierarchy order once My Avatar's items are on their bones: the build moves them
+        // just before VRCFury runs (AttachmentBuild), each becoming its bone's last child, and their toggles sort from there.
+        private static IEnumerable<Component> InBuildOrder(GameObject root, Type type)
+        {
+            var all = root.GetComponentsInChildren(type, true);
+            // Only an item holding VRCFury components (its toggle) changes their order: the moves are worked out then only.
+            if (!all.Any(c => c != null && c.GetComponentInParent<Orbiters.Toolkit.VRChat.OrbitersAttachment>(true) != null)) return all;
+            var moves = AttachmentBuild.Reparented(root);
+            if (moves.Count == 0) return all;
+            var moved = new HashSet<Transform>(moves.Select(m => m.Follower));
+            var under = new Dictionary<Transform, List<Transform>>();
+            foreach (var (follower, parent) in moves)
+            {
+                if (!under.TryGetValue(parent, out var list)) under[parent] = list = new List<Transform>();
+                list.Add(follower);
+            }
+            var components = new List<Component>();
+            void Walk(Transform t)
+            {
+                components.AddRange(t.GetComponents(type));
+                foreach (Transform child in t)
+                    if (!moved.Contains(child)) Walk(child);
+                if (under.TryGetValue(t, out var more))
+                    foreach (var follower in more) Walk(follower);
+            }
+            Walk(root.transform);
+            return components;
         }
 
         /// <summary>
