@@ -42,7 +42,7 @@ namespace Orbiters.MyAvatar.Editor.Locomotion
         // The standard GoGoLoco, for VRCFury or Modular Avatar ("Beyond" adds its own FX layer and more parameters).
         internal const string VrcFuryPrefab = Prefabs + "VRCFury/GogoLoco All (VRCFury).prefab";
         internal const string ModularAvatarPrefab = Prefabs + "Modular Avatar/GogoLoco All (Modular Avatar).prefab";
-        private const string VrcFuryId = "com.vrcfury.vrcfury", ModularAvatarFolder = "Packages/nadena.dev.modular-avatar";
+        private const string VrcFuryId = Toolkit.Editor.InstalledTools.VrcFuryId;
 
         /// <summary>The downloads GoGoLoco needs, and the avatars waiting for them.</summary>
         internal static readonly PackageSetup Downloads = new PackageSetup("GoGoLoco", "GoGoLoco", "VRCFury or GoGoLoco",
@@ -51,7 +51,7 @@ namespace Orbiters.MyAvatar.Editor.Locomotion
         internal static bool Installed => AssetDatabase.IsValidFolder(PackageFolder);
         /// <summary>The installed GoGoLoco's version, or null.</summary>
         internal static string Version => UnityEditor.PackageManager.PackageInfo.FindForAssetPath(PackageFolder)?.version;
-        private static bool ModularAvatarInstalled => AssetDatabase.IsValidFolder(ModularAvatarFolder);
+        private static bool ModularAvatarInstalled => Toolkit.Editor.InstalledTools.ModularAvatar;
         /// <summary>Modular Avatar's prefab in a project that has it and not VRCFury; VRCFury's otherwise.</summary>
         internal static bool UsesModularAvatar => !VrcFury.Installed && ModularAvatarInstalled;
 

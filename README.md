@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **VRCFury Stub is not VRCFury.** Menu previews, menu saves, GoGoLoco and face tracking ask Orbiters Toolkit's
+  `InstalledTools`: with VRCFury Stub installed instead of VRCFury, nothing is set up as VRCFury toggles or links and the
+  menu preview leaves VRCFury's components out, as the build will. Checks has a new group, **Other tools**.
 - **Fix clipping on the fit card.** Lining clothing up for a refit, under "How close should it sit?", a "Fix clipping"
   switch (Orbiters Toolkit's shared `RefitPreferences.FixClipping`, used by MCB's refits too) asks ReFit to push the fabric
   the fit leaves inside the body out of it.

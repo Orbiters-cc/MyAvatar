@@ -177,7 +177,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             inputs.Menu = DescriptorMenu(inputs.Descriptor);
             // Modular Avatar runs first (NDMF builds at -11000, VRCFury at -10000): VRCFury starts from the menu it made.
             inputs.ModularAvatar = MaMenus.Read(root);
-            var type = VrcFury.Component;
+            // VRCFury's own menu rules, when VRCFury builds (VRCFury Stub's components add nothing to the menu).
+            var type = VrcFury.Installed ? VrcFury.Component : null;
             if (type == null) return inputs;
             componentBase ??= VrcFury.Find("VF.Component.VRCFuryComponent");
             debugInfo ??= VrcFury.Find("VF.Model.VRCFuryDebugInfo");

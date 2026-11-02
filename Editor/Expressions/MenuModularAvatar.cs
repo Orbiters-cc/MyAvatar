@@ -99,8 +99,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             filterType = VrcFury.Find(Core + "ModularAvatarPlatformFilter");
         }
 
-        /// <summary>Modular Avatar is in the project: it then builds every avatar before VRCFury.</summary>
-        public static bool Installed { get { Look(); return installerType != null; } }
+        /// <summary>Modular Avatar's package is in the project (and its types loaded): it then builds every avatar before VRCFury.</summary>
+        public static bool Installed { get { Look(); return installerType != null && Toolkit.Editor.InstalledTools.ModularAvatar; } }
 
         private static Texture2D moreIcon;
         public static Texture2D MoreIcon => moreIcon != null ? moreIcon : moreIcon = AssetDatabase.LoadAssetAtPath<Texture2D>(MoreIconPath);

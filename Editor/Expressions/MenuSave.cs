@@ -159,7 +159,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 }
                 Delete(imported);
                 // The last way tried (VRCFury's features only) says best what can't be done, unless VRCFury is missing.
-                return new Outcome { Message = last != null && VrcFury.Component != null ? last : first };
+                return new Outcome { Message = last != null && VrcFury.Installed ? last : first };
             }
             catch (Exception ex)
             {
@@ -208,7 +208,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 var draft = MenuDraft.Apply(now, edits);
                 var writer = new Writer(root, pins, outcome, sharing);
                 outcome.Pins = pins;
-                bool vrcFuryInstalled = VrcFury.Component != null;
+                bool vrcFuryInstalled = VrcFury.Installed;
                 if (strategy != Strategy.Features)
                 {
                     var skip = SkipEdits(root);
