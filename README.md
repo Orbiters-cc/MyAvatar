@@ -23,6 +23,14 @@
 - **VRCFury Stub is not VRCFury.** Menu previews, menu saves, GoGoLoco and face tracking ask Orbiters Toolkit's
   `InstalledTools`: with VRCFury Stub installed instead of VRCFury, nothing is set up as VRCFury toggles or links and the
   menu preview leaves VRCFury's components out, as the build will. Checks has a new group, **Other tools**.
+- **Checks: Animation paths.** The avatar's own clips, masks and state audio that animate objects that aren't there, on
+  the avatar and as built (objects VRCFury or Modular Avatar make at upload count), each with a Fix button when one
+  object of that name exists (one Undo step; a clip other avatars use too is copied for this one). A check's fix shows
+  "Fixing…" at once and then what it did.
+- **A rename that breaks animations says so on the card.** Renaming or moving objects of the avatar in Unity's
+  Hierarchy (or any tool) so its animations no longer reach them shows "Renaming “Jacket” broke 3 animations" at the
+  top of the card, with Fix (points them at the objects where they are now), Fix everywhere (for shared clips) and
+  Leave. Nothing changes until you press Fix.
 - **Fix clipping on the fit card.** Lining clothing up for a refit, under "How close should it sit?", a "Fix clipping"
   switch (Orbiters Toolkit's shared `RefitPreferences.FixClipping`, used by MCB's refits too) asks ReFit to push the fabric
   the fit leaves inside the body out of it.

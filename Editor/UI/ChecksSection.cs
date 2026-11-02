@@ -175,8 +175,34 @@ namespace Orbiters.MyAvatar.Editor
                     var name = new Label(issue.Title); name.AddToClassList("chk-issue__title"); texts.Add(name);
                     var detail = new Label(issue.Detail); detail.AddToClassList("chk-issue__detail"); texts.Add(detail);
                     if (!string.IsNullOrEmpty(issue.Where)) { var where = new Label(issue.Where); where.AddToClassList("chk-issue__where"); texts.Add(where); }
+                    if (issue.Fix != null) row.Add(FixButton(issue));
                 }
             }
+        }
+
+        // A check's own fix: the press shows at once ("Fixing…"), the fix runs on the next frame and says what it did. It
+        // changes the avatar's assets, never the checked copy.
+        private static Button FixButton(AvatarIssue issue)
+        {
+            Button button = null;
+            button = MyAvatarEditor.PressButton(issue.FixLabel ?? "Fix", () =>
+            {
+                if (!button.enabledSelf) return;
+                button.SetEnabled(false);
+                button.text = "Fixing…";
+                button.schedule.Execute(() =>
+                {
+                    string said;
+                    try { said = issue.Fix(); }
+                    catch (Exception ex) { Debug.LogException(ex); said = "Couldn't fix: " + ex.Message; }
+                    button.text = said ?? "Fixed";
+                    button.tooltip = button.text + ". Check again to see the avatar now.";
+                });
+            });
+            button.AddToClassList("ft-ghost");
+            button.AddToClassList("chk-issue__fix");
+            button.tooltip = "Changes your avatar's own assets, in one Undo step.";
+            return button;
         }
 
         // ---- Running ----
@@ -301,6 +327,7 @@ namespace Orbiters.MyAvatar.Editor
             {
                 Guarded("Menu and parameters", () => MenuAudit.Find(copy, Usage())),
                 Guarded("Animators", () => AnimatorFlow.Find(copy)),
+                Guarded("Animation paths", () => BrokenBindings.Find(run.Root, copy)),
                 Guarded("Holes in the body", () => BodyHoles.Find(copy, Usage())),
                 Guarded("Quest", () => Quest(run, copy)),
             };

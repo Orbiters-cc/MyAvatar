@@ -91,6 +91,8 @@ namespace Orbiters.MyAvatar.Editor
             content = new VisualElement(); content.AddToClassList("content"); root.Add(content);
             // A VRM avatar, or one without VRChat's avatar descriptor, is offered to be made VRChat ready first.
             content.Add(new VrchatReadySection(avatar));
+            // A rename or move that broke the avatar's animations: Fix / Leave (Toolkit's AnimationPathWatch).
+            content.Add(new AnimationPathsNotice(avatar));
             var section = new Label("Drop anything"); section.AddToClassList("section-title"); content.Add(section);
             undo = Button("Undo", () => _ = Run(() => { note = null; TextureChanges.UndoLast(avatar); RefreshResults(); return Task.CompletedTask; }));
             undo.tooltip = "Restore the materials from before this texture set. Click again to redo.";

@@ -18,3 +18,10 @@
 .chk-issue__title { margin: 0; padding: 0; color: #e6e6e6; font-size: 11px; -unity-font-style: bold; white-space: normal; }
 .chk-issue__detail { margin: 2px 0 0 0; padding: 0; color: #9a9a9a; font-size: 11px; white-space: normal; }
 .chk-issue__where { margin: 2px 0 0 0; padding: 0; color: #6f6f6f; font-size: 10px; white-space: normal; }
+
+/* A check's Fix, at the right of its row; the notice of animations a rename broke (top of the card, Fix / Leave). */
+.mcb-button.ft-ghost.chk-issue__fix { flex-shrink: 0; align-self: center; margin: 0 0 0 8px; max-width: 170px; }
+.chk-notice { margin: 4px 0 8px 0; }
+.chk-notice .chk-issue { margin-top: 0; padding: 10px 12px; border-radius: 14px; background-color: #2e2b23; }
+.chk-notice__actions { flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.mcb-button.ft-primary.chk-notice__primary { height: 28px; min-height: 28px; margin: 0 6px 0 0; padding: 0 14px; border-radius: 14px; font-size: 11px; }
