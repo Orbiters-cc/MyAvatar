@@ -330,6 +330,8 @@ namespace Orbiters.MyAvatar.Editor
                 Guarded("Animation paths", () => BrokenBindings.Find(run.Root, copy)),
                 Guarded("Holes in the body", () => BodyHoles.Find(copy, Usage())),
                 Guarded("Quest", () => Quest(run, copy)),
+                // Read on the avatar itself: the other tools' components leave the copy as they build.
+                Guarded("Other tools", () => ToolConflicts.Find(run.Root)),
             };
         }
 

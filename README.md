@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Checks: "Other tools".** What other avatar tools change in what Orbiters does (lilycalInventory's or FaceEmo's
+  menus, which the menu editor shows only from a real build; VRCFury components that won't build), from Toolkit's
+  `ToolConflicts`, read on the avatar itself.
 - **Reach a rank, on the Optimization card.** Under the upload estimate, pick a target (Excellent, Good, Medium, Poor;
   one rank better than the upload by default, never worse than now) and see, for PC and Quest side by side (Quest when
   the avatar has a version there, or "Plan for Quest too"), each category that holds the avatar below it: its value at
