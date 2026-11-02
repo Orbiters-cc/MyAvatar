@@ -1,6 +1,6 @@
 # My Avatar
 
-## Unreleased
+## 0.9.23 — 2026-11-02
 
 - **Reach a rank estimates what a setting not tried yet would save.** A level or Custom switch never measured showed
   "Not measured yet"; it now says "About −685 polygons · −1 material slot · −1 mesh at upload, estimated" (and "may
