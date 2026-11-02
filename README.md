@@ -1,6 +1,6 @@
 # My Avatar
 
-## Unreleased
+## 0.9.21 — 2026-11-02
 
 - **The menu editor shows the menu of a real build when other tools add menus at upload.** With lilycalInventory,
   FaceEmo, Avatar Menu Creator for MA, AvatarPoseLibrary, EmotePrefab or Bavi Motion Patcher on the avatar, a quiet
