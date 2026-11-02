@@ -7,7 +7,8 @@
   together). The upload's log line says "merged N toggled meshes into M, toggles kept". What a hiding blendshape adds
   to the download is weighed with the estimate's own figure (`DownloadSize.CollapseBytes`), and the estimate counts
   those blendshapes as kept. MasculineCanine at Big, before and after: 9 skinned meshes, Very Poor (PC) / Very Poor
-  (Quest), 15.74 MB — none of its toggled meshes can merge (see Toolkit's notes).
+  (Quest), 15.74 MB — none of its toggled meshes can merge (the drawing pen follows a constraint, N4N0's parts animate
+  their own materials).
 
 ## 0.9.21 — 2026-11-02
 
