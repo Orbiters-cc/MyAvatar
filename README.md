@@ -1,6 +1,6 @@
 # My Avatar
 
-## Unreleased
+## 0.9.20 — 2026-11-02
 
 - **A gallery item that needs another VRChat SDK asks, in one dialog, instead of failing.** Installing N4N0 1.0.19 on a
   project with SDK 3.7.5 and tools that only work below 3.8 stopped on its card ("VRChat SDK - Base needs your
