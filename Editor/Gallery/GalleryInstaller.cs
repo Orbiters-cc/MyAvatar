@@ -117,6 +117,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             if (job == null || !job.Waiting) return;
             if (!accept) { Finish(job, GalleryJob.Cancelled, CancelledText(job)); return; }
+            if (job.waiting == PackagesQuestion) { ApprovePackages(job); return; }
             job.accepted.Add(job.waiting);
             job.waiting = null; job.questionLines.Clear(); job.questionSummary = null;
             GalleryJournal.Save(job);
@@ -157,6 +158,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private static string CancelledText(GalleryJob job) => job.imported && job.placed.Count == 0
             ? "Cancelled. Its files were imported but nothing was added to the avatar: Cleanup can remove them."
+            : job.packages?.changed.Count > 0 ? "Cancelled. Nothing was added to the avatar; the packages already changed stay (" + string.Join(", ", job.packages.changed) + ")."
             : "Cancelled. Nothing was added to the avatar.";
 
         internal static async Task RunAsync(GalleryJob job)
@@ -244,6 +246,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private static void Finish(GalleryJob job, string stage, string status)
         {
             job.stage = stage; job.status = status; job.waiting = null; job.importing = false; job.installingDependencies = false;
+            job.packages = null;
             if (stage != GalleryJob.Failed) DeleteStaged(job);
             // A journal that cannot be written stops the job here; the card still shows how it ended until Unity reloads.
             try { GalleryJournal.Save(job); }
@@ -338,43 +341,113 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Move(job, GalleryJob.Dependencies, "Checking what it needs…", 0.45f);
         }
 
-        // ---- Dependencies: one plan, shown before any package changes ----
+        // ---- Dependencies: one plan, shown in its dialog before any package changes ----
 
-        private static async Task ResolveDependencies(GalleryJob job, CancellationToken cancellation)
-        {
-            if (job.dependencies.Count == 0) { Move(job, GalleryJob.Preview, "Checking your project…", 0.5f); return; }
+        internal const string PackagesQuestion = "packages";
+
 #if MYAVATAR_VPM
+        /// <summary>
+        /// Replaced in tests: the complete plan for the job's dependencies, for the user to approve. It may change the VRChat
+        /// SDK and the tools that only work with the installed SDK (removing one only when nothing else works).
+        /// </summary>
+        internal static Func<GalleryJob, CancellationToken, Task<VpmDependencyPlan>> PlanPackages = async (job, cancellation) =>
+        {
             var catalog = await KnownDependencies(cancellation);
             var candidates = (catalog?.packages ?? new List<KnownPackage>()).SelectMany(p => p.versions.Select(v => new VpmCandidate
             {
                 Id = p.id, Version = v.version, DisplayName = p.displayName, RepositoryUrl = p.repositoryUrl,
                 Dependencies = new Dictionary<string, string>(v.dependencies ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase),
-            }));
-            var plan = VpmDependencyPlan.Resolve(job.dependencies.Select(d => new VpmDependencyPlan.Requirement(d.id, d.range, job.assetName)), new VpmProjectCatalog(candidates));
+            })).ToList();
+            return await VpmApprovalPlanner.PlanAsync(job.dependencies.Select(d => new VpmDependencyPlan.Requirement(d.id, d.range, job.assetName)), candidates, cancellation);
+        };
+        /// <summary>Replaced in tests: applies an approved plan (without reloading), reporting each step.</summary>
+        internal static Func<VpmDependencyPlan, Action<VpmApplyProgress>, Task<VpmDependencyInstallResult>> ApplyPackages =
+            (plan, progress) => VpmPlanInstaller.ApplyAsync(plan, progress, reload: false);
+        /// <summary>Replaced in tests: Unity takes in the changed packages and reloads its scripts.</summary>
+        internal static Action ReloadPackages = VpmPlanInstaller.Reload;
+#endif
+
+        /// <summary>
+        /// The user's answer in the package dialog: approve (Review), Retry (Failed) or Check again (Blocked). The plan is
+        /// read again first; an approval holds for the changes it showed, anything else is shown for approval again.
+        /// </summary>
+        internal static void ApprovePackages(GalleryJob job)
+        {
+            if (job?.packages == null || job.waiting != PackagesQuestion) return;
+            var plan = job.packages;
+            // Shown at once, before the plan is read again.
+            if (plan.state == GalleryPackagePlan.Blocked) job.status = "Checking the packages again…";
+            else
+            {
+                if (!job.accepted.Contains(PackagesQuestion)) job.accepted.Add(PackagesQuestion);
+                plan.state = GalleryPackagePlan.Applying; plan.error = null; plan.step = plan.steps = 0;
+                plan.progressText = "Checking the packages again…"; plan.progress = 0.02f;
+                job.status = "Updating packages…";
+            }
+            job.waiting = null; job.questionLines.Clear(); job.questionSummary = null;
+            GalleryJournal.Save(job);
+            _ = RunAsync(job);
+        }
+
+        private static async Task ResolveDependencies(GalleryJob job, CancellationToken cancellation)
+        {
+            if (job.dependencies.Count == 0) { job.packages = null; Move(job, GalleryJob.Preview, "Checking your project…", 0.5f); return; }
+#if MYAVATAR_VPM
+            if (job.packages == null) { job.status = "Checking what it needs…"; GalleryJournal.Notify(job); }
+            var plan = await PlanPackages(job, cancellation);
             if (job.installingDependencies)
             {
-                // Back after the install reloaded Unity: anything still missing failed.
+                // Back after the packages changed (and Unity reloaded): what the plan showed must be there now.
                 job.installingDependencies = false;
-                if (!plan.NothingToDo) { Fail(job, "Some packages it needs could not be installed: " + string.Join(", ", plan.Steps.Where(s => s.Action != VpmStepAction.Keep).Select(VpmDependencyPlan.Describe)) + "."); return; }
+                if (!plan.NothingToDo)
+                {
+                    PackagesFailed(job, "These are still not as the plan showed: " + string.Join(", ", plan.Steps.Where(s => s.Action != VpmStepAction.Keep).Select(VpmDependencyPlan.Describe)) +
+                                        ". The VRChat Creator Companion's resolver may have chosen other versions: check the Console, then Retry.", plan);
+                    return;
+                }
             }
-            if (plan.NothingToDo) { Move(job, GalleryJob.Preview, "Checking your project…", 0.5f); return; }
-            var lines = plan.Steps.Select(s => VpmDependencyPlan.Describe(s) + (s.Action == VpmStepAction.Keep ? "" : " — " + (s.Reason ?? "needed by " + string.Join(", ", s.RequiredBy))));
-            if (!plan.CanApply) { Fail(job, "It needs packages My Avatar cannot install: " + string.Join("; ", plan.Steps.Where(s => !s.Changes && s.Action != VpmStepAction.Keep).Select(s => VpmDependencyPlan.Describe(s) + " (" + s.Reason + ")")) + "."); return; }
-            if (!job.accepted.Contains("dependencies"))
+            if (plan.NothingToDo) { job.packages = null; job.accepted.Remove(PackagesQuestion); Move(job, GalleryJob.Preview, "Checking your project…", 0.5f); return; }
+            bool approved = job.accepted.Contains(PackagesQuestion) && GalleryPackages.Covered(plan, job.packages);
+            if (!approved)
             {
-                int count = plan.Changes.Count();
-                Ask(job, "dependencies", $"{job.assetName} needs {count} package{(count == 1 ? "" : "s")} this project does not have yet.", lines);
+                job.accepted.Remove(PackagesQuestion);
+                var changed = job.packages?.changed;
+                job.packages = GalleryPackages.From(plan, job.assetName);
+                if (changed != null) job.packages.changed.AddRange(changed);
+                Ask(job, PackagesQuestion, job.packages.Summary(job.assetName), job.packages.Lines());
                 return;
             }
+            var model = job.packages;
+            model.state = GalleryPackagePlan.Applying;
+            model.error = null;
             job.installingDependencies = true;
-            job.status = "Installing " + string.Join(", ", plan.Changes.Select(s => s.DisplayName)) + "…";
+            job.status = "Updating packages…";
             GalleryJournal.Save(job);
-            await Task.Yield();
-            var result = VpmPlanInstaller.Apply(plan);
-            if (!result.Success) { job.installingDependencies = false; Fail(job, result.ErrorMessage ?? "The packages could not be installed."); return; }
-            // Unity reloads its scripts now; the job resumes and checks the plan again.
-            job.accepted.Remove("dependencies");
+            var result = await ApplyPackages(plan, p =>
+            {
+                model.step = p.Step; model.steps = p.Count; model.progressText = p.Text; model.progress = p.Fraction;
+                job.status = p.Text; job.progress = 0.45f + 0.05f * p.Fraction;
+                GalleryJournal.Notify(job);
+            });
+            if (!result.Success)
+            {
+                job.installingDependencies = false;
+                foreach (string id in result.InstalledPackageIds)
+                {
+                    var step = plan.Steps.FirstOrDefault(s => s.Id == id);
+                    string done = (step?.DisplayName ?? id) + " " + step?.To;
+                    if (!model.changed.Contains(done)) model.changed.Add(done);
+                }
+                PackagesFailed(job, result.ErrorMessage ?? "The packages could not be changed.", null);
+                return;
+            }
+            // Saved before Unity reloads its scripts: the job resumes from the journal and checks the plan again (without a
+            // reload it goes on here the same way).
+            model.state = GalleryPackagePlan.Reloading;
+            model.progressText = null; model.progress = 1f;
+            job.status = "Unity is taking in the new packages…";
             GalleryJournal.Save(job);
+            ReloadPackages();
 #else
             await Task.Yield();
             var missing = job.dependencies.Where(d => !AssetDatabase.IsValidFolder("Packages/" + d.id)).ToList();
@@ -382,6 +455,19 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             Move(job, GalleryJob.Preview, "Checking your project…", 0.5f);
 #endif
         }
+
+#if MYAVATAR_VPM
+        // A failure shows in the plan's dialog, with Retry.
+        private static void PackagesFailed(GalleryJob job, string error, VpmDependencyPlan plan)
+        {
+            var model = job.packages ?? (plan != null ? GalleryPackages.From(plan, job.assetName) : new GalleryPackagePlan());
+            model.state = GalleryPackagePlan.Failed;
+            model.error = error;
+            model.progressText = null;
+            job.packages = model;
+            Ask(job, PackagesQuestion, model.Summary(job.assetName), model.Lines());
+        }
+#endif
 
         internal static void DeleteStaged(GalleryJob job)
         {

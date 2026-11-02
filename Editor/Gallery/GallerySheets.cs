@@ -16,21 +16,21 @@ namespace Orbiters.MyAvatar.Editor.Gallery
     {
         // ---- Question: code, files replaced, packages needed, parameter memory ----
 
-        internal static void Question(VisualElement content, GalleryJob job, Action<bool> answer)
+        /// <param name="closed">The package dialog (a job changing packages) answers by itself and calls this once it is done.</param>
+        internal static void Question(VisualElement content, GalleryJob job, Action<bool> answer, Action closed = null)
         {
+            if (GalleryPackagesDialog.Shows(job)) { content.Add(new GalleryPackagesDialog(job, closed)); return; }
             string eyebrow, confirm;
             switch (job.waiting)
             {
                 case "code": eyebrow = "CODE FROM AN UNTRUSTED CREATOR"; confirm = "Install anyway"; break;
                 case "conflicts": eyebrow = "FILES WILL BE REPLACED"; confirm = "Replace and continue"; break;
-                case "dependencies": eyebrow = "PACKAGES NEEDED"; confirm = "Install packages and continue"; break;
                 default: eyebrow = "PARAMETER MEMORY"; confirm = "Add anyway"; break;
             }
             GalleryUI.Text(eyebrow, "gallery-sheet__eyebrow", content);
             GalleryUI.Text(job.questionSummary, "gallery-sheet__title", content);
             string explanation = job.waiting == "code" ? "Choose Cancel unless you trust its author: nothing is imported, and the download is discarded."
                 : job.waiting == "conflicts" ? "Unity's importer writes these files over your project's copies. Every avatar, prefab and scene using them changes too. Cancel keeps your files; nothing is imported."
-                : job.waiting == "dependencies" ? "These are installed from the VPM repositories Orbiters knows. Nothing else in your project is updated."
                 : "The avatar may not upload until some parameters are removed or compressed.";
             GalleryUI.Text(explanation, "gallery-sheet__text", content);
             if (job.questionLines.Count > 0)

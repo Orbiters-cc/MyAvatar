@@ -241,6 +241,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 grid.Add(card);
             }
             if (creator && filter != 3) grid.Add(CreateCard());
+            // A package plan on its way (back after Unity reloaded its scripts) shows its dialog again.
+            foreach (var card in cards.Values)
+            {
+                var job = card.Job;
+                if (!GalleryPackagesDialog.Shows(job)) continue;
+                string key = job.id + job.waiting + job.packages.state;
+                if (asked.Add(key)) schedule.Execute(() => { if (card.panel != null) OpenQuestion(card, job); }).StartingIn(50);
+            }
             CardGrid.Resize(grid, 150f, 12f, (card, width) => { var media = card.Q(className: "orbiters-card__media"); if (media != null) media.style.height = width; });
             Empty(shown.Any());
             footer.Clear();
@@ -310,8 +318,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             if (!avatar || job.avatar != GalleryInstaller.AvatarId(avatar) || !cards.TryGetValue(job.assetId, out var card)) return;
             Bind(card);
-            // A question opens on its own the first time it is asked.
-            if (job.Waiting && !asked.Contains(job.id + job.waiting)) { asked.Add(job.id + job.waiting); OpenQuestion(card, job); }
+            // A question opens on its own the first time it is asked; the package dialog again at each new state of its plan
+            // (applying, Unity reloading, failed), also after the reload.
+            string key = job.id + job.waiting + (GalleryPackagesDialog.Shows(job) ? job.packages.state : "");
+            if ((job.Waiting || GalleryPackagesDialog.Shows(job)) && !asked.Contains(key)) { asked.Add(key); OpenQuestion(card, job); }
             if (job.stage == GalleryJob.Complete) ShowContext(avatarContext = Refreshed(avatarContext));
         }
         private readonly HashSet<string> asked = new HashSet<string>();
@@ -341,7 +351,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     break;
                 case GalleryUI.State.Question: OpenQuestion(card, card.Job); break;
                 case GalleryUI.State.Failed: GalleryInstaller.Retry(card.Job); break;
-                case GalleryUI.State.Working: GalleryInstaller.Cancel(card.Job); break;
+                case GalleryUI.State.Working:
+                    // While its packages change, the card reopens their dialog (that cannot stop halfway).
+                    if (GalleryPackagesDialog.Shows(card.Job)) OpenQuestion(card, card.Job); else GalleryInstaller.Cancel(card.Job);
+                    break;
             }
         }
 
@@ -363,9 +376,23 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             card.Bind(card.Asset, card.Installed, job);
         }
 
+        private GallerySheet packagesSheet;
+        private string packagesJob;
+
         private void OpenQuestion(GalleryCard card, GalleryJob job)
         {
-            if (job == null || !job.Waiting) return;
+            if (job == null) return;
+            if (GalleryPackagesDialog.Shows(job))
+            {
+                // One dialog per plan: it follows the job by itself.
+                if (packagesSheet != null && packagesJob == job.id && packagesSheet.panel != null) return;
+                GallerySheet open = null;
+                open = GallerySheet.Open(sheets, card, 480f, () => { if (packagesSheet == open) { packagesSheet = null; packagesJob = null; } });
+                packagesSheet = open; packagesJob = job.id;
+                GallerySheets.Question(open.Content, job, null, () => open.Close());
+                return;
+            }
+            if (!job.Waiting) return;
             GallerySheet sheet = null;
             sheet = GallerySheet.Open(sheets, card, 420f);
             GallerySheets.Question(sheet.Content, job, accept => { sheet.Close(); GalleryInstaller.Answer(job, accept); });

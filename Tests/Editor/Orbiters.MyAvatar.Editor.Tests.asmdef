@@ -1,8 +1,11 @@
 {
   "name": "Orbiters.MyAvatar.Editor.Tests",
-  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "Orbiters.Toolkit", "Orbiters.Toolkit.Editor", "Orbiters.Toolkit.VRChat", "Orbiters.Toolkit.Editor.VRChat", "VRC.SDKBase"],
+  "references": ["Orbiters.MyAvatar", "Orbiters.MyAvatar.Editor", "Orbiters.Toolkit", "Orbiters.Toolkit.Editor", "Orbiters.Toolkit.VRChat", "Orbiters.Toolkit.Editor.VRChat", "Orbiters.Toolkit.Editor.Vpm", "VRC.SDKBase"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "overrideReferences": true,
-  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll", "VRCSDK3A.dll", "VRC.Dynamics.dll", "VRC.SDK3.Dynamics.PhysBone.dll"]
+  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll", "VRCSDK3A.dll", "VRC.Dynamics.dll", "VRC.SDK3.Dynamics.PhysBone.dll"],
+  "versionDefines": [
+    { "name": "com.vrchat.core.vpm-resolver", "expression": "0.1.0", "define": "MYAVATAR_VPM" }
+  ]
 }

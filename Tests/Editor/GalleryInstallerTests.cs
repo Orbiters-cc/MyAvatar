@@ -493,5 +493,155 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.Throws<IOException>(() => GalleryJournal.Save(new GalleryJob { id = Guid.NewGuid().ToString("N") }));
             Assert.DoesNotThrow(() => LibraryStore.Write("a-cache.json", new List<int> { 1 }));
         }
+
+#if MYAVATAR_VPM
+        // ---- Packages the installation changes first: approved in their dialog, applied, resumed after Unity reloads ----
+
+        private static readonly System.Reflection.FieldInfo JournalJobs = typeof(GalleryJournal).GetField("jobs", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+
+        // What a reload leaves: the journal on disk.
+        private static void ForgetJournalInMemory() => JournalJobs.SetValue(null, null);
+
+        private sealed class PackageHooks : IDisposable
+        {
+            private readonly Func<GalleryJob, System.Threading.CancellationToken, Task<Orbiters.Toolkit.Editor.Vpm.VpmDependencyPlan>> plan = GalleryInstaller.PlanPackages;
+            private readonly Func<Orbiters.Toolkit.Editor.Vpm.VpmDependencyPlan, Action<Orbiters.Toolkit.Editor.Vpm.VpmApplyProgress>, Task<Orbiters.Toolkit.Editor.Vpm.VpmDependencyInstallResult>> apply = GalleryInstaller.ApplyPackages;
+            private readonly Action reload = GalleryInstaller.ReloadPackages;
+            public void Dispose() { GalleryInstaller.PlanPackages = plan; GalleryInstaller.ApplyPackages = apply; GalleryInstaller.ReloadPackages = reload; }
+        }
+
+        private GalleryAsset AssetNeedingTheNewSdk(int id, TestVpmCatalog catalog)
+        {
+            var (package, guid, _) = Package("Visor" + id);
+            var asset = Asset(id, package, guid);
+            asset.fit.variants[0].dependencies = new List<GalleryDependency> { new GalleryDependency { id = "com.vrchat.avatars", range = ">=3.10.3", displayName = "VRChat SDK - Avatars" } };
+            GalleryInstaller.PlanPackages = (job, cancellation) => Task.FromResult(Orbiters.Toolkit.Editor.Vpm.VpmDependencyPlan.ResolveForApproval(TestVpmCatalog.N4N0, catalog));
+            return asset;
+        }
+
+        private static void Install(TestVpmCatalog catalog, Orbiters.Toolkit.Editor.Vpm.VpmDependencyPlan plan)
+        {
+            foreach (var step in plan.Changes)
+                if (step.Action == Orbiters.Toolkit.Editor.Vpm.VpmStepAction.Remove) catalog.installed.Remove(step.Id); else catalog.installed[step.Id] = step.To;
+        }
+
+        [UnityTest] public IEnumerator ThePackagePlanIsApprovedAppliedRetriedAndResumedAfterTheReload()
+        {
+            using (new PackageHooks())
+            {
+                var avatar = Avatar();
+                var catalog = TestVpmCatalog.SampleProject();
+                var asset = AssetNeedingTheNewSdk(9120, catalog);
+                int applies = 0;
+                Orbiters.Toolkit.Editor.Vpm.VpmDependencyPlan retried = null;
+                GalleryJob atReload = null;
+                GalleryInstaller.ApplyPackages = (plan, progress) =>
+                {
+                    applies++;
+                    progress(new Orbiters.Toolkit.Editor.Vpm.VpmApplyProgress { Step = 1, Count = 3, Text = "Update VRChat SDK - Base 3.7.5 → 3.10.6…", Fraction = 0.3f });
+                    if (applies == 1)
+                    {
+                        // The SDK's base changed, then VRCFury's download failed.
+                        catalog.installed["com.vrchat.base"] = "3.10.6";
+                        return Task.FromResult(new Orbiters.Toolkit.Editor.Vpm.VpmDependencyInstallResult { Errors = { "VPM could not install VRCFury 1.1436.0." }, InstalledPackageIds = { "com.vrchat.base" } });
+                    }
+                    retried = plan;
+                    Install(catalog, plan);
+                    return Task.FromResult(new Orbiters.Toolkit.Editor.Vpm.VpmDependencyInstallResult { Success = true });
+                };
+                string id = null;
+                GalleryInstaller.ReloadPackages = () => { ForgetJournalInMemory(); atReload = GalleryJournal.All.First(j => j.id == id); };
+
+                var job = GalleryInstaller.Start(avatar, asset, asset.fit.release, asset.fit.variants[0], null);
+                id = job.id;
+                yield return Until(() => Job(id).Waiting || Job(id).Terminal);
+                var waiting = Job(id);
+                Assert.That(waiting.waiting, Is.EqualTo(GalleryInstaller.PackagesQuestion), waiting.error);
+                Assert.That(GalleryPackagesDialog.Shows(waiting), Is.True);
+                Assert.That(waiting.packages.state, Is.EqualTo(GalleryPackagePlan.Review));
+                Assert.That(waiting.packages.rows.Single(r => r.id == "com.vrchat.avatars").Versions, Is.EqualTo("3.7.5 → 3.10.6"));
+                Assert.That(waiting.questionSummary, Is.EqualTo(waiting.packages.Title(waiting.assetName) + "."));
+                Assert.That(GalleryUI.StateOf(asset, null, waiting, out _), Is.EqualTo(GalleryUI.State.Question), "the card asks, it does not fail");
+
+                GalleryInstaller.Answer(waiting, true);
+                yield return Until(() => Job(id).Waiting || Job(id).Terminal);
+                var failed = Job(id);
+                Assert.That(failed.stage, Is.EqualTo(GalleryJob.Dependencies), "a failure stays in the dialog");
+                Assert.That(failed.packages.state, Is.EqualTo(GalleryPackagePlan.Failed));
+                Assert.That(failed.packages.error, Is.EqualTo("VPM could not install VRCFury 1.1436.0."));
+                Assert.That(failed.packages.changed, Is.EqualTo(new[] { "VRChat SDK - Base 3.10.6" }));
+                Assert.That(failed.packages.Primary, Is.EqualTo("Retry"));
+
+                GalleryInstaller.ApprovePackages(failed);
+                yield return Until(() => Job(id).Terminal);
+                Assert.That(Job(id).stage, Is.EqualTo(GalleryJob.Complete), Job(id).error);
+                Assert.That(applies, Is.EqualTo(2));
+                Assert.That(retried.Changes.Any(s => s.Id == "com.vrchat.base"), Is.False, "Retry goes on from what was already changed, without asking again");
+                Assert.That(atReload, Is.Not.Null, "Unity was asked to take in the packages");
+                Assert.That(atReload.stage, Is.EqualTo(GalleryJob.Dependencies));
+                Assert.That(atReload.installingDependencies, Is.True, "saved before the reload: the resumed job checks the plan again");
+                Assert.That(atReload.packages.state, Is.EqualTo(GalleryPackagePlan.Reloading));
+                Assert.That(GalleryPackagesDialog.Shows(atReload), Is.True, "the dialog comes back after the reload");
+                Assert.That(Job(id).packages, Is.Null);
+                Assert.That(avatar.GetComponentsInChildren<OrbitersAttachment>(true).Length, Is.EqualTo(1));
+            }
+        }
+
+        [UnityTest] public IEnumerator AJobSavedBeforeTheReloadResumesFromTheJournal()
+        {
+            using (new PackageHooks())
+            {
+                var avatar = Avatar();
+                var catalog = TestVpmCatalog.SampleProject();
+                var asset = AssetNeedingTheNewSdk(9121, catalog);
+                GalleryInstaller.ApplyPackages = (plan, progress) => { Install(catalog, plan); return Task.FromResult(new Orbiters.Toolkit.Editor.Vpm.VpmDependencyInstallResult { Success = true }); };
+                GalleryInstaller.ReloadPackages = () => { };
+                var job = GalleryInstaller.Start(avatar, asset, asset.fit.release, asset.fit.variants[0], null);
+                string id = job.id;
+                yield return Until(() => Job(id).Waiting || Job(id).Terminal);
+                // As the journal is when Unity reloads after applying (the packages did not all come).
+                var saved = Job(id);
+                saved.waiting = null; saved.questionLines.Clear(); saved.installingDependencies = true;
+                saved.accepted.Add(GalleryInstaller.PackagesQuestion);
+                saved.packages.state = GalleryPackagePlan.Reloading;
+                GalleryJournal.Save(saved);
+                ForgetJournalInMemory();
+
+                var loaded = Job(id);
+                Assert.That(loaded, Is.Not.SameAs(saved));
+                Assert.That(loaded.packages.rows.Count, Is.EqualTo(saved.packages.rows.Count), "the plan survives the reload");
+                Assert.That(GalleryPackagesDialog.Shows(loaded), Is.True);
+                GalleryInstaller.Resume();
+                yield return Until(() => Job(id).Waiting || Job(id).Terminal);
+                Assert.That(Job(id).packages.state, Is.EqualTo(GalleryPackagePlan.Failed), "what the plan showed is not there");
+                Assert.That(Job(id).packages.error, Does.StartWith("These are still not as the plan showed: "));
+
+                // Retry applies what is still missing and the installation goes on.
+                GalleryInstaller.ApprovePackages(Job(id));
+                yield return Until(() => Job(id).Terminal);
+                Assert.That(Job(id).stage, Is.EqualTo(GalleryJob.Complete), Job(id).error);
+                Assert.That(catalog.installed["com.vrchat.avatars"], Is.EqualTo("3.10.6"));
+            }
+        }
+
+        [UnityTest] public IEnumerator CancelInThePackageDialogChangesNothing()
+        {
+            using (new PackageHooks())
+            {
+                var avatar = Avatar();
+                var catalog = TestVpmCatalog.SampleProject();
+                var asset = AssetNeedingTheNewSdk(9122, catalog);
+                bool applied = false;
+                GalleryInstaller.ApplyPackages = (plan, progress) => { applied = true; return Task.FromResult(new Orbiters.Toolkit.Editor.Vpm.VpmDependencyInstallResult { Success = true }); };
+                var job = GalleryInstaller.Start(avatar, asset, asset.fit.release, asset.fit.variants[0], null);
+                yield return Until(() => Job(job.id).Waiting || Job(job.id).Terminal);
+                GalleryInstaller.Answer(Job(job.id), false);
+                Assert.That(Job(job.id).stage, Is.EqualTo(GalleryJob.Cancelled));
+                Assert.That(Job(job.id).status, Is.EqualTo("Cancelled. Nothing was added to the avatar."));
+                Assert.That(applied, Is.False);
+                Assert.That(GalleryPackagesDialog.Shows(Job(job.id)), Is.False);
+            }
+        }
+#endif
     }
 }

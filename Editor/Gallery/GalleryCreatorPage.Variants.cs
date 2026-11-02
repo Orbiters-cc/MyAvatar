@@ -184,10 +184,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (!string.IsNullOrEmpty(variant.testJob))
             {
                 var job = GalleryJournal.All.FirstOrDefault(j => j.id == variant.testJob);
-                if (job != null && job.Waiting)
+                if (job != null && (job.Waiting || GalleryPackagesDialog.Shows(job)))
                 {
                     var question = GalleryUI.Box("creator-report", card);
-                    GallerySheets.Question(question, job, accept => { GalleryInstaller.Answer(job, accept); Build(); });
+                    GallerySheets.Question(question, job, accept => { GalleryInstaller.Answer(job, accept); Build(); }, () => schedule.Execute(Build));
                 }
                 else if (job != null) GalleryUI.Text("Test: " + job.status, "creator-report__line" + (job.stage == GalleryJob.Failed ? " creator-report__line--error" : ""), card);
             }

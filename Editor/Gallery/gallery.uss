@@ -326,3 +326,28 @@
 .gallery-creator-window__scroll { flex-grow: 1; }
 .gallery-creator-window .gallery-page { padding: 18px 22px 24px 22px; }
 .creator-picker-note { margin: 4px 2px 0 2px; }
+
+/* ---- Package dialog: the packages a gallery installation changes first (GalleryPackagesDialog) ---- */
+.packages-dialog__eyebrow--error { color: #ff6b6b; }
+.packages-dialog__error { color: #ffb4b4; }
+.packages-dialog__heading { margin: 14px 0 6px 2px; padding: 0; font-size: 10px; letter-spacing: 0.8px; -unity-font-style: bold; color: #9a9a9a; }
+.packages-dialog__list { padding: 4px 10px; border-radius: 12px; background-color: #151515; }
+.packages-dialog__row { flex-direction: row; align-items: flex-start; padding: 7px 0; border-bottom-width: 1px; border-color: rgba(255, 255, 255, 0.05); }
+.packages-dialog__row--last { border-bottom-width: 0; }
+.packages-dialog__row--kept { opacity: 0.6; }
+.packages-dialog__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; margin-right: 10px; }
+.packages-dialog__name { margin: 0; padding: 0; font-size: 11px; -unity-font-style: bold; color: #ececec; white-space: normal; }
+.packages-dialog__why { margin: 2px 0 0 0; padding: 0; font-size: 10px; color: #8c8c8c; white-space: normal; }
+.packages-dialog__side { align-items: flex-end; flex-shrink: 0; max-width: 45%; }
+.packages-dialog__tag { height: 18px; margin: 0; padding: 0 8px; border-radius: 9px; font-size: 9px; -unity-font-style: bold; -unity-text-align: middle-center; color: #d6d6d6; background-color: #2e2e2e; }
+.packages-dialog__tag--install { color: #06140c; background-color: #00DA6D; }
+.packages-dialog__tag--update { color: #ffffff; background-color: #8a7dff; }
+.packages-dialog__tag--downgrade { color: #1a1205; background-color: #ffb020; }
+.packages-dialog__tag--remove, .packages-dialog__tag--blocked, .packages-dialog__tag--missing { color: #ffffff; background-color: #e25555; }
+.packages-dialog__versions { margin: 4px 0 0 0; padding: 0; font-size: 10px; color: #c4c4c4; -unity-text-align: middle-right; white-space: normal; }
+.packages-dialog__note { margin: 10px 2px 0 2px; padding: 0; font-size: 10px; color: #9a9a9a; white-space: normal; }
+.packages-dialog__note--warning { padding: 8px 10px; margin: 10px 0 0 0; border-radius: 10px; color: #ffcf7a; background-color: rgba(255, 176, 32, 0.08); }
+.packages-dialog__progress { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background-color: rgba(0, 218, 109, 0.08); }
+.packages-dialog__bar { height: 6px; border-radius: 3px; background-color: rgba(0, 218, 109, 0.18); overflow: hidden; }
+.packages-dialog__fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background-color: #00DA6D; transition-property: width; transition-duration: 0.3s; }
+.packages-dialog__progress-label { margin: 7px 0 0 0; padding: 0; font-size: 11px; color: #d6f5e6; white-space: normal; }

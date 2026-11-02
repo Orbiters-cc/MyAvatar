@@ -1,5 +1,22 @@
 # My Avatar
 
+## Unreleased
+
+- **A gallery item that needs another VRChat SDK asks, in one dialog, instead of failing.** Installing N4N0 1.0.19 on a
+  project with SDK 3.7.5 and tools that only work below 3.8 stopped on its card ("VRChat SDK - Base needs your
+  attention… update it with the VRChat Creator Companion"). The gallery now opens its package dialog over the page:
+  every package with from → to, added or removed, and why, in sections (VRChat SDK, Needed by the item, Other tools in
+  this project, Already installed); the repositories it adds; a warning for a tool it must remove (only when no version
+  of it works). "Update packages and continue" applies the whole plan with its progress in the dialog, Unity reloads
+  its scripts, and the installation goes on by itself: the plan is saved in the job's journal, so the dialog comes back
+  after the reload. A failure stays in the dialog with Retry (an approval holds for the changes it showed; what was
+  already changed is not redone); a package that blocks every plan is named with what to do and Check again. Enter
+  presses the primary button, Escape closes the dialog (the card reopens it), Cancel stops the installation.
+- **No compiler warnings on SDK 3.7.5**: the gallery's capped download keeps its bytes apart from `DownloadHandler.data`,
+  the sheet's scrim colour is `Transparent` (not hiding `VisualElement.Clear`), the gallery cache follows build target
+  changes through `IActiveBuildTargetChanged`, and the SDK thumbnail's offered picture exists only where its SDK block
+  does (3.7.6+).
+
 ## 0.9.19 — 2026-11-01
 
 - **My Avatar loads on VRChat SDK 3.7.x.** Its editor did not compile there (an avatar's My Avatar component showed no

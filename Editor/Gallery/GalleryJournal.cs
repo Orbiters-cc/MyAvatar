@@ -27,11 +27,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         public List<GalleryDependency> dependencies = new List<GalleryDependency>();
         public GalleryManifest manifest = new GalleryManifest();
         public string stage = Queued;
-        /// <summary>What the job waits for the user to decide: "budget", "code", "dependencies", "conflicts"; null otherwise.</summary>
+        /// <summary>What the job waits for the user to decide: "budget", "code", "packages", "conflicts"; null otherwise.</summary>
         public string waiting;
         /// <summary>Details for the question (code files, files replaced, the dependency plan's lines).</summary>
         public List<string> questionLines = new List<string>();
         public string questionSummary;
+        /// <summary>
+        /// The packages the project must change first, as their dialog shows them, from the plan's review to its end (it is
+        /// cleared once the project has them). Kept here, the dialog comes back after the reload a VRChat SDK update causes.
+        /// </summary>
+        public GalleryPackagePlan packages;
         /// <summary>Questions the user accepted; a resumed job does not ask them again.</summary>
         public List<string> accepted = new List<string>();
         /// <summary>A step changing the project started: after a reload or restart it is checked, never run twice blindly.</summary>
