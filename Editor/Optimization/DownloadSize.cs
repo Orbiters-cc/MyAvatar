@@ -100,7 +100,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// there for objects the copy no longer says.
         /// </summary>
         internal static Parts Of(GameObject root, bool mobile = false, Func<Texture, TextureOptimization.TexturePlan> planned = null,
-            Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null)
+            Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null,
+            List<EditorCurveBinding> bindings = null)
         {
             var parts = new Parts();
             var meshes = new Dictionary<Mesh, ICollection<string>>();
@@ -156,7 +157,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
             foreach (var clip in clips)
             {
-                long raw = ClipBytes(clip);
+                long raw = ClipBytes(clip, bindings);
                 parts.Animations += (long)(raw * Clips);
                 parts.Raw += raw;
                 Add(PieceKind.Animation, clip.name, null, clip, (long)(raw * Clips));
@@ -529,16 +530,21 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         // ---- Animations and sounds ----
 
-        private static long ClipBytes(AnimationClip clip)
+        // The clip's stored size; its bindings go in <paramref name="bindings"/> when asked (a rank plan's facts read them).
+        private static long ClipBytes(AnimationClip clip, List<EditorCurveBinding> bindings = null)
         {
             long bytes = 256;
             foreach (var binding in AnimationUtility.GetCurveBindings(clip))
             {
                 var curve = AnimationUtility.GetEditorCurve(clip, binding);
                 bytes += 48 + (curve != null ? curve.length * 16L : 0);
+                bindings?.Add(binding);
             }
             foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
+            {
                 bytes += 48 + AnimationUtility.GetObjectReferenceCurve(clip, binding).Length * 8L;
+                bindings?.Add(binding);
+            }
             return bytes;
         }
 

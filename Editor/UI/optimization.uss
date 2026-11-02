@@ -151,6 +151,7 @@
 .opt-step__title { margin: 0; padding: 0; color: #f2f2f2; font-size: 11px; -unity-font-style: bold; white-space: normal; flex-shrink: 1; }
 .opt-step__tag { height: 16px; margin: 0 0 0 6px; padding: 0 7px; border-radius: 8px; color: #00DA6D; background-color: rgba(0, 218, 109, 0.12); font-size: 9px;
     -unity-font-style: bold; -unity-text-align: middle-center; }
+.opt-step__tag--estimated { color: #b8c4bd; background-color: rgba(255, 255, 255, 0.07); }
 .opt-step__detail { margin: 2px 0 0 0; padding: 0; color: #8f8f8f; font-size: 10px; white-space: normal; }
 .mcb-button.opt-button.opt-step__button { height: 26px; min-height: 26px; margin: 0 0 0 10px; padding: 0 14px; border-radius: 13px; flex-shrink: 0; }
 .mcb-button.opt-button.opt-step__button--apply { background-color: #00DA6D; color: #06140c; -unity-font-style: bold; border-width: 0; }

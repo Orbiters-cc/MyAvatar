@@ -78,6 +78,13 @@ namespace Orbiters.MyAvatar.Editor
         /// on its most demanding use (where it is stretched the least). Kept until the avatar's renderers, meshes, scale,
         /// blendshape weights, materials or imported assets change.
         /// </summary>
+        /// <summary>
+        /// What <see cref="MetersPerTexture"/> measured for the avatar as it is now, or null when it hasn't (nothing is
+        /// measured here: a rank plan's estimates only read it).
+        /// </summary>
+        internal static Dictionary<Texture, float> Known(MyAvatar avatar) =>
+            avatar && Cache.TryGetValue(avatar.GetInstanceID(), out var cached) && cached.Key == TextureOptimization.ChangeKey(avatar) ? cached.Meters : null;
+
         internal static Dictionary<Texture, float> MetersPerTexture(MyAvatar avatar, List<TextureSlot> slots)
         {
             string key = TextureOptimization.ChangeKey(avatar);

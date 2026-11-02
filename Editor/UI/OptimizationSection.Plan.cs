@@ -102,7 +102,7 @@ namespace Orbiters.MyAvatar.Editor
             picker.SetIndex(Array.IndexOf(RankPlan.Targets, target));
             head.Add(picker);
 
-            var steps = RankSteps.For(Settings, result.Upload, plans, s => OptimizationEstimate.Known(avatar, s)?.Upload);
+            var steps = RankSteps.For(Settings, result.Upload, plans, s => OptimizationEstimate.Known(avatar, s)?.Upload, result.Now.Facts, result.Report?.Polygons ?? 0);
             int needed = RankSteps.Needed(steps, plans, out string shortOf);
             var summary = new Label(Summary(plans, target, needed, shortOf, steps)); summary.AddToClassList("opt-panel__text"); summary.AddToClassList("opt-plan__summary");
             summary.EnableInClassList("opt-plan__summary--done", plans.All(p => p.Reached));
@@ -136,7 +136,7 @@ namespace Orbiters.MyAvatar.Editor
                     shownPlan = null;
                     Refresh();
                 });
-                toggle.AddToClassList("opt-plan__platforms");
+                toggle.AddToClassList("opt-button"); toggle.AddToClassList("opt-plan__platforms");
                 toggle.tooltip = "The other platform shows on its own when this avatar has a version for it (a blueprint uploaded there, or per-platform overrides).";
                 card.Add(toggle);
             }
@@ -149,10 +149,13 @@ namespace Orbiters.MyAvatar.Editor
             if (plans.All(p => p.Reached)) return name + " or better on " + where + " at upload: nothing holds it back.";
             var blocking = plans.SelectMany(p => p.Blocking).Select(g => g.Category).Distinct().Count();
             string held = blocking == 1 ? "One category holds it back" : blocking + " categories hold it back";
-            if (needed > 0) return held + ". " + (needed == 1 ? "One step reaches " : needed + " steps reach ") + name + " on " + where + ".";
-            bool untried = steps.Any(s => s.Kind == RankStep.Kinds.Setting && !s.Known);
+            // Estimated steps among those counted: the count is an estimate too.
+            bool about = steps.Where(s => s.Known && s.Kind != RankStep.Kinds.Note && s.Closes > 0f).Take(Math.Max(0, needed)).Any(s => s.Estimated);
+            if (needed > 0) return held + ". " + (about ? "About " : "") + (needed == 1 ? (about ? "one step reaches " : "One step reaches ") : needed + " steps reach ") +
+                                   name + " on " + where + (about ? " (estimated)." : ".");
+            bool untried = steps.Any(s => s.Kind == RankStep.Kinds.Setting && (!s.Known || s.Estimated));
             return held + (shortOf != null ? ". With the steps measured so far, " + shortOf : "") + "." +
-                   (untried ? " A setting not tried yet may close the rest: its savings show once it's on." : "");
+                   (untried ? " A setting not tried yet may do better than its estimate: it's measured once it's on." : "");
         }
 
         // One platform: its rank at upload against the target, and a bar for each category that holds it back (or the
@@ -296,13 +299,19 @@ namespace Orbiters.MyAvatar.Editor
             var title = new Label(step.Title); title.AddToClassList("opt-step__title"); titleRow.Add(title);
             if (step.ReachesAlone)
             {
-                var reaches = new Label("reaches " + RankSteps.RankName(plans[0].Target)); reaches.AddToClassList("opt-step__tag"); titleRow.Add(reaches);
+                var reaches = new Label((step.Estimated ? "may reach " : "reaches ") + RankSteps.RankName(plans[0].Target)); reaches.AddToClassList("opt-step__tag");
+                reaches.EnableInClassList("opt-step__tag--estimated", step.Estimated);
+                if (step.Estimated) reaches.tooltip = "Estimated from the avatar as it is: it's measured once the setting is on.";
+                titleRow.Add(reaches);
             }
             string saves = step.Kind == RankStep.Kinds.Setting && step.Known ? RankSteps.Describe(step, plans) : null;
-            string detail = step.Kind == RankStep.Kinds.Setting
-                ? (step.Known ? (string.IsNullOrEmpty(saves) ? "Measured: it saves nothing that holds the rank." : saves + " at upload, measured.")
-                    : step.Detail + " Not measured yet: it lowers " + string.Join(", ", step.Touches.Take(3).Select(c => RankPlan.NameOf(c).ToLowerInvariant())) + ".")
-                : step.Detail;
+            string lowers = string.Join(", ", step.Touches.Take(3).Select(c => RankPlan.NameOf(c).ToLowerInvariant()));
+            string detail = step.Kind != RankStep.Kinds.Setting ? step.Detail
+                : step.Estimated
+                    ? (string.IsNullOrEmpty(saves) ? step.Detail + " Estimated: little that holds the rank (it lowers " + lowers + "); measured once it's on."
+                        : "About " + saves + " at upload, estimated: measured once it's on. " + step.Detail)
+                : step.Known ? (string.IsNullOrEmpty(saves) ? "Measured: it saves nothing that holds the rank." : saves + " at upload, measured.")
+                : step.Detail + " Not measured yet: it lowers " + lowers + ".";
             var text = new Label(detail); text.AddToClassList("opt-step__detail"); texts.Add(text);
             if (step.Kind == RankStep.Kinds.Setting)
             {

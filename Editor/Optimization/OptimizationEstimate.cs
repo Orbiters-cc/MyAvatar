@@ -46,6 +46,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public int DesktopShaderMaterials;
             public List<string> DesktopShaders = new List<string>();
 
+            /// <summary>The avatar's renderers and textures as they are (only on the estimate of the avatar now): what a rank plan
+            /// estimates the savings of settings not measured yet from.</summary>
+            public RankFacts Facts;
+
             public RankStats Rank(bool mobile) => mobile ? MobileRank : PcRank;
             public DownloadSize.Parts Parts(bool mobile) => mobile ? QuestParts : PcParts;
         }
@@ -340,7 +344,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 }
                 // Written once for the job's textures.
                 DownloadSize.SaveMeasures();
-                if (job.Step == 0) job.Result.Now = Measure(root, Kept(root, McbPrunes), null, null);
+                if (job.Step == 0) job.Result.Now = Measure(root, Kept(root, McbPrunes), null, null, facts: job.Avatar);
                 // Off: the upload is the avatar as it is, no copy needed.
                 if (job.Step == 1 || job.Passes == OptimizationPasses.None)
                 {
@@ -594,7 +598,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         // A copy is measured with the avatar it was copied from (sceneRoot): what the copy no longer says (which item an
         // object belongs to) is read there.
         private static Snapshot Measure(GameObject root, Func<SkinnedMeshRenderer, ICollection<string>> kept, TextureOptimization.Plan pcTextures,
-            TextureOptimization.Plan questTextures, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null)
+            TextureOptimization.Plan questTextures, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null, MyAvatar facts = null)
         {
             float pcMegabytes = TextureMegabytes(root, false, pcTextures), mobileMegabytes = TextureMegabytes(root, true, questTextures);
             var pc = Stats(root, false, pcMegabytes);
@@ -610,7 +614,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 Colliders = pc.physBone?.colliderCount ?? 0,
                 BlendShapes = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).Sum(r => r.sharedMesh.blendShapeCount),
             };
-            var pcParts = DownloadSize.Of(root, false, pcTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)pcTextures.For, kept, sizes, sceneRoot);
+            // The avatar as it is also keeps its facts, from the bindings the download reads anyway.
+            var bindings = facts ? new List<EditorCurveBinding>() : null;
+            var pcParts = DownloadSize.Of(root, false, pcTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)pcTextures.For, kept, sizes, sceneRoot, bindings);
+            if (facts) snapshot.Facts = RankEstimates.Read(root, facts, bindings);
             var questParts = DownloadSize.Of(root, true, questTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)questTextures.For, kept, sizes, sceneRoot);
             snapshot.PcParts = pcParts; snapshot.QuestParts = questParts;
             // What a rank plan works from: each category of each platform, and what costs most in each (read once, textures

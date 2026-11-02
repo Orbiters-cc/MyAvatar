@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Reach a rank estimates what a setting not tried yet would save.** A level or Custom switch never measured showed
+  "Not measured yet"; it now says "About −685 polygons · −1 material slot · −1 mesh at upload, estimated" (and "may
+  reach Good" when it would), and the measured figures replace it once that setting's estimate is in. Pure arithmetic
+  over what the estimate of the avatar as it is reads anyway (no new hidden build): each renderer's triangles, whether it
+  shows at rest, whether an animation switches it or changes it otherwise, whether something points at it or animates
+  its blendshapes (the descriptor's visemes and eyelids, VRCFury and Modular Avatar components, blendshape curves) and
+  whether a constraint moves it, from the clips' bindings the download estimate reads; and each texture's build size and
+  memory. Textures follow the size rule for the distance (`TextureDensity.Cap`, with the meters an earlier estimate
+  measured, else the body's 2048 px and the others' 512 px at 1 m), halved surface maps and Quest's half-size ASTC;
+  polygons a share of each mesh of 2,000 triangles or more for the budget (1.5% at ½ mm to 12% at 8 mm, divided by
+  1 + its blendshapes / 4), scaled to what the current estimate simplified when it simplified any; merges by Mesh Merge's
+  rules (what something points at stays and the meshes always shown join it; with toggled meshes, each mesh one toggle
+  shows and hides joins it when that rates skinned meshes or meshes better, not when its animations change it otherwise,
+  a constraint moves it or a build tool names it); objects hidden at rest that nothing shows (nor a build tool names).
+  On MasculineCanine at Off: Big estimated at −685 polygons, −1 material slot, −1 mesh; measured −194 polygons, −1
+  material slot.
 - **"Stop watching renames" on the card's animation notice** switches the watcher off (Orbiters settings > Features >
   Toolkit turns it back on).
 - **Big merges the always-shown meshes that animate only their materials, the same way** (Toolkit's `MergeStill`, given

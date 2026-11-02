@@ -244,6 +244,139 @@ namespace Orbiters.MyAvatar.Editor.Tests
             StringAssert.Contains("on Quest", shortOf);
         }
 
+        // ---- Estimates of settings not measured yet ----
+
+        private static RankFacts Facts(params RendererFact[] renderers) => new RankFacts { Renderers = renderers.ToList() };
+
+        private static RendererFact Mesh(string path, int triangles, bool skinned = true, bool shown = true, bool toggled = false, int shapes = 0) =>
+            new RendererFact { Path = path, Skinned = skinned, Shown = shown, Toggled = toggled, Triangles = triangles, BlendShapes = shapes, Materials = 1 };
+
+        private static OptimizationEstimate.Snapshot Upload(int skinned, int meshes, int polygons, float textures = 0f)
+        {
+            var values = new[] { (AvatarPerformanceCategory.SkinnedMeshCount, (float)skinned), (AvatarPerformanceCategory.MeshCount, (float)meshes),
+                (AvatarPerformanceCategory.PolyCount, (float)polygons), (AvatarPerformanceCategory.TextureMegabytes, textures) };
+            return new OptimizationEstimate.Snapshot { PcRank = Stats(false, values), MobileRank = Stats(true, values) };
+        }
+
+        [Test] public void TexturesAreEstimatedByTheDistanceRule()
+        {
+            var texture = new TextureFact { Name = "Shirt", Width = 2048, Height = 2048, PcBytes = 4 << 20, MobileBytes = 4 << 20 };
+            // Not measured: the sizes My Avatar uses at one meter (512 px for all but the body), scaled with the distance.
+            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 1f), Is.EqualTo((4 << 20) / 16));
+            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 3f), Is.EqualTo((4 << 20) / 256), "512 / 3 m: 128 px");
+            texture.Body = true;
+            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 1f), Is.EqualTo(4 << 20), "the body keeps 2048 px at 1 m");
+            // Measured meters: a texel per screen pixel from the distance (1,000 px per meter at 1 m, a tenth of slack).
+            texture.Body = false; texture.Meters = 1f;
+            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 1f), Is.EqualTo((4 << 20) / 4), "909 texels needed: 1024 px");
+            Assert.That(RankEstimates.Bytes(texture, false, false, false, false, 1f), Is.EqualTo(4 << 20), "no resize: as it is");
+            // Quest: half the size in ASTC 6x6, 1024 px at most.
+            long quest = RankEstimates.Bytes(new TextureFact { Width = 2048, Height = 2048, PcBytes = 4 << 20, MobileBytes = 4 << 20 }, true, false, false, true, 1f);
+            Assert.That(quest, Is.EqualTo((long)(1024d * 1024d * 4d / 3d * (128d / 36d) / 8d)));
+            var surface = new TextureFact { Width = 1024, Height = 1024, PcBytes = 1 << 20, MobileBytes = 1 << 20, Meters = 2f, Surface = true, Linear = true };
+            Assert.That(RankEstimates.Bytes(surface, false, true, true, false, 1f), Is.EqualTo((1 << 20) / 4), "metallic and roughness at half");
+        }
+
+        [Test] public void PolygonsAreEstimatedFromTrianglesAndScaledToWhatWasMeasured()
+        {
+            var facts = Facts(Mesh("Body", 10000, shapes: 40), Mesh("Coat", 6000), Mesh("Ring", 500));
+            var upload = Upload(3, 0, 16500);
+            var small = new UploadOptimization { level = OptimizationLevel.Small };
+            var saves = RankEstimates.Saves(facts, upload, 0, new UploadOptimization(), small, false);
+            float share = RankEstimates.Share(UploadOptimization.SmallPolygonQuality);
+            Assert.That(share, Is.EqualTo(.08f).Within(1e-4f), "4 mm");
+            Assert.That(saves[AvatarPerformanceCategory.PolyCount], Is.EqualTo(10000 * share / 11f + 6000 * share).Within(1f),
+                "40 blendshapes keep ten elevenths of the body; a mesh under 2,000 triangles is never simplified");
+            // Small measured 300 polygons fewer where the rule said 553: Big's estimate is scaled the same way.
+            float predictedSmall = 10000 * share / 11f + 6000 * share, predictedBig = (10000 / 11f + 6000) * RankEstimates.Share(UploadOptimization.BigPolygonQuality);
+            var big = RankEstimates.Saves(facts, upload, 300, small, new UploadOptimization { level = OptimizationLevel.Big }, false);
+            Assert.That(big[AvatarPerformanceCategory.PolyCount], Is.EqualTo(predictedBig * 300f / predictedSmall - 300f).Within(1f));
+            var none = RankEstimates.Saves(facts, upload, 0, small, new UploadOptimization { level = OptimizationLevel.Big }, false);
+            Assert.That(none.ContainsKey(AvatarPerformanceCategory.PolyCount), Is.False, "nothing simplified at 4 mm: no more expected at 8 mm");
+        }
+
+        [Test] public void MergesAreEstimatedByMeshMergesRules()
+        {
+            if (!AvatarBudget.Ready) Assert.Ignore("The VRChat SDK has not loaded its performance levels yet.");
+            var off = new UploadOptimization();
+            var big = new UploadOptimization { level = OptimizationLevel.Big };
+            // Body, hair and a prop always shown join one skinned mesh; a hat one toggle shows joins it when that rates better.
+            var facts = Facts(Mesh("Body", 100), Mesh("Hair", 100), Mesh("Prop", 10, skinned: false), Mesh("Hat", 10, toggled: true));
+            var saves = RankEstimates.Saves(facts, Upload(3, 1, 220), 0, off, big, false);
+            Assert.That(saves[AvatarPerformanceCategory.SkinnedMeshCount], Is.EqualTo(2f), "3 → 1");
+            Assert.That(saves[AvatarPerformanceCategory.MeshCount], Is.EqualTo(1f));
+            // A toggled mesh whose animations change its materials, or that a constraint moves, stays apart.
+            var animated = Mesh("Hat", 10, toggled: true); animated.Animated = true;
+            var kept = RankEstimates.Saves(Facts(Mesh("Body", 100), Mesh("Hair", 100), animated), Upload(3, 0, 210), 0, off, big, false);
+            Assert.That(kept[AvatarPerformanceCategory.SkinnedMeshCount], Is.EqualTo(1f));
+            // What the descriptor or a build tool points at, or whose shapes animate, stays: the others join it.
+            var body = Mesh("Body", 100); body.Referenced = true;
+            var joined = RankEstimates.Saves(Facts(body, Mesh("Hair", 100)), Upload(2, 0, 200), 0, off, big, false);
+            Assert.That(joined[AvatarPerformanceCategory.SkinnedMeshCount], Is.EqualTo(1f), "the hair joins the body");
+            var tail = Mesh("Tail", 100); tail.Referenced = true;
+            var apart = RankEstimates.Saves(Facts(body, tail), Upload(2, 0, 200), 0, off, big, false);
+            Assert.That(apart.ContainsKey(AvatarPerformanceCategory.SkinnedMeshCount), Is.False, "two that stay where they are");
+            // Hidden at rest and never shown: gone at upload with Small already, unless a build tool may show it.
+            var toggledByTool = Mesh("Mane", 80, shown: false); toggledByTool.Referenced = true;
+            var keptByTool = RankEstimates.Saves(Facts(Mesh("Body", 100), toggledByTool), Upload(2, 0, 180), 0, off,
+                new UploadOptimization { level = OptimizationLevel.Small }, false);
+            Assert.That(keptByTool.ContainsKey(AvatarPerformanceCategory.PolyCount), Is.False);
+            // Hidden at rest and never shown: gone at upload with Small already.
+            var hidden = RankEstimates.Saves(Facts(Mesh("Body", 100), Mesh("Old shirt", 50, shown: false)), Upload(2, 0, 150), 0, off,
+                new UploadOptimization { level = OptimizationLevel.Small }, false);
+            Assert.That(hidden[AvatarPerformanceCategory.SkinnedMeshCount], Is.EqualTo(1f));
+            Assert.That(hidden[AvatarPerformanceCategory.PolyCount], Is.EqualTo(50f));
+        }
+
+        [Test] public void AStepIsEstimatedUntilItsSettingsAreMeasured()
+        {
+            if (!AvatarBudget.Ready) Assert.Ignore("The VRChat SDK has not loaded its performance levels yet.");
+            float good = Limit(AvatarPerformanceCategory.SkinnedMeshCount, PerformanceRating.Good, false);
+            int count = (int)good + 3;
+            var facts = Facts(Enumerable.Range(0, count).Select(i => Mesh("Part" + i, 100)).ToArray());
+            var upload = Upload(count, 0, count * 100);
+            var plans = new List<RankPlan> { RankPlan.For(null, upload.PcRank, PerformanceRating.Good, false) };
+            var off = new UploadOptimization();
+
+            var estimated = RankSteps.For(off, upload, plans, _ => null, facts).Single(s => s.Title == "Big optimization");
+            Assert.That(estimated.Estimated, Is.True);
+            Assert.That(estimated.Pc[AvatarPerformanceCategory.SkinnedMeshCount], Is.EqualTo(count - 1f));
+            Assert.That(estimated.ReachesAlone, Is.True);
+
+            var measured = Upload(2, 0, count * 100);
+            var known = RankSteps.For(off, upload, plans, s => s.level == OptimizationLevel.Big ? measured : null, facts).Single(s => s.Title == "Big optimization");
+            Assert.That(known.Estimated, Is.False, "measured: the estimate gives way");
+            Assert.That(known.Pc[AvatarPerformanceCategory.SkinnedMeshCount], Is.EqualTo(count - 2f));
+        }
+
+        [Test] public void TheEstimateOfTheAvatarNowKeepsItsFacts()
+        {
+            Skinned(root.transform, "Body", 2400);
+            Skinned(root.transform, "Old shirt", 50).gameObject.SetActive(false);
+            var hat = Skinned(root.transform, "Hat", 30);
+            var clip = Own(new AnimationClip { name = "Hat toggle" });
+            clip.SetCurve("Hat", typeof(GameObject), "m_IsActive", AnimationCurve.Constant(0, 0, 0));
+            var fx = Own(new UnityEditor.Animations.AnimatorController());
+            fx.AddLayer("Hat");
+            fx.layers[0].stateMachine.AddState("On").motion = clip;
+            var descriptor = root.GetComponent<VRCAvatarDescriptor>();
+            descriptor.VisemeSkinnedMesh = root.transform.Find("Body").GetComponent<SkinnedMeshRenderer>();
+            descriptor.customizeAnimationLayers = true;
+            descriptor.baseAnimationLayers = new[] { new VRCAvatarDescriptor.CustomAnimLayer { type = VRCAvatarDescriptor.AnimLayerType.FX, animatorController = fx } };
+
+            var facts = Estimate().Now.Facts;
+            Assert.That(facts, Is.Not.Null);
+            Assert.That(facts.Renderers.Select(r => r.Path), Is.EquivalentTo(new[] { "Body", "Old shirt", "Hat" }));
+            Assert.That(facts.Renderers.Single(r => r.Path == "Hat").Toggled, Is.True);
+            Assert.That(facts.Renderers.Single(r => r.Path == "Old shirt").Shown, Is.False);
+            Assert.That(facts.Renderers.Single(r => r.Path == "Body").Triangles, Is.EqualTo(2400));
+            Assert.That(facts.Renderers.Single(r => r.Path == "Body").BlendShapes, Is.EqualTo(1));
+            Assert.That(facts.Renderers.Single(r => r.Path == "Body").Referenced, Is.True, "the descriptor's visemes");
+            Assert.That(facts.Renderers.Single(r => r.Path == "Old shirt").Referenced, Is.False);
+            Assert.That(facts.Textures, Is.Empty, "Standard materials without textures");
+            Assert.That(hat, Is.Not.Null);
+        }
+
         // ---- The last build, measured ----
 
         [Test] public void ABuildIsKeptApartFromTheEstimateAndKnowsWhenItIsOutOfDate()

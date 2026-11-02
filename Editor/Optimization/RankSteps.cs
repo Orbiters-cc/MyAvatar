@@ -32,7 +32,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         public float Closes;
         public bool ReachesAlone;
 
+        /// <summary>Its savings are known: measured, or estimated (<see cref="Estimated"/>).</summary>
         public bool Known => Pc != null || Mobile != null;
+        /// <summary>The savings are estimated from the avatar as it is (<see cref="RankEstimates"/>), not measured yet.</summary>
+        public bool Estimated;
         public Dictionary<Category, float> Saves(bool mobile) => mobile ? Mobile : Pc;
     }
 
@@ -94,8 +97,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// then by the share of the gap they close, then the cheapest (a setting before an item, an item before a manual
         /// change). <paramref name="known"/> gives the finished estimate of other settings, or null (tests pass their own).
         /// </summary>
+        /// <param name="facts">The avatar as it is (the estimate of now): settings never measured get estimated savings from it.</param>
+        /// <param name="removedPolygons">The polygons the current estimate removed (it scales the polygon estimate).</param>
         internal static List<RankStep> For(UploadOptimization current, OptimizationEstimate.Snapshot upload, IReadOnlyList<RankPlan> plans,
-            Func<UploadOptimization, OptimizationEstimate.Snapshot> known)
+            Func<UploadOptimization, OptimizationEstimate.Snapshot> known, RankFacts facts = null, int removedPolygons = 0)
         {
             var steps = new List<RankStep>();
             if (upload == null || plans.Count == 0 || plans.All(p => p.Reached)) return steps;
@@ -115,6 +120,17 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     step.Pc = Savings(upload.PcRank, measured.PcRank);
                     step.Mobile = Savings(upload.MobileRank, measured.MobileRank);
                     step.Touches.UnionWith(step.Pc.Keys.Concat(step.Mobile.Keys).Where(blocking.Contains));
+                }
+                else if (facts != null)
+                {
+                    // Never measured: estimated from the avatar as it is, until it is.
+                    var pc = RankEstimates.Saves(facts, upload, removedPolygons, current, settings, false);
+                    var mobile = RankEstimates.Saves(facts, upload, removedPolygons, current, settings, true);
+                    if (pc != null && mobile != null)
+                    {
+                        step.Pc = pc; step.Mobile = mobile; step.Estimated = true;
+                        step.Touches.UnionWith(pc.Keys.Concat(mobile.Keys).Where(blocking.Contains));
+                    }
                 }
                 if (step.Touches.Count > 0) steps.Add(step);
             }
