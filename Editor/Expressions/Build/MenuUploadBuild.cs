@@ -41,6 +41,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             /// <summary>VRCFury's "Next" items: the pages it splits menus of more than 8 items into.</summary>
             public readonly List<List<MenuPaths.Step>> Pages = new List<List<MenuPaths.Step>>();
             public Texture2D NextIcon;
+            /// <summary>The folders of the menu planned for (<see cref="MenuPaths.Folders"/>): another tool's at upload aren't among them.</summary>
+            public HashSet<string> Folders = new HashSet<string>(StringComparer.Ordinal);
             public bool Empty => Remove.Count == 0 && Parameters.Count == 0 && Icons.Count == 0 && NextIcon == null;
         }
 
@@ -91,7 +93,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             var built = MenuBuild.Run(inputs ?? MenuInputs.Read(avatar));
             // The menu VRChat receives: VRCFury's pages where it will split the menu.
             var paged = built.VrcFury ? MenuBuild.Paginate(built.Root, built.NextText, built.NextIcon) : built.Root;
-            var plan = new Plan();
+            var plan = new Plan { Folders = MenuPaths.Folders(paged) };
             foreach (var node in Removals(settings, built, out plan.Unresolved))
             {
                 var path = MenuPaths.PagedPath(paged, node.Id);
@@ -199,7 +201,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             int missing = plan.Unresolved;
             foreach (var path in plan.Remove)
             {
-                var found = MenuPaths.Find(menu, path);
+                // A tool the plan couldn't foresee (its own build pass) may have pushed the item into a new page.
+                var found = MenuPaths.Find(menu, path) ?? MenuPaths.FindMoved(menu, path, plan.Folders);
                 if (found == null || pages.Contains(found.Value.Control)) missing++; else gone.Add(found.Value);
             }
             foreach (var found in MenuPaths.Menus(menu).SelectMany(m => (m.controls ?? new List<VRCExpressionsMenu.Control>()).Select(c => new MenuPaths.Found(m, c))))

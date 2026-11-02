@@ -150,6 +150,59 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return found;
         }
 
+        /// <summary>
+        /// The folders of <paramref name="paged"/> by their path of names ("/Clothes", "/Clothes/Hats"): what
+        /// <see cref="FindMoved"/> knows the menu holds.
+        /// </summary>
+        public static HashSet<string> Folders(MenuPage paged)
+        {
+            var folders = new HashSet<string>(StringComparer.Ordinal);
+            var seen = new HashSet<MenuPage>();
+            void Visit(MenuPage page, string prefix)
+            {
+                if (page == null || !seen.Add(page)) return;
+                foreach (var node in page.Items)
+                {
+                    if (!node.IsFolder) continue;
+                    folders.Add(prefix + "/" + node.Name);
+                    Visit(node.Page, prefix + "/" + node.Name);
+                }
+            }
+            Visit(paged, "");
+            return folders;
+        }
+
+        /// <summary>
+        /// <see cref="Find"/>, and where an item isn't on its page, the one item of its name inside a folder of that page
+        /// <paramref name="known"/> doesn't list: a page a tool the plan couldn't foresee made at upload (Modular Avatar
+        /// splits a page of more than 8 items when lilycalInventory or FaceEmo added one). Two such items: none.
+        /// </summary>
+        public static Found? FindMoved(VRCExpressionsMenu root, IList<Step> path, ICollection<string> known)
+        {
+            var menu = root;
+            string prefix = "";
+            Found? found = null;
+            foreach (var step in path ?? Array.Empty<Step>())
+            {
+                var controls = menu?.controls;
+                if (controls == null) return null;
+                Found? here = Find(menu, new[] { step });
+                if (here == null && !step.Next)
+                {
+                    var moved = controls.Where(c => c != null && c.type == ControlType.SubMenu && c.subMenu != null && !known.Contains(prefix + "/" + (c.name ?? "")))
+                        .SelectMany(f => (f.subMenu.controls ?? new List<VRCExpressionsMenu.Control>()).Where(c => c != null && (c.name ?? "") == step.Name)
+                            .Select(c => new Found(f.subMenu, c))).Take(2).ToList();
+                    if (moved.Count == 1) here = moved[0];
+                }
+                if (here == null) return null;
+                found = here;
+                prefix += "/" + step.Name;
+                var control = here.Value.Control;
+                menu = control.type == ControlType.SubMenu ? control.subMenu : null;
+            }
+            return found;
+        }
+
         /// <summary>Every menu reached from <paramref name="root"/>, once each.</summary>
         public static List<VRCExpressionsMenu> Menus(VRCExpressionsMenu root)
         {

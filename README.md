@@ -6,6 +6,9 @@
   FaceEmo, Avatar Menu Creator for MA, AvatarPoseLibrary, EmotePrefab or Bavi Motion Patcher on the avatar, a quiet
   note says their menus aren't in the preview, with **Show the real build**: a hidden copy built as an upload builds
   it, its menu shown read only (kept until the avatar changes), then **Back to editing**.
+- **Remove default menu, and items left out, also when another tool reshuffles the menu.** A tool My Avatar doesn't
+  model (lilycalInventory, FaceEmo...) can add items at upload so that Modular Avatar pages the menu: the clean-up now
+  finds an item in the page it was pushed into instead of keeping it.
 - **The menu preview sorts an item's toggle where the build puts it.** An item placed on a bone moves under it just
   before VRCFury builds, and VRCFury sorts its toggle from there: the menu editor now shows it at that place too
   (found by the compatibility project on MasculineCanine; the preview and the real build agree at Off and Big).
