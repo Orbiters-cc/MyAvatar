@@ -80,6 +80,7 @@ namespace Orbiters.MyAvatar.Editor
                     Step(2, $"If {model.Item} is off, drag its arrows in the Scene view onto the blue body.");
                     var tightness = Step(3, "How close should it sit?");
                     tightness.parent.Add(TightnessControl());
+                    tightness.parent.Add(FixClippingControl());
                     var place = Row("fit-card__actions");
                     place.Add(Button("ReFit now", "fit-btn--primary", actions.Confirm));
                     place.Add(Button("Cancel", "fit-btn--ghost", actions.Cancel));
@@ -265,6 +266,19 @@ namespace Orbiters.MyAvatar.Editor
             control.tooltip = "Shared with MCB's ReFit panel.";
             control.AddToClassList("fit-card__tightness");
             return control;
+        }
+
+        // Beside the tightness: after the fit, fabric left inside the body is pushed out of it (ReFit's "Fix clipping").
+        private static VisualElement FixClippingControl()
+        {
+            var row = new VisualElement { tooltip = "After the fit, fabric left inside your body is pushed out of it, smoothly. Shared with MCB's refits." };
+            row.AddToClassList("fit-card__fix");
+            var texts = new VisualElement(); texts.AddToClassList("fit-card__fix-texts"); row.Add(texts);
+            var title = new Label("Fix clipping"); title.AddToClassList("fit-card__fix-title"); texts.Add(title);
+            var sub = new Label("Pushes out fabric left inside your body"); sub.AddToClassList("fit-card__fix-subtitle"); texts.Add(sub);
+            row.Add(new ToggleSwitch(Orbiters.Toolkit.Editor.Refit.RefitPreferences.FixClipping,
+                on => Orbiters.Toolkit.Editor.Refit.RefitPreferences.FixClipping = on));
+            return row;
         }
 
         private VisualElement Row(string className)

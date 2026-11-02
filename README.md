@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fix clipping on the fit card.** Lining clothing up for a refit, under "How close should it sit?", a "Fix clipping"
+  switch (Orbiters Toolkit's shared `RefitPreferences.FixClipping`, used by MCB's refits too) asks ReFit to push the fabric
+  the fit leaves inside the body out of it.
 - **A published item asks for the oldest VRChat SDK its content works with**, not the creator's own version: 3.7.0 (what
   every Orbiters tool supports), 3.7.6 with a local-only contact sender, 3.10.0 with a PhysBone permission filter limited
   to some content types, 3.10.2 with a parameter driver's Prevent Repeats. N4N0 1.0.19, published from SDK 3.10.3, asked

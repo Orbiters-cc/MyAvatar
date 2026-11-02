@@ -224,6 +224,10 @@
 
 .fit-step__text { flex-grow: 1; flex-shrink: 1; font-size: 11px; color: #cfcfcf; white-space: normal; }
 .fit-card__tightness { margin: 6px 0 0 34px; }
+.fit-card__fix { flex-direction: row; align-items: center; margin: 10px 0 0 34px; }
+.fit-card__fix-texts { flex-grow: 1; flex-shrink: 1; margin-right: 10px; }
+.fit-card__fix-title { font-size: 11px; color: #cfcfcf; }
+.fit-card__fix-subtitle { font-size: 10px; color: #8c8c8c; white-space: normal; margin-top: 1px; }
 
 /* A refit at work. */
 .fit-card__track {
