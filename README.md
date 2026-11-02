@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **"Stop watching renames" on the card's animation notice** switches the watcher off (Orbiters settings > Features >
+  Toolkit turns it back on).
 - **Big merges the always-shown meshes that animate only their materials, the same way** (Toolkit's `MergeStill`, given
   the build's animations). MasculineCanine at Big: 9 → 8 skinned meshes (Tail2 into MohawkHair), PC's skinned-mesh
   category Poor → Medium, rank Very Poor (PC) / Very Poor (Quest) as before (other categories), 15.74 MB as before, no

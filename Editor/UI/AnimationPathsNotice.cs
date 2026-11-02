@@ -71,6 +71,16 @@ namespace Orbiters.MyAvatar.Editor
             leave.AddToClassList("ft-ghost");
             leave.tooltip = "Keep the animations as they are.";
             actions.Add(leave);
+            // The watcher's switch, where its notice shows (also in Orbiters settings, Features, Toolkit).
+            var stop = MyAvatarEditor.PressButton("Stop watching renames", () =>
+            {
+                AnimationPathWatch.Leave(notice);
+                AnimationPathWatch.Enabled = false;
+                Debug.Log("[My Avatar] Renames that break animations aren't noticed any more: Orbiters settings > Features > Toolkit > “Notice renames that break animations” turns it back on.");
+            });
+            stop.AddToClassList("ft-ghost");
+            stop.tooltip = "Don't notice renames and moves that break animations any more. Orbiters settings (Features, Toolkit) turns it back on; Mixer's own renames still ask.";
+            actions.Add(stop);
         }
 
         // The buttons go at once; the fix runs on the next frame.
