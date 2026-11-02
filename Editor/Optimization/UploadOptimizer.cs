@@ -25,6 +25,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         {
             public int HiddenObjects, DisabledComponents, IdlePhysBones, Colliders, StillPhysBones, BlendShapes, HiddenTriangles, MergedMeshes, StaticBones, BoneReferences, EndBones, MaterialSlots, Textures;
             public int ToggledMeshes, Polygons, Icons, ShortObjects, ShortParameters, DuplicateTextures, ResizedTextures, Bounds;
+            /// <summary>Meshes toggled on their own merged into one always shown, their toggles kept, and how many took them in.</summary>
+            public int ToggledKept, ToggledInto;
             /// <summary>How long each change of the structure step took, in the order they ran.</summary>
             public readonly List<(OptimizationPasses Pass, long Milliseconds)> Times = new List<(OptimizationPasses, long)>();
 
@@ -47,6 +49,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 void Add(int n, string one, string many) { if (n > 0) parts.Add(n + " " + (n == 1 ? one : many)); }
                 void Change(int n, string one, string many) { if (n > 0) changes.Add(n + " " + (n == 1 ? one : many)); }
                 Change(ToggledMeshes, "mesh toggled with another merged into it", "meshes toggled with others merged into them");
+                if (ToggledKept > 0)
+                    changes.Add("merged " + ToggledKept + " toggled " + (ToggledKept == 1 ? "mesh" : "meshes") + " into " + ToggledInto + ", toggles kept");
                 Change(ResizedTextures, "texture resized or compressed", "textures resized or compressed");
                 Change(Icons, "menu icon shrunk to 64 px", "menu icons shrunk to 64 px");
                 Change(Bounds, "mesh given the avatar's culling box", "meshes given the avatar's culling box");
@@ -225,6 +229,11 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     var merged = MeshMerge.MergeTogether(usage, Animations());
                     made.UnionWith(merged.Meshes);
                     report.ToggledMeshes += merged.Merged;
+                    // Then those toggled on their own, when a mesh fewer gives a better rating on the platform built for.
+                    var toggled = MeshMerge.MergeToggled(usage, Animations(), MeshMerge.ToggledPolicy.For(TextureOptimization.Mobile, DownloadSize.CollapseBytes));
+                    made.UnionWith(toggled.Meshes);
+                    report.ToggledKept += toggled.Merged;
+                    report.ToggledInto += toggled.Into;
                 }),
                 (OptimizationPasses.StaticBones, () =>
                 {

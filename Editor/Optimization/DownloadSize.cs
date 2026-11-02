@@ -488,6 +488,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             return vertices + indices * (mesh.indexFormat == UnityEngine.Rendering.IndexFormat.UInt32 ? 4 : 2) + mesh.bindposes.Length * 64L;
         }
 
+        /// <summary>
+        /// What a one-frame blendshape moving <paramref name="moved"/> vertices adds to the download, as <see cref="Of"/> counts
+        /// it: what Toolkit's merge of toggled meshes weighs a blendshape hiding a part by.
+        /// </summary>
+        internal static long CollapseBytes(int moved) => (long)((moved * 40L + 64) * Shapes);
+
         /// <summary>Each blendshape's stored offsets: only the vertices a frame moves are kept.</summary>
         /// <param name="sizes">Where the sizes of a mesh that is not a saved asset are kept, by whoever knows it won't change
         /// meanwhile (an estimate's copy, measured for each platform): every frame of every blendshape is read to size it.</param>

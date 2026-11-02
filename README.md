@@ -1,5 +1,14 @@
 # My Avatar
 
+## Unreleased
+
+- **Big also merges meshes toggled on their own, keeping their toggles,** when that gives the skinned meshes or the
+  meshes a better rating on the platform built for (Toolkit's `MeshMerge.MergeToggled`, after the meshes toggled
+  together). The upload's log line says "merged N toggled meshes into M, toggles kept". What a hiding blendshape adds
+  to the download is weighed with the estimate's own figure (`DownloadSize.CollapseBytes`), and the estimate counts
+  those blendshapes as kept. MasculineCanine at Big, before and after: 9 skinned meshes, Very Poor (PC) / Very Poor
+  (Quest), 15.74 MB — none of its toggled meshes can merge (see Toolkit's notes).
+
 ## 0.9.21 — 2026-11-02
 
 - **The menu editor shows the menu of a real build when other tools add menus at upload.** With lilycalInventory,

@@ -61,7 +61,8 @@ namespace Orbiters.MyAvatar.Editor
             (OptimizationPasses.UnusedTextures, "Unused textures", "Textures a material still points at that its shader doesn't use (after Poiyomi locks its materials)."),
             (OptimizationPasses.MergeMeshes, "Merge meshes", "Meshes that are always shown, props included, join the one animations use: fewer meshes. Toggled meshes stay apart."),
             (OptimizationPasses.MergeToggledMeshes, "Meshes toggled together", "Meshes every animation shows and hides together become one (an outfit's pieces); " +
-                "the animations of their blendshapes and materials follow them."),
+                "the animations of their blendshapes and materials follow them. Meshes toggled on their own join one that is always shown when that gives " +
+                "a better rank, and their toggles keep working."),
             (OptimizationPasses.StaticBones, "Bones that never move", "Bones nothing animates, simulates or constrains (clothing armatures, attachment bones) follow the bone they hang from: same look, fewer bones counted."),
             (OptimizationPasses.EndBones, "PhysBone endpoints", "Bones that only mark where a PhysBone chain ends become its endpoint: fewer transforms for VRChat to move."),
             (OptimizationPasses.BodyUnderClothing, "Body under clothing", "Body triangles that opaque clothing worn all the time hides from every side go: fewer polygons. Clothing a toggle hides doesn't count."),

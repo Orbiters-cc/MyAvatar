@@ -582,7 +582,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 for (int i = 0; i < mesh.blendShapeCount; i++)
                 {
                     string name = mesh.GetBlendShapeName(i);
-                    if (named.Contains(name) || shapes != null && shapes.Contains(name)) kept.Add(name);
+                    // A toggled part's blendshape (merged meshes): its toggle's animations set it at upload.
+                    if (named.Contains(name) || shapes != null && shapes.Contains(name) || name.StartsWith(Toolkit.Editor.VRChat.Optimization.MeshMerge.HiddenShapePrefix, StringComparison.Ordinal)) kept.Add(name);
                 }
                 return kept;
             }
