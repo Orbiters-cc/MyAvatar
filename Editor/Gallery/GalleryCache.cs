@@ -26,8 +26,13 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             AuthenticationService.Changed += Clear;
             OrbitersEnvironment.Changed += Clear;
-            // Another build target offers other packages.
-            EditorUserBuildSettings.activeBuildTargetChanged += Clear;
+        }
+
+        // Another build target offers other packages.
+        private sealed class BuildTargetWatch : UnityEditor.Build.IActiveBuildTargetChanged
+        {
+            public int callbackOrder => 0;
+            public void OnActiveBuildTargetChanged(BuildTarget previousTarget, BuildTarget newTarget) => Clear();
         }
 
         internal static void Clear()

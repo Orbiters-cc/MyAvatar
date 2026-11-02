@@ -139,7 +139,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
     internal sealed class GalleryScrim : VisualElement
     {
         internal const float Fade = 80f;
-        private static readonly Color32 Solid = new Color32(0, 0, 0, 153), Clear = new Color32(0, 0, 0, 0);
+        private static readonly Color32 Solid = new Color32(0, 0, 0, 153), Transparent = new Color32(0, 0, 0, 0);
 
         internal GalleryScrim() { generateVisualContent += Draw; }
 
@@ -152,7 +152,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var mesh = context.Allocate(8, 12);
             mesh.SetAllVertices(new[]
             {
-                V(r.xMin, r.yMin, Clear), V(r.xMax, r.yMin, Clear), V(r.xMax, edge, Solid), V(r.xMin, edge, Solid),
+                V(r.xMin, r.yMin, Transparent), V(r.xMax, r.yMin, Transparent), V(r.xMax, edge, Solid), V(r.xMin, edge, Solid),
                 V(r.xMin, edge, Solid), V(r.xMax, edge, Solid), V(r.xMax, r.yMax, Solid), V(r.xMin, r.yMax, Solid),
             });
             mesh.SetAllIndices(new ushort[] { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 });

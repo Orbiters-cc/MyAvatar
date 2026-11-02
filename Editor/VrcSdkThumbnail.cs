@@ -32,7 +32,10 @@ namespace Orbiters.MyAvatar.Editor
         private static string offered;
         private static double selectedAt;
         private static int revision;
+#if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
+        // The picture Offer gave the SDK's thumbnail block (its block exists from SDK 3.7.6).
         private static Texture2D offeredImage;
+#endif
 
         static VrcSdkThumbnail() => EditorApplication.update += Watch;
 
@@ -52,7 +55,13 @@ namespace Orbiters.MyAvatar.Editor
                 pendingSelection = null;
             }
             var selected = Selected(builder);
-            if (selected != lastSelected) { lastSelected = selected; offered = null; offeredImage = null; selectedAt = EditorApplication.timeSinceStartup; revision++; }
+            if (selected != lastSelected)
+            {
+                lastSelected = selected; offered = null; selectedAt = EditorApplication.timeSinceStartup; revision++;
+#if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
+                offeredImage = null;
+#endif
+            }
             if (!selected) return;
             if (builder.BuildState == SdkBuildState.Building || builder.UploadState == SdkUploadState.Uploading) return;
             // Whatever thumbnail waits in the SDK, VRChat's copy is known ahead of Build & Publish (VrcSdkThumbnailCheck).
@@ -187,7 +196,9 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (!(builder is VRCSdkControlPanelAvatarBuilder) || PendingField == null) return false;
             PendingField.SetValue(builder, null);
+#if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
             offeredImage = null;
+#endif
             try
             {
                 const BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic;

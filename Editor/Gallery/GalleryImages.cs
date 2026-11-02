@@ -142,7 +142,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private sealed class CappedDownload : DownloadHandlerScript
         {
             private readonly long limit;
-            private readonly MemoryStream data = new MemoryStream();
+            // Not DownloadHandler.data: that one asks GetData, which this handler does not provide (Bytes does).
+            private readonly MemoryStream received = new MemoryStream();
             internal bool TooBig { get; private set; }
 
             internal CappedDownload(long limit) : base(new byte[64 * 1024]) { this.limit = limit; }
@@ -154,12 +155,12 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
             protected override bool ReceiveData(byte[] chunk, int length)
             {
-                if (TooBig || data.Length + length > limit) { TooBig = true; return false; }
-                data.Write(chunk, 0, length);
+                if (TooBig || received.Length + length > limit) { TooBig = true; return false; }
+                received.Write(chunk, 0, length);
                 return true;
             }
 
-            internal byte[] Bytes => data.ToArray();
+            internal byte[] Bytes => received.ToArray();
         }
 
         /// <summary>A PNG's or JPEG's width and height, read from its header; false for anything else.</summary>
