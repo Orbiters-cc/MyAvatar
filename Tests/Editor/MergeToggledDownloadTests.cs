@@ -80,6 +80,34 @@ public sealed class MergeToggledDownloadTests
                   after.BlendShapes + ", meshes " + before.Meshes + " -> " + after.Meshes + ").");
     }
 
+    // A merged mesh stores its skin weights the way a bundle does (measured 2026-11-02, 4,000 vertices in uncompressed
+    // bundles: weights set as BoneWeight take 32 bytes a vertex whatever the influences, weights set per vertex 4 bytes for
+    // one influence and 16 for two, bundle growth = vertex stream growth + 16 bytes). DownloadSize reads the vertex streams,
+    // so the smaller merged mesh is counted as it uploads: not an undercount.
+    [Test] public void AMergedMeshIsCountedWithTheSkinWeightsItStores()
+    {
+        var sources = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Select(r => r.sharedMesh).ToList();
+        Assert.That(sources.All(m => m.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.BlendWeight)), "Set as BoneWeight: four weights a vertex.");
+        long before = sources.Sum(DownloadSize.VertexBytes);
+        int vertices = sources.Sum(m => m.vertexCount);
+        var policy = new MeshMerge.ToggledPolicy
+        {
+            SkinnedLimits = new[] { 1, 2, 8, 16 }, MeshLimits = new[] { 1, 4, 8, 16 }, BoneLimits = new[] { 75, 150, 256, 400 }, CollapseBytes = DownloadSize.CollapseBytes,
+        };
+        var result = MeshMerge.MergeToggled(new AvatarUsage(root), null, policy);
+        owned.AddRange(result.Meshes);
+        var merged = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Single().sharedMesh;
+        Assert.That(merged.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.BlendWeight), Is.False, "One influence a vertex: only its bone index is stored.");
+        long skin = 0;
+        for (int stream = 0; stream < merged.vertexBufferCount; stream++)
+            if (merged.GetVertexAttributes().Any(a => a.stream == stream && a.attribute == UnityEngine.Rendering.VertexAttribute.BlendIndices))
+                skin += (long)merged.vertexCount * merged.GetVertexBufferStride(stream);
+        Assert.That(skin, Is.EqualTo(4L * merged.vertexCount), "4 bytes a vertex for its skin, as a bundle stores it.");
+        long after = DownloadSize.VertexBytes(merged);
+        Assert.That(before - after, Is.GreaterThanOrEqualTo(28L * vertices), "28 of the 32 bytes of skin weights a vertex took are gone.");
+        Debug.Log("Mesh bytes before " + before + ", merged " + after + " (" + vertices + " vertices).");
+    }
+
     private T Own<T>(T o) where T : Object { owned.Add(o); return o; }
 
     // A strip of quads up the bones, each quad on one bone, in the avatar's space.

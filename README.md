@@ -1,5 +1,17 @@
 # My Avatar
 
+## Unreleased
+
+- **Big merges the always-shown meshes that animate only their materials, the same way** (Toolkit's `MergeStill`, given
+  the build's animations). MasculineCanine at Big: 9 → 8 skinned meshes (Tail2 into MohawkHair), PC's skinned-mesh
+  category Poor → Medium, rank Very Poor (PC) / Very Poor (Quest) as before (other categories), 15.74 MB as before, no
+  new unresolved binding. Toggled parts on several bones fold onto one point now (Toolkit), and their caps follow the
+  platform built for.
+- **The download estimate counts a merged mesh's skin weights as stored: checked, no undercount.** In uncompressed bundles
+  (4,000 vertices) weights set as `BoneWeight` take 32 B a vertex whatever the influences; weights set per vertex
+  (`SetBoneWeights`, as merges write them) 4 B for one influence and 16 B for two. The bundle grows by exactly the
+  vertex streams `DownloadSize.VertexBytes` reads. A merged mesh is that much smaller: 18,320 → 9,616 bytes in the test.
+
 ## 0.9.22 — 2026-11-02
 
 - **Big also merges meshes toggled on their own, keeping their toggles,** when that gives the skinned meshes or the

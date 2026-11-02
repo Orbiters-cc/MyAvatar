@@ -220,7 +220,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 (OptimizationPasses.FewerPolygons, () => report.Polygons += PolygonReduction.Reduce(usage, polygonQuality, made, shapes, background: unbuilt, owner: owner)),
                 (OptimizationPasses.MergeMeshes, () =>
                 {
-                    var merged = MeshMerge.MergeStill(usage);
+                    var merged = MeshMerge.MergeStill(usage, Animations);
                     made.UnionWith(merged.Meshes);
                     report.MergedMeshes += merged.Merged;
                 }),
