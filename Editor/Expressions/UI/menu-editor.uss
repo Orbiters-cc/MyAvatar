@@ -50,6 +50,10 @@
 .mcb-button.me-stage__notice-action { flex-shrink: 0; height: 22px; min-height: 22px; margin: 0 0 0 10px; padding: 0 10px; border-width: 0; border-radius: 11px; background-color: rgba(255, 176, 32, 0.2); color: #ffcf73; font-size: 11px; -unity-font-style: bold; transition-property: background-color, scale; transition-duration: 0.12s, 0.18s; }
 .mcb-button.me-stage__notice-action:hover { background-color: rgba(255, 176, 32, 0.32); color: #ffffff; }
 .mcb-button.me-stage__notice-action.pressed { scale: 0.94 0.94; }
+.me-stage__notice--quiet { background-color: rgba(255, 255, 255, 0.06); }
+.me-stage__notice--quiet > .me-stage__notice-text { color: #c8c8c8; }
+.me-stage__notice--quiet > .mcb-button.me-stage__notice-action { background-color: rgba(0, 218, 109, 0.14); color: #00DA6D; }
+.me-stage__notice--quiet > .mcb-button.me-stage__notice-action:hover { background-color: rgba(0, 218, 109, 0.26); color: #ffffff; }
 
 .me-side { width: 248px; flex-shrink: 0; margin-left: 12px; }
 .me-side > .unity-scroll-view__content-viewport > .unity-scroll-view__content-container { padding-right: 2px; }

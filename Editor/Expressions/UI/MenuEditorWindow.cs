@@ -57,6 +57,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         [NonSerialized] private IReadOnlyDictionary<VRCExpressionsMenu.Control, string> savedPins;
         // Left-out items no item of the menu answers to now.
         [NonSerialized] private List<MenuRemoval> stale = new List<MenuRemoval>();
+        // Tools on the avatar whose upload menus the preview doesn't model, and whether the menu of a real build is shown
+        // instead (read only), as it was last shown.
+        [NonSerialized] private IReadOnlyList<string> menuTools = Array.Empty<string>();
+        [NonSerialized] private bool realMode, shownReal;
 
         private VisualElement stage, quickHolder, radialHolder, crumbs, side, history, deleted, defaultMenu;
         private QuickMenuView quick;
@@ -400,19 +404,25 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 builtAssets ??= MenuChanges.Assets(root);
                 savedRemovals = MenuSave.SavedRemovals(root, built, out savedDefault);
                 stale = MenuSave.Unresolved(root, built);
+                menuTools = Orbiters.Toolkit.Editor.VRChat.Checks.ToolConflicts.MenuTools(root);
                 dirty = false;
                 shownRevision = -1;
                 Rename(savedPins);
                 savedPins = null;
             }
-            if (shownRevision != state.revision || draft == null)
+            // The real build is shown while the avatar is as it was built (a change goes back to the preview).
+            var real = MenuRealBuild.Of(root);
+            if (realMode && real?.Page == null) { realMode = false; ClearPlace(); }
+            if (shownRevision != state.revision || draft == null || realMode != shownReal)
             {
+                shownReal = realMode;
                 draft = MenuDraft.Apply(built, state.edits, savedRemovals, savedDefault);
                 visible = draft.Visible();
                 // VRCFury's "Next" pages without an icon get the arrow at upload, as Orbiters' items get theirs.
                 var nextIcon = draft.NextIcon != null ? draft.NextIcon : Orbiters.Toolkit.Editor.VRChat.OrbitersMenuIcons.Next;
                 paged = built.VrcFury ? MenuBuild.Paginate(visible, draft.NextText, nextIcon) : MenuTree.Copy(visible);
                 Defaults(paged);
+                if (realMode) paged = real.Page;
                 Offsets(paged);
                 shownRevision = state.revision;
             }
@@ -420,7 +430,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             var page = Current(out string title);
             // Ticks of items no longer shown go.
             if (ticked.RemoveAll(id => page == null || page.Items.All(n => n.Id != id)) > 0) shownSignature = null;
-            MenuViewData Data() => new MenuViewData { Page = page, Title = title, Root = path.Count == 0, Selected = selected, Changed = draft.Changed, Pages = built.VrcFury, Checked = new HashSet<string>(ticked) };
+            MenuViewData Data() => new MenuViewData { Page = page, Title = title, Root = path.Count == 0, Selected = selected, Changed = realMode ? new HashSet<string>() : draft.Changed, Pages = realMode || built.VrcFury, Checked = new HashSet<string>(ticked) };
             var data = Data();
             string signature = Signature(data);
             if (signature != shownSignature)
@@ -454,16 +464,69 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 // The saved edits were written to run after every other menu change.
                 SetNotice("Menu changes on an object after “" + MenuSave.EditsName + "” now run after the ones saved there: they may move, reorder or change icons of what you saved.",
                     "Put it last", PutEditsLast);
-            else
+            else if (realMode)
+                SetNotice("The menu of a real build, made " + Ago(real.When) + (menuTools.Count > 0 ? ", with what " + Names(menuTools) + (menuTools.Count == 1 ? " adds" : " add") + " at upload" : "") + ". It is read only.",
+                    "Back to editing", LeaveReal, quiet: true);
+            else if (real != null && real.Running) SetNotice("Building a hidden copy the way an upload does, to show its menu…", quiet: true);
+            else if (descriptor == null || built.Root.Items.Count == 0 && state.edits.Count == 0 || !built.VrcFury && Overfull(visible))
                 SetNotice(descriptor == null ? "This object has no VRChat avatar descriptor."
                     : built.Root.Items.Count == 0 && state.edits.Count == 0 ? "This avatar has no expressions menu yet: add one to its avatar descriptor, VRCFury toggles or Modular Avatar menu items."
-                    : !built.VrcFury && Overfull(visible) ? "A menu has more than 8 items: VRChat refuses it unless VRCFury splits it into pages." : null);
+                    : "A menu has more than 8 items: VRChat refuses it unless VRCFury splits it into pages.");
+            else if (menuTools.Count > 0)
+                // Their own build passes add these menus: shown only from a real build, on request (it takes a while).
+                SetNotice((real?.Error != null ? "The real build stopped (" + real.Error + "). " : "") + "Menus from " + Names(menuTools) +
+                          " are added at upload and aren't shown here.", real?.Error != null ? "Try again" : "Show the real build", StartReal, quiet: real?.Error == null);
+            else SetNotice(null);
             // The Menu card follows the changes waiting here and the menu built.
             if (rebuilt || state.edits.Count != raised)
             {
                 raised = state.edits.Count;
                 Changed?.Invoke();
             }
+        }
+
+        private static string Names(IReadOnlyList<string> names) =>
+            names.Count == 1 ? names[0] : string.Join(", ", names.Take(names.Count - 1)) + " and " + names[names.Count - 1];
+
+        private static string Ago(DateTime when)
+        {
+            var span = DateTime.Now - when;
+            return span.TotalMinutes < 1 ? "just now" : span.TotalHours < 1 ? (int)span.TotalMinutes + " min ago" : "at " + when.ToString("HH:mm");
+        }
+
+        // The menu of a real build: the notice says so at once, the hidden build starts on the next frame (the editor pauses
+        // while it builds, as at upload) and the menu shows when it ends.
+        private void StartReal()
+        {
+            SetNotice("Building a hidden copy the way an upload does, to show its menu…", quiet: true);
+            rootVisualElement.schedule.Execute(() =>
+            {
+                if (root == null) return;
+                MenuRealBuild.Start(root, () =>
+                {
+                    if (this == null) return;
+                    realMode = MenuRealBuild.Of(root)?.Page != null;
+                    ClearPlace();
+                    MarkDirty();
+                });
+                MarkDirty();
+            });
+        }
+
+        private void LeaveReal()
+        {
+            realMode = false;
+            ClearPlace();
+            MarkDirty();
+        }
+
+        // The menus shown are other items: back to their first page, nothing selected.
+        private void ClearPlace()
+        {
+            path.Clear();
+            selected = null;
+            ticked.Clear();
+            shownSignature = null;
         }
 
         // After a save, the items it renamed or copied are known by new ids (an item of the avatar's menu is known by its
@@ -611,7 +674,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         private static bool IsNext(MenuNode node) => node?.Origin?.Kind == MenuOriginKind.Next;
 
-        public bool CanRename(MenuNode node) => node != null && node.Id != null && !node.Id.StartsWith("vrc:", StringComparison.Ordinal) && !node.Id.StartsWith("gm:", StringComparison.Ordinal);
+        public bool CanRename(MenuNode node) => !realMode && node != null && node.Id != null && !node.Id.StartsWith("vrc:", StringComparison.Ordinal) && !node.Id.StartsWith("gm:", StringComparison.Ordinal);
 
         public bool CanMove(MenuNode node)
         {
@@ -854,6 +917,12 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         {
             if (deleted == null || draft == null) return;
             deleted.Clear();
+            if (realMode)
+            {
+                if (deleted.style.display.value == DisplayStyle.Flex) rootVisualElement.schedule.Execute(Fit);
+                deleted.style.display = DisplayStyle.None;
+                return;
+            }
             var defaults = draft.DefaultRemoved ? MenuUploadBuild.DefaultItems(draft.Root) : new List<MenuNode>();
             var defaultIds = new HashSet<string>(defaults.Select(n => n.Id));
             // Items inside a folder left out go with it: the folder stands for them.
@@ -947,6 +1016,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         {
             if (defaultMenu == null || draft == null) return;
             defaultMenu.Clear();
+            defaultMenu.style.display = realMode ? DisplayStyle.None : DisplayStyle.Flex;
             bool removed = draft.DefaultRemoved;
             int count = MenuUploadBuild.DefaultItems(draft.Root).Count;
             var icon = new VectorIcon(removed ? IconGlyph.Check : IconGlyph.Close); icon.AddToClassList("me-default__glyph"); defaultMenu.Add(icon);
@@ -1021,6 +1091,21 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             var checkedNodes = ticked.Select(Node).Where(n => n != null).ToList();
             if (checkedNodes.Count > 1) { ShowSelection(card, checkedNodes); return; }
             var node = checkedNodes.Count == 1 ? checkedNodes[0] : Node(selected);
+            if (realMode)
+            {
+                var title = new Label("The menu of a real build"); title.AddToClassList("me-card__title"); card.Add(title);
+                var about = new Label("A hidden copy of " + root.name + " built the way an upload builds it, with every tool's menus" +
+                                      (menuTools.Count > 0 ? " (" + Names(menuTools) + " included)" : "") + ". It can't be edited here: go back to editing to change the menu.");
+                about.AddToClassList("me-card__text"); card.Add(about);
+                if (node != null)
+                {
+                    Fact(card, "Item", Plain(node.Name));
+                    Fact(card, "Type", node.Type.ToString());
+                    if (!string.IsNullOrEmpty(MenuSave.ItemParameter(node))) Fact(card, "Parameter", MenuSave.ItemParameter(node));
+                }
+                Tip(card, "Click", "a folder to open it.");
+                return;
+            }
             if (node == null || !CanRename(node))
             {
                 var heading = new Label("Edit the menu"); heading.AddToClassList("me-card__title"); card.Add(heading);
@@ -1423,9 +1508,11 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             ShowStatus();
         }
 
-        private void SetNotice(string text, string action = null, Action callback = null)
+        private void SetNotice(string text, string action = null, Action callback = null, bool quiet = false)
         {
             if (notice == null) return;
+            // Information, not a problem (the real build's menu, tools the preview leaves out): the quiet look.
+            notice.EnableInClassList("me-stage__notice--quiet", quiet);
             noticeText.text = text ?? "";
             notice.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
             noticeAction.text = action ?? "";

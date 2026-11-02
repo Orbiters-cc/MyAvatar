@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The menu editor shows the menu of a real build when other tools add menus at upload.** With lilycalInventory,
+  FaceEmo, Avatar Menu Creator for MA, AvatarPoseLibrary, EmotePrefab or Bavi Motion Patcher on the avatar, a quiet
+  note says their menus aren't in the preview, with **Show the real build**: a hidden copy built as an upload builds
+  it, its menu shown read only (kept until the avatar changes), then **Back to editing**.
 - **The menu preview sorts an item's toggle where the build puts it.** An item placed on a bone moves under it just
   before VRCFury builds, and VRCFury sorts its toggle from there: the menu editor now shows it at that place too
   (found by the compatibility project on MasculineCanine; the preview and the real build agree at Off and Big).
