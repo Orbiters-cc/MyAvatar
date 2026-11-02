@@ -1,5 +1,12 @@
 # My Avatar
 
+## Unreleased
+
+- **A published item asks for the oldest VRChat SDK its content works with**, not the creator's own version: 3.7.0 (what
+  every Orbiters tool supports), 3.7.6 with a local-only contact sender, 3.10.0 with a PhysBone permission filter limited
+  to some content types, 3.10.2 with a parameter driver's Prevent Repeats. N4N0 1.0.19, published from SDK 3.10.3, asked
+  every project for 3.10.3 although it only needs 3.7.6 (its stored ranges were lowered on Orbiters).
+
 ## 0.9.20 — 2026-11-02
 
 - **A gallery item that needs another VRChat SDK asks, in one dialog, instead of failing.** Installing N4N0 1.0.19 on a

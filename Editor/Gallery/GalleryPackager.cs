@@ -162,6 +162,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             report.containsCode = report.codeFiles.Count > 0;
             if (!fromIndex)
                 report.prefabs = prefabGuids.Select(g => new GallerySetupPrefab { guid = g, path = AssetDatabase.GUIDToAssetPath(g), name = Path.GetFileNameWithoutExtension(AssetDatabase.GUIDToAssetPath(g)) }).ToList();
+            LowerVrchatSdk(report.dependencies, VrchatSdkFloor(paths));
             if (report.bytes > MaxBytes) report.errors.Add($"The package is {GalleryUI.Size(report.bytes)}; the gallery accepts up to {GalleryUI.Size(MaxBytes)} per package. Leave out unused textures or lower their sizes.");
             try { report.parameterBits = ParameterCost(avatar, report.prefabs.Select(p => AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(p.guid))).Where(p => p != null).ToList()); }
             catch (Exception ex)
@@ -254,6 +255,74 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             string id = info?.name ?? folder;
             if (id.StartsWith("com.unity.", StringComparison.Ordinal) || report.dependencies.Any(d => d.id == id)) return;
             report.dependencies.Add(new GalleryDependency { id = id, displayName = info?.displayName ?? id, range = !string.IsNullOrEmpty(info?.version) ? ">=" + info.version : "*" });
+        }
+
+        /// <summary>The oldest VRChat SDK every Orbiters tool supports: an item that uses nothing newer asks for this one.</summary>
+        internal const string OldestVrchatSdk = "3.7.0";
+
+        /// <summary>
+        /// The oldest VRChat SDK the item's content works with, from what it uses: a local-only contact sender needs 3.7.6,
+        /// a PhysBone permission filter limited to some content types 3.10.0, a parameter driver's Prevent Repeats 3.10.2.
+        /// Else <see cref="OldestVrchatSdk"/>. (The creator's own SDK version used to be the minimum: N4N0 1.0.19, built
+        /// with 3.10.3, refused every older project although it only needs 3.7.6.)
+        /// </summary>
+        internal static string VrchatSdkFloor(IEnumerable<string> paths)
+        {
+            bool localSender = false, contentTypes = false, preventRepeats = false;
+            var everything = EverythingContentTypes();
+            foreach (string path in paths.Where(p => p.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".controller", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)))
+            {
+                UnityEngine.Object[] objects;
+                try { objects = AssetDatabase.LoadAllAssetsAtPath(path); }
+                catch (Exception) { continue; }
+                foreach (var obj in objects)
+                {
+                    if (obj == null) continue;
+                    string type = obj.GetType().Name;
+                    if (type != "VRCContactSender" && type != "VRCPhysBone" && type != "VRCAvatarParameterDriver") continue;
+                    var so = new SerializedObject(obj);
+                    if (type == "VRCContactSender") localSender |= so.FindProperty("localOnly")?.boolValue == true;
+                    else if (type == "VRCPhysBone")
+                    {
+                        foreach (string filter in new[] { "grabFilter.contentTypes", "poseFilter.contentTypes" })
+                        {
+                            var p = so.FindProperty(filter);
+                            if (p != null && everything.HasValue && p.intValue != everything.Value) contentTypes = true;
+                        }
+                    }
+                    else
+                    {
+                        var list = so.FindProperty("parameters");
+                        for (int i = 0; list != null && i < list.arraySize; i++)
+                            preventRepeats |= list.GetArrayElementAtIndex(i).FindPropertyRelative("preventRepeats")?.boolValue == true;
+                    }
+                }
+            }
+            return SdkFloor(localSender, contentTypes, preventRepeats);
+        }
+
+        internal static string SdkFloor(bool localSender, bool contentTypes, bool preventRepeats) =>
+            preventRepeats ? "3.10.2" : contentTypes ? "3.10.0" : localSender ? "3.7.6" : OldestVrchatSdk;
+
+        // DynamicsUsageFlags.Everything on SDKs that have content types (3.10.0+); null before (no filter to compare).
+        private static int? EverythingContentTypes()
+        {
+            var type = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("VRC.Dynamics.DynamicsUsageFlags", false)).FirstOrDefault(t => t != null);
+            if (type == null || !type.IsEnum) return null;
+            try { return Convert.ToInt32(Enum.Parse(type, "Everything")); }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>The VRChat SDK packages' ranges become "&gt;=<paramref name="floor"/>" (never above what the creator has).</summary>
+        internal static void LowerVrchatSdk(List<GalleryDependency> dependencies, string floor)
+        {
+            foreach (var dependency in dependencies)
+            {
+                if (dependency.id != "com.vrchat.base" && dependency.id != "com.vrchat.avatars") continue;
+                if (dependency.range == null || !dependency.range.StartsWith(">=", StringComparison.Ordinal)) continue;
+                if (Version.TryParse(dependency.range.Substring(2).Split('-')[0], out var creator) && Version.TryParse(floor, out var needed) && needed < creator)
+                    dependency.range = ">=" + floor;
+            }
         }
 
         /// <summary>
