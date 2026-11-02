@@ -21,9 +21,32 @@ namespace Orbiters.MyAvatar.Editor.Optimization
     /// </summary>
     internal static class DownloadSize
     {
+        /// <summary>What one thing adds to the download (a texture, a mesh, a mesh's blendshapes, an animation, a shader, a sound).</summary>
+        internal sealed class Piece
+        {
+            public PieceKind Kind;
+            public string Name;
+            /// <summary>The object it is on, from the avatar's root ("" for none), and the Orbiters item holding that object, or null.</summary>
+            public string Owner, Item;
+            /// <summary>The asset to show for it (a texture, a clip), else 0: the object at <see cref="Owner"/>.</summary>
+            public int Asset;
+            /// <summary>Its share of the compressed bundle.</summary>
+            public long Bytes;
+        }
+
+        internal enum PieceKind { Texture, Mesh, BlendShapes, Animation, Shader, Audio, Other }
+
+        /// <summary>The pieces kept with an estimate, biggest first; the rest are summed into one last piece.</summary>
+        internal const int KeptPieces = 24;
+
         internal sealed class Parts
         {
             public long Textures, Meshes, BlendShapes, Animations, Shaders, Audio, Other;
+            /// <summary>
+            /// The biggest pieces, then one for everything else: together they make <see cref="Bundle"/>, each from what the
+            /// estimate measures anyway.
+            /// </summary>
+            public List<Piece> Pieces = new List<Piece>();
             /// <summary>The bundle the SDK uploads, compressed: what VRChat's download limits apply to.</summary>
             public long Bundle => Textures + Meshes + BlendShapes + Animations + Shaders + Audio + Other;
             /// <summary>The bundle's size as VRChat shows it (see <see cref="Shown"/>).</summary>
@@ -72,51 +95,125 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// replaces a texture's size and format (textures an optimization will resize); <paramref name="kept"/> gives the
         /// blendshapes a skinned mesh keeps when a build step removes the rest (null: all of them). <paramref name="sizes"/> keeps
         /// the blendshape sizes of meshes that are not saved assets (an estimate's copies) between measures: see <see cref="ShapeBytes"/>.
+        /// The pieces it keeps (<see cref="Parts.Pieces"/>) are the amounts it adds up anyway. When <paramref name="root"/> is a
+        /// copy (an estimate's), <paramref name="sceneRoot"/> is the avatar it was copied from: the pieces' items are looked up
+        /// there for objects the copy no longer says.
         /// </summary>
         internal static Parts Of(GameObject root, bool mobile = false, Func<Texture, TextureOptimization.TexturePlan> planned = null,
-            Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null)
+            Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null)
         {
             var parts = new Parts();
             var meshes = new Dictionary<Mesh, ICollection<string>>();
+            // The first renderer showing each mesh: where its piece points.
+            var shownBy = new Dictionary<Mesh, Renderer>();
             var clips = new HashSet<AnimationClip>();
-            var sounds = new HashSet<AudioClip>();
+            var sounds = new Dictionary<AudioClip, AudioSource>();
             foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
             {
                 var mesh = MeshOptimization.MeshOf(renderer);
                 if (mesh == null || meshes.ContainsKey(mesh) && meshes[mesh] == null) continue;
+                if (!shownBy.ContainsKey(mesh)) shownBy[mesh] = renderer;
                 // Null: every shape stays; else the shapes kept.
                 meshes[mesh] = renderer is SkinnedMeshRenderer skinned && kept != null && mesh.blendShapeCount > 0 ? kept(skinned) : null;
             }
             var materials = Materials(root, clips);
-            foreach (var source in root.GetComponentsInChildren<AudioSource>(true)) if (source.clip != null) sounds.Add(source.clip);
+            foreach (var source in root.GetComponentsInChildren<AudioSource>(true))
+                if (source.clip != null && !sounds.ContainsKey(source.clip)) sounds[source.clip] = source;
 
+            var items = new Toolkit.Editor.VRChat.Budget.ItemLookup(root, sceneRoot);
+            var pieces = new List<Piece>();
+            void Add(PieceKind kind, string name, Transform owner, Object asset, long bytes)
+            {
+                if (bytes <= 0) return;
+                pieces.Add(new Piece
+                {
+                    Kind = kind, Name = name, Owner = owner != null ? AnimationUtility.CalculateTransformPath(owner, root.transform) : "",
+                    Item = owner != null ? items.Of(owner)?.Name : null, Asset = asset != null && EditorUtility.IsPersistent(asset) ? asset.GetInstanceID() : 0,
+                    Bytes = bytes,
+                });
+            }
+
+            var owners = Owners(root, materials);
             foreach (var texture in Textures(root, materials))
             {
-                parts.Textures += Texture(texture, mobile, planned?.Invoke(texture), out long raw);
+                long bytes = Texture(texture, mobile, planned?.Invoke(texture), out long raw);
+                parts.Textures += bytes;
                 parts.Raw += raw;
+                Add(PieceKind.Texture, texture.name, owners.TryGetValue(texture, out var shown) ? shown : null, texture, bytes);
             }
             foreach (var pair in meshes)
             {
                 long vertices = VertexBytes(pair.Key);
-                long shapes = ShapeBytes(pair.Key, sizes).Where(s => pair.Value == null || pair.Value.Contains(s.Key)).Sum(s => s.Value);
+                var shapesKept = ShapeBytes(pair.Key, sizes).Where(s => pair.Value == null || pair.Value.Contains(s.Key)).ToList();
+                long shapes = shapesKept.Sum(s => s.Value);
                 parts.Meshes += (long)(vertices * Vertices);
                 parts.BlendShapes += (long)(shapes * Shapes);
                 parts.Raw += vertices + shapes;
+                var renderer = shownBy[pair.Key];
+                Add(PieceKind.Mesh, renderer.name, renderer.transform, pair.Key, (long)(vertices * Vertices));
+                Add(PieceKind.BlendShapes, renderer.name + " · " + shapesKept.Count.ToString("N0", CultureInfo.InvariantCulture) +
+                    (shapesKept.Count == 1 ? " blendshape" : " blendshapes"), renderer.transform, null, (long)(shapes * Shapes));
             }
             foreach (var clip in clips)
             {
                 long raw = ClipBytes(clip);
                 parts.Animations += (long)(raw * Clips);
                 parts.Raw += raw;
+                Add(PieceKind.Animation, clip.name, null, clip, (long)(raw * Clips));
             }
-            int shaderCount = materials.Select(m => m.shader).Where(s => s != null).Distinct().Count();
-            parts.Shaders = shaderCount * Shader;
-            foreach (var sound in sounds) parts.Audio += Sound(sound);
+            var shaders = materials.Select(m => m.shader).Where(s => s != null).Distinct().ToList();
+            parts.Shaders = shaders.Count * Shader;
+            foreach (var shader in shaders) Add(PieceKind.Shader, shader.name, null, shader, Shader);
+            foreach (var pair in sounds)
+            {
+                long bytes = Sound(pair.Key);
+                parts.Audio += bytes;
+                Add(PieceKind.Audio, pair.Key.name, pair.Value.transform, pair.Key, bytes);
+            }
             int components = root.GetComponentsInChildren<Component>(true).Length;
             parts.Other = components * PerComponent + materials.Count * PerMaterial;
-            parts.Raw += shaderCount * RawShader + materials.Count * RawMaterial + components * RawComponent + parts.Audio;
+            parts.Raw += shaders.Count * RawShader + materials.Count * RawMaterial + components * RawComponent + parts.Audio;
+            Add(PieceKind.Other, components.ToString("N0", CultureInfo.InvariantCulture) + " components, " + materials.Count.ToString("N0", CultureInfo.InvariantCulture) +
+                (materials.Count == 1 ? " material" : " materials"), null, null, parts.Other);
+            parts.Pieces = Keep(pieces, parts.Bundle);
             return parts;
         }
+
+        /// <summary>The biggest pieces, then one for the rest, so that together they make <paramref name="bundle"/>.</summary>
+        internal static List<Piece> Keep(List<Piece> pieces, long bundle)
+        {
+            var kept = pieces.OrderByDescending(p => p.Bytes).ThenBy(p => p.Name, StringComparer.Ordinal).Take(KeptPieces).ToList();
+            long rest = bundle - kept.Sum(p => p.Bytes);
+            int others = pieces.Count - kept.Count;
+            if (rest > 0)
+                kept.Add(new Piece
+                {
+                    Kind = PieceKind.Other, Name = others > 0 ? others.ToString("N0", CultureInfo.InvariantCulture) + (others == 1 ? " smaller piece" : " smaller pieces") : "The rest",
+                    Owner = "", Bytes = rest,
+                });
+            return kept;
+        }
+
+        // Where each texture is first shown: the renderer of the first material holding it (an animation's material or a
+        // menu icon has none).
+        private static Dictionary<Texture, Transform> Owners(GameObject root, HashSet<Material> materials)
+        {
+            var owners = new Dictionary<Texture, Transform>();
+            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+                foreach (var material in renderer.sharedMaterials)
+                {
+                    if (material == null || !materials.Contains(material)) continue;
+                    foreach (int id in material.GetTexturePropertyNameIDs())
+                    {
+                        var texture = material.GetTexture(id);
+                        if (texture != null && !owners.ContainsKey(texture)) owners[texture] = renderer.transform;
+                    }
+                }
+            return owners;
+        }
+
+        /// <summary>A bundle's size as VRChat shows it: about 5% under the file the SDK builds.</summary>
+        internal static long AsShown(long bundle) => (long)(bundle * Shown);
 
         // ---- What the bundle holds ----
 

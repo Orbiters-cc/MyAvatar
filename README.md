@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Reach a rank, on the Optimization card.** Under the upload estimate, pick a target (Excellent, Good, Medium, Poor;
+  one rank better than the upload by default, never worse than now) and see, for PC and Quest side by side (Quest when
+  the avatar has a version there, or "Plan for Quest too"), each category that holds the avatar below it: its value at
+  upload against the target's limit on a bar with every rank's tick, how far over it is, and, a click away, what costs
+  most in it (each naming the Orbiters item it belongs to; a click shows it). Then the steps, best first (those that
+  reach the target alone, then by how much of the gap they close, then the cheapest): the next level or the Custom
+  switches that lower what blocks, with **Apply** (applied at once, measured in the background); removing or hiding an
+  item with what it saves; shortening PhysBones by hand; switching Quest's materials to mobile shaders. The summary says
+  how many steps reach the target, or what stays over. A setting's savings come from estimates measured already (a
+  level tried and left is remembered while the avatar stays as it is); one never measured says what it lowers. Nothing
+  more is measured for the plan.
+- **What weighs most.** A fold under the download: the estimate's parts (textures, meshes, blendshapes, animations,
+  shaders, sounds, the rest) as one bar, and its eight biggest pieces with their item or object, size and share of the
+  download; a click shows the asset or the object. They are the amounts the estimate adds up anyway, and add up to it.
+- **The last real build, beside the estimate.** When the VRChat SDK builds the avatar (Build & Test, Build & Publish),
+  the bundle's size is kept in `Library/OrbitersMyAvatar/measured-builds.json` per avatar and platform, with what the
+  estimate said for those settings: "Last build 14.5 MB · PC, 2 h ago · estimated then 14.5 MB", marked "changed since"
+  once the avatar or its settings change. It never corrects the estimate. Read from Orbiters Toolkit's `VrcSdkBuilds`.
 - **VRCFury Stub is not VRCFury.** Menu previews, menu saves, GoGoLoco and face tracking ask Orbiters Toolkit's
   `InstalledTools`: with VRCFury Stub installed instead of VRCFury, nothing is set up as VRCFury toggles or links and the
   menu preview leaves VRCFury's components out, as the build will. Checks has a new group, **Other tools**.

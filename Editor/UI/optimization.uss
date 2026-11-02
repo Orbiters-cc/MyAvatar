@@ -64,3 +64,96 @@
 .optimize-suggestion.opt-more { margin-top: 0; margin-bottom: 10px; padding: 12px 16px; border-top-width: 1px; border-width: 1px; border-radius: 16px; border-color: rgba(255, 255, 255, 0.05); background-color: #1c1e23; }
 
 .mcb-button.opt-button { height: 30px; min-height: 30px; margin: 10px 0 0 8px; padding: 0 16px; border-radius: 15px; font-size: 11px; }
+
+/* The last real build, under the estimated download. */
+.opt-measured { margin: -2px 0 6px 52px; padding: 0; color: #9a9a9a; font-size: 10px; white-space: normal; }
+.opt-measured--stale { color: #8a7a55; }
+
+/* What weighs most: a fold under the download, its parts as one bar, then the biggest pieces. */
+.opt-weighs__head { flex-direction: row; align-items: center; height: 26px; margin: 2px 0 0 0; padding: 0 10px 0 6px; border-radius: 12px; cursor: link; transition-property: background-color; transition-duration: 0.12s; }
+.opt-weighs__head:hover { background-color: rgba(255, 255, 255, 0.04); }
+.opt-weighs__chevron { width: 12px; height: 12px; margin-right: 6px; rotate: -90deg; --icon-color: #8f8f8f; transition-property: rotate; transition-duration: 0.18s; transition-timing-function: ease-out-back; }
+.opt-weighs__head--open .opt-weighs__chevron { rotate: 0deg; }
+.opt-weighs__head:hover .opt-weighs__chevron { --icon-color: #e6e6e6; }
+.opt-weighs__title { margin: 0; padding: 0; color: #e6e6e6; font-size: 11px; -unity-font-style: bold; }
+.opt-weighs__aside { flex-grow: 1; flex-shrink: 1; margin: 0 0 0 10px; padding: 0; color: #8f8f8f; font-size: 10px; -unity-text-align: middle-right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-weighs { margin: 4px 0 2px 0; }
+.opt-weighs__bar { margin: 4px 2px 6px 2px; }
+.opt-weighs__bar .orbiters-budget__bar { background-color: #121317; }
+.opt-weighs__bar .orbiters-budget__label { font-size: 10px; color: #9a9a9a; }
+
+/* A row naming one thing and what it weighs: the costliest of a category, the pieces of the download. */
+.opt-cost { flex-direction: row; align-items: center; min-height: 30px; margin-top: 3px; padding: 3px 10px 3px 12px; border-radius: 12px; background-color: #2a2a2a; cursor: link;
+    transition-property: background-color, scale; transition-duration: 0.12s, 0.16s; transition-timing-function: ease-out, ease-out-back; }
+.opt-cost:hover { background-color: #313236; }
+.opt-cost--pressed { scale: 0.985 0.985; background-color: #36383d; }
+.opt-cost--still { cursor: arrow; }
+.opt-cost--still:hover { background-color: #2a2a2a; }
+.opt-cost__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.opt-cost__name { margin: 0; padding: 0; color: #e6e6e6; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-cost__owner { margin: 1px 0 0 0; padding: 0; color: #7f7f7f; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-cost__owner--item { color: #00DA6D; }
+.opt-cost__amount { margin: 0 0 0 10px; padding: 0; color: #e6e6e6; font-size: 11px; -unity-font-style: bold; -unity-text-align: middle-right; flex-shrink: 0; }
+.opt-cost__share { min-width: 34px; margin: 0; padding: 0; color: #8f8f8f; font-size: 10px; -unity-text-align: middle-right; flex-shrink: 0; }
+.opt-piece { padding-left: 8px; }
+.opt-piece__icon { width: 16px; height: 16px; margin-right: 8px; flex-shrink: 0; }
+.opt-piece__icon--texture { --icon-color: #00DA6D; }
+.opt-piece__icon--mesh { --icon-color: #4FA3FF; }
+.opt-piece__icon--blendshapes { --icon-color: #B58CFF; }
+.opt-piece__icon--animation { --icon-color: #FFB020; }
+.opt-piece__icon--shader { --icon-color: #FF7A6B; }
+.opt-piece__icon--audio { --icon-color: #3DD6D0; }
+.opt-piece__icon--other { --icon-color: #73777f; }
+
+/* Reach a rank: the target, a column per platform with a bar per category against each rank's limit, then the steps. */
+.opt-plan-host { transition-property: opacity; transition-duration: 0.15s; }
+.opt-plan--measuring { opacity: 0.5; }
+.opt-plan .opt-panel__head { margin-bottom: 2px; }
+.opt-plan__target { width: 236px; flex-shrink: 1; background-color: #17181c; }
+.opt-plan__summary { margin: 4px 0 2px 0; }
+.opt-plan__summary--done { color: #00DA6D; }
+.opt-plan__columns { flex-direction: row; margin: 4px -4px 0 -4px; }
+.opt-plan__column { flex-grow: 1; flex-basis: 0; min-width: 0; margin: 0 4px; }
+.opt-plan__done { width: 16px; height: 16px; margin-left: 8px; --icon-color: #00DA6D; }
+.opt-chip--target { border-width: 1px; border-color: rgba(255, 255, 255, 0.14); }
+.opt-plan__label { margin: 10px 0 2px 2px; padding: 0; color: #9a9a9a; font-size: 10px; -unity-font-style: bold; }
+
+.opt-gap { margin-top: 4px; padding: 6px 10px 8px 10px; border-radius: 12px; background-color: #2a2a2a; cursor: link; border-width: 1px; border-color: rgba(0, 0, 0, 0);
+    transition-property: background-color, border-color, scale; transition-duration: 0.12s, 0.12s, 0.16s; transition-timing-function: ease-out, ease-out, ease-out-back; }
+.opt-gap:hover { background-color: #313236; }
+.opt-gap--pressed { scale: 0.985 0.985; }
+.opt-gap--open { border-color: rgba(0, 218, 109, 0.45); background-color: #2c2f31; }
+.opt-gap__line { flex-direction: row; align-items: center; }
+.opt-gap__name { flex-grow: 1; flex-shrink: 1; min-width: 0; margin: 0; padding: 0; color: #e6e6e6; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-gap__values { margin: 0 0 0 6px; padding: 0; color: #8f8f8f; font-size: 10px; flex-shrink: 0; }
+.opt-gap__over { margin: 0 0 0 6px; padding: 0; color: #ff7a6b; font-size: 10px; -unity-font-style: bold; flex-shrink: 0; }
+.opt-gap__track { position: relative; height: 6px; margin-top: 6px; border-radius: 3px; background-color: #121317; overflow: hidden; }
+.opt-gap__before { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background-color: rgba(255, 255, 255, 0.10); }
+.opt-gap__fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; transition-property: width; transition-duration: 0.3s; transition-timing-function: ease-out; }
+.opt-gap__fill--good { background-color: #00DA6D; }
+.opt-gap__fill--medium { background-color: #ffd23f; }
+.opt-gap__fill--poor { background-color: #ff7a6b; }
+.opt-gap__tick { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -1px; background-color: rgba(255, 255, 255, 0.22); }
+.opt-gap__tick--target { width: 2px; background-color: #ffffff; }
+
+.opt-costliest { margin-top: 2px; }
+
+.opt-step { flex-direction: row; align-items: center; min-height: 44px; margin-top: 4px; padding: 6px 8px 6px 8px; border-radius: 12px; background-color: #2a2a2a;
+    transition-property: background-color, opacity; transition-duration: 0.15s; }
+.opt-step--applied { background-color: rgba(0, 218, 109, 0.10); }
+.opt-step--note { background-color: #26272b; }
+.opt-step__index { width: 22px; height: 22px; margin: 0 10px 0 2px; padding: 0; border-radius: 11px; flex-shrink: 0; background-color: #1c1e23; color: #e6e6e6;
+    font-size: 10px; -unity-font-style: bold; -unity-text-align: middle-center; }
+.opt-step--applied .opt-step__index { background-color: #00DA6D; color: #06140c; }
+.opt-step--note .opt-step__index { color: #ffb020; }
+.opt-step__texts { flex-grow: 1; flex-shrink: 1; min-width: 0; }
+.opt-step__title-row { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.opt-step__title { margin: 0; padding: 0; color: #f2f2f2; font-size: 11px; -unity-font-style: bold; white-space: normal; flex-shrink: 1; }
+.opt-step__tag { height: 16px; margin: 0 0 0 6px; padding: 0 7px; border-radius: 8px; color: #00DA6D; background-color: rgba(0, 218, 109, 0.12); font-size: 9px;
+    -unity-font-style: bold; -unity-text-align: middle-center; }
+.opt-step__detail { margin: 2px 0 0 0; padding: 0; color: #8f8f8f; font-size: 10px; white-space: normal; }
+.mcb-button.opt-button.opt-step__button { height: 26px; min-height: 26px; margin: 0 0 0 10px; padding: 0 14px; border-radius: 13px; flex-shrink: 0; }
+.mcb-button.opt-button.opt-step__button--apply { background-color: #00DA6D; color: #06140c; -unity-font-style: bold; border-width: 0; }
+.mcb-button.opt-button.opt-step__button--apply:hover { background-color: #19e27d; }
+.mcb-button.opt-button.opt-step__button--apply:disabled { background-color: rgba(0, 218, 109, 0.25); color: #00DA6D; opacity: 1; }
+.mcb-button.opt-button.opt-plan__platforms { align-self: flex-start; height: 26px; min-height: 26px; margin: 10px 0 0 0; padding: 0 12px; border-radius: 13px; font-size: 10px; }

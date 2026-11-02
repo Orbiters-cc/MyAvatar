@@ -17,7 +17,7 @@ namespace Orbiters.MyAvatar.Editor
     // avatar never changes) with what VRChat would rank and download, the polygons, and a pointer to d4rkAvatarOptimizer for
     // what only shader rewriting can do. A finished estimate updates what shows it in place: nothing under the pointer is
     // rebuilt.
-    internal sealed class OptimizationSection : AvatarSection
+    internal sealed partial class OptimizationSection : AvatarSection
     {
         private const string StyleSheetPath = "Packages/orbiters.myavatar/Editor/UI/optimization.uss";
         private static readonly Color Glow = new Color(0f, .85f, .43f, .18f);
@@ -89,8 +89,13 @@ namespace Orbiters.MyAvatar.Editor
             estimate = new VisualElement();
             polygons = new VisualElement();
             suggestion = new VisualElement(); Body.Add(suggestion);
-            RegisterCallback<AttachToPanelEvent>(_ => { poll?.Pause(); poll = schedule.Execute(Poll).Every(1500); Undo.undoRedoPerformed += Rebuild; });
-            RegisterCallback<DetachFromPanelEvent>(_ => { poll?.Pause(); Undo.undoRedoPerformed -= Rebuild; Flush(); });
+            plan.AddToClassList("opt-plan-host");
+            RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                poll?.Pause(); poll = schedule.Execute(Poll).Every(1500);
+                Undo.undoRedoPerformed += Rebuild; MeasuredBuilds.Changed += BuildMeasured;
+            });
+            RegisterCallback<DetachFromPanelEvent>(_ => { poll?.Pause(); Undo.undoRedoPerformed -= Rebuild; MeasuredBuilds.Changed -= BuildMeasured; Flush(); });
             Refresh();
         }
 
@@ -102,7 +107,10 @@ namespace Orbiters.MyAvatar.Editor
         private static bool Quest => ShowQuest ?? TextureOptimization.Mobile;
         private static string Mobile => ShowQuest == null && TextureOptimization.PlatformName(true) == TextureOptimization.IPhone ? "iOS" : "Quest";
 
-        private void Rebuild() { shown = shownRank = shownEstimate = shownPolygons = null; view = null; Refresh(); }
+        private void Rebuild() { shown = shownRank = shownEstimate = shownPolygons = shownPlan = null; view = null; Refresh(); }
+
+        // A build finished: its size shows under the estimate.
+        private void BuildMeasured() { shownEstimate = null; if (panel != null) Refresh(); }
 
         // The poll looks for changes only while the section can be seen with Unity in front: a covered, scrolled-away or
         // folded section costs nothing. Clicks and finished estimates refresh it directly.
@@ -122,6 +130,7 @@ namespace Orbiters.MyAvatar.Editor
             var result = Measured();
             ShowRank(result);
             ShowEstimate(result);
+            ShowPlan(result);
             ShowPolygons(result);
             ShowSuggestion();
         }
@@ -172,6 +181,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             // What VRChat would rank and download, under the choice that makes it; then the polygons.
             frame.Frame.Add(estimate);
+            frame.Frame.Add(plan);
             frame.Frame.Add(polygons);
         }
 
@@ -263,9 +273,9 @@ namespace Orbiters.MyAvatar.Editor
         private sealed class EstimateCard
         {
             public string Layout;
-            public Label Aside, Platform, Delta, Caption, Why, None, Error;
+            public Label Aside, Platform, Delta, Caption, Why, None, Error, Measured, WeighsAside;
             public VrcLoadingBar Bar;
-            public VisualElement Card, Download, Ranks, Stats;
+            public VisualElement Card, Download, Ranks, Stats, WeighsHead, Weighs;
             public Button Retry;
             public bool Filled;
         }
@@ -302,6 +312,9 @@ namespace Orbiters.MyAvatar.Editor
                 view.Bar = new VrcLoadingBar(); view.Download.Add(view.Bar);
                 view.Delta = new Label(); view.Delta.AddToClassList("opt-stat__delta"); view.Delta.AddToClassList("opt-download__delta"); view.Download.Add(view.Delta);
                 view.Caption = new Label(); view.Caption.AddToClassList("opt-download__caption"); view.Card.Add(view.Caption);
+                // The last real build, apart from the estimate; then what the estimate is made of.
+                view.Measured = new Label(); view.Measured.AddToClassList("opt-measured"); view.Card.Add(view.Measured);
+                WeighsFold(view);
                 view.Ranks = new VisualElement(); view.Ranks.AddToClassList("opt-ranks"); view.Card.Add(view.Ranks);
                 // Why the rank stays where it is: what no change here can bring down.
                 view.Why = new Label(); view.Why.AddToClassList("opt-estimate__why"); view.Card.Add(view.Why);
@@ -325,8 +338,8 @@ namespace Orbiters.MyAvatar.Editor
             view.Filled = filled;
             Display(view.Error, failed); Display(view.Retry, failed);
             if (failed) view.Error.text = "The estimate failed: " + result.Error;
-            foreach (var part in new VisualElement[] { view.Download, view.Caption, view.Ranks, view.Why, view.Stats, view.None }) Display(part, filled);
-            if (!filled) return;
+            foreach (var part in new VisualElement[] { view.Download, view.Caption, view.Ranks, view.Why, view.Stats, view.None, view.WeighsHead }) Display(part, filled);
+            if (!filled) { Display(view.Measured, false); Display(view.Weighs, false); return; }
 
             var now = result.Now; var upload = result.Upload;
             var shownSnapshot = off ? now : upload;
@@ -345,6 +358,8 @@ namespace Orbiters.MyAvatar.Editor
             else if (unpacked > rawLimit) text += " · " + DownloadSize.Megabytes(unpacked) + " unpacked, over VRChat's " + DownloadSize.Megabytes(rawLimit) + " limit: the upload would be refused";
             view.Caption.text = text;
             view.Caption.EnableInClassList("warning", bundle > limit || unpacked > rawLimit);
+            ShowMeasured(view, quest);
+            ShowWeighs(view, shownSnapshot.Parts(quest));
 
             view.Ranks.Clear();
             if (quest) RankRow(view.Ranks, now.Mobile, upload.Mobile);
