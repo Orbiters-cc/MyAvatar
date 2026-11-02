@@ -1,6 +1,6 @@
 # My Avatar
 
-## Unreleased
+## 0.9.22 — 2026-11-02
 
 - **Big also merges meshes toggled on their own, keeping their toggles,** when that gives the skinned meshes or the
   meshes a better rating on the platform built for (Toolkit's `MeshMerge.MergeToggled`, after the meshes toggled
