@@ -1,5 +1,10 @@
 # My Avatar
 
+## 0.9.25 — 2026-11-03
+
+- **Needs Toolkit 0.4.17.** 0.9.24 asked for Toolkit 0.4.16, which was released at the same time without the OSC config
+  switch and the clean-up rules it reads, so 0.9.24 doesn't compile with it. Nothing else changes. Skip 0.9.24.
+
 ## 0.9.24 — 2026-11-03
 
 - **Reach a rank's estimates, calibrated on 16 avatars of Enzo's projects** (Orbiters Compat: MasculineCanine with and
@@ -32,7 +37,7 @@
   so an avatar's polygon figure stays rough. Novabeast 1.2's body loses 7.9% with 175 shapes where MasculineCanine's
   (497) and Rexouium's (488) lose none, and Rexouium's 17,552-triangle tail without shapes loses none at 8 mm.
 - **Reset VRChat's OSC config at upload: a switch.** Orbiters settings > Features > My Avatar, last, on by default.
-  Off, an upload leaves VRChat's OSC config files alone (Toolkit 0.4.16, which now resets every account's file
+  Off, an upload leaves VRChat's OSC config files alone (Toolkit 0.4.17, which now resets every account's file
   even with Haï's package installed). Tests: OscConfigResetTests.
 
 ## 0.9.23 — 2026-11-02
