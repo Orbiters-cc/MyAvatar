@@ -1,5 +1,40 @@
 # My Avatar
 
+## 0.9.24 — 2026-11-03
+
+- **Reach a rank's estimates, calibrated on 16 avatars of Enzo's projects** (Orbiters Compat: MasculineCanine with and
+  without the fixture items, its two fallbacks, Control; MCB Test: Alphazear, Rexouium 1.6, Novabeast 1.0 in two
+  scenes, Novabeast 1.2 lilToon and Poiyomi with and without face tracking; N4N0 sample avatar: Low Poly Rex, its Quest
+  copy, The 1MB Ultirex). Each was measured at Off, Small and Big on PC and mobile, and each mesh at ½, 1, 2, 4 and 8 mm.
+  The figures are in `Tests/Editor/Fixtures/rank-calibration.json` (`RankCalibrationMeasure` measures them again in a
+  batch editor), and `RankCalibrationTests` holds the estimates to them. The error, summed over the avatars, for Small
+  and Big from Off (0.9.23 → 0.9.24; measured in brackets):
+  - texture memory, PC: Small 192.2 → 2.0 MB (251.2), Big 153.5 → 3.6 MB (580.0); mobile: Small 198.4 → 1.8 MB
+    (267.1), Big 79.6 → 0.7 MB (626.3);
+  - material slots and skinned meshes: 1 → 0 (Control's hidden body, which Small keeps, was counted as gone); meshes
+    at Big stay off by one (MasculineCanine with the fixture items: 2 estimated, 1 measured);
+  - polygons: Small 35,977 → 19,703 (19,826), Big 42,852 → 21,422 (43,656). Each mesh's polygons, summed per avatar
+    over every budget: 109% → 69% of what was measured. At 8 mm the total is −15% (it was −59%), and no budget claims
+    polygons that don't go (0.9.23 said 2,229 at ½ mm, where none go).
+- **Textures are estimated by the upload's own rule.** `TextureOptimization.Copy` decides each texture's copy (size,
+  format, quality) for both the upload's plan and the estimate. The estimate's facts keep what it needs per platform
+  (`TextureOptimization.States`: the import's size and format, the density measured as Small's estimate measures it,
+  alpha, body, surface and matcap maps). Unused textures (properties the shader doesn't declare) and duplicate images
+  leave the estimate as they leave the upload. Before, the estimate subtracted its own figures from the rank's whole
+  texture memory, so every texture it didn't hold counted as saved (The 1MB Ultirex at Big: 18.9 MB estimated, 0
+  measured). Mobile used PC's sizes, and density counted only when an earlier estimate had measured it.
+- **Hidden objects are estimated by the passes' own rules** (Toolkit's `ComponentCleanup.Removes`): an object holding
+  a humanoid bone, used from outside or pending for a build tool stays, as it does at upload.
+- **Polygons: almost nothing under 4 mm, a fifth at 8 mm.** Each mesh of 2,000 triangles or more loses 0 / 0.03% /
+  0.1% / 0.4% / 19% of its triangles at ½ / 1 / 2 / 4 / 8 mm, times e^(−blendshapes / 40). It was 1.5% to 12% divided by
+  1 + blendshapes / 4: bodies with hundreds of shapes lose nothing, while some clothes lose half at 4 mm and others
+  nothing. The simplifier goes by geometry the facts don't hold (how dense a mesh is, how much of it its shapes move),
+  so an avatar's polygon figure stays rough. Novabeast 1.2's body loses 7.9% with 175 shapes where MasculineCanine's
+  (497) and Rexouium's (488) lose none, and Rexouium's 17,552-triangle tail without shapes loses none at 8 mm.
+- **Reset VRChat's OSC config at upload: a switch.** Orbiters settings > Features > My Avatar, last, on by default.
+  Off, an upload leaves VRChat's OSC config files alone (Toolkit 0.4.16, which now resets every account's file
+  even with Haï's package installed). Tests: OscConfigResetTests.
+
 ## 0.9.23 — 2026-11-02
 
 - **Reach a rank estimates what a setting not tried yet would save.** A level or Custom switch never measured showed

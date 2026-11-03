@@ -34,38 +34,53 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// </summary>
         public bool Referenced;
         public int Triangles, BlendShapes, Materials;
+        /// <summary>
+        /// Hidden objects (its object or one above hidden for good) or Disabled components (the renderer off for good) take it
+        /// out of the upload, by Toolkit's own rules (<see cref="ComponentCleanup.Removes"/>), unless a build tool names it.
+        /// </summary>
+        public bool HiddenGone, DisabledGone;
     }
 
     internal sealed class TextureFact
     {
         public string Name;
-        /// <summary>The size the build stores it at now (its import settings), and its memory then on PC and on mobile.</summary>
-        public int Width, Height;
-        public long PcBytes, MobileBytes;
-        /// <summary>Meters of the avatar's surface its width covers, when an earlier estimate measured it; else -1.</summary>
-        public float Meters = -1f;
-        public bool Body, Normal, Linear, Surface;
+        /// <summary>How it is imported and used for a PC and for a mobile upload (what decides its copy).</summary>
+        public TextureOptimization.TextureState Pc, Mobile;
+        /// <summary>
+        /// Only renderers Hidden objects takes out show it (<see cref="HiddenGone"/>), or only renderers Hidden objects and
+        /// Disabled components together take out (<see cref="DisabledGone"/>): it leaves with them.
+        /// </summary>
+        public bool HiddenGone, DisabledGone;
+        /// <summary>
+        /// Only material properties its shader doesn't declare hold it (Unused textures drops it), or it is the same image
+        /// imported the same way as another one the materials show (Duplicate textures keeps that one).
+        /// </summary>
+        public bool Unused, Duplicate;
+        public TextureOptimization.TextureState State(bool mobile) => mobile ? Mobile : Pc;
     }
 
     /// <summary>
     /// What settings would save at upload, estimated from the facts of the avatar as it is (<see cref="RankFacts"/>) by the
-    /// rules the changes follow: textures sized for the distance (<see cref="TextureDensity.Cap"/>), halved surface maps,
-    /// Quest's half-size ASTC; polygons from each mesh's triangles and a share of them for the budget (scaled to what the
-    /// current estimate measured, when it simplified any); merges from Mesh Merge's rules (meshes always shown join one,
-    /// meshes one toggle each shows and hides join it when that gives a better rating); objects hidden at rest that nothing
-    /// shows. Pure arithmetic: the plan shows it as "about", until the settings are measured.
+    /// rules the changes follow: each texture as the upload's own rule makes it (<see cref="TextureOptimization.Copy"/>,
+    /// from its density and import read once), gone with Unused and Duplicate textures; polygons from each mesh's triangles
+    /// and a share of them for the budget (scaled to what the current estimate measured, when it simplified any); merges
+    /// from Mesh Merge's rules (meshes always shown join one, meshes one toggle each shows and hides join it when that gives
+    /// a better rating); what Hidden objects and Disabled components take out, by Toolkit's rules
+    /// (<see cref="ComponentCleanup.Removes"/>). Pure arithmetic: the plan shows it as "about", until the settings are measured.
+    /// Calibrated on the avatars of Enzo's projects: RankCalibrationTests.
     /// </summary>
     internal static class RankEstimates
     {
-        // Share of a mesh's triangles the simplifier removes for each budget (mm), on a mesh without blendshapes. What any
-        // blendshape moving less than a quarter of the mesh moves is kept as it is: a mesh keeps more the more shapes it has
-        // (ShapesLock shapes halve the share). MasculineCanine at 8 mm (a body of 99,642 triangles with 497 shapes, hair of
-        // 3,832 and 4,658 with 7 each, a mane a VRCFury toggle shows): 192 removed, where this says about 680.
-        private static readonly (float Millimetres, float Share)[] Shares = { (.5f, .015f), (1f, .03f), (2f, .05f), (4f, .08f), (8f, .12f) };
-        private const float ShapesLock = 4f;
+        // Share of a mesh's triangles the simplifier removes for each budget (mm), on a mesh without blendshapes, times
+        // e^(-blendshapes / ShapesKeep): what any blendshape moves is kept as it is, and a body with hundreds of shapes keeps
+        // everything. Fitted on 42 meshes of 2,000 triangles or more of 14 avatars of Enzo's projects (Tests/Editor/Fixtures/
+        // rank-calibration.json, RankCalibrationTests): at 8 mm by least squares on each avatar's total (a fifth of a mesh
+        // without shapes); under it nothing does better than next to nothing (a few meshes lose a part, most none), so the
+        // shares there are those that err least on each avatar. The simplifier goes by geometry these facts don't hold (how
+        // dense a mesh is, how much of it the shapes move): a mesh loses a part or nothing, so one avatar's figure stays rough.
+        private static readonly (float Millimetres, float Share)[] Shares = { (.5f, 0f), (1f, .0003f), (2f, .001f), (4f, .004f), (8f, .19f) };
+        private const float ShapesKeep = 40f;
         private const int MinTriangles = 2000;
-        // ASTC's bits per pixel: 6x6 for colour and normal maps, 8x8 for other linear data (TextureOptimization's Quest rule).
-        private const float Astc6 = 128f / 36f, Astc8 = 2f;
 
         // ---- Reading ----
 
@@ -92,17 +107,33 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     else animated.Add(name);
                 }
             }
-            var renderers = root.GetComponentsInChildren<Renderer>(true).Where(r => r is SkinnedMeshRenderer || r is MeshRenderer).ToList();
-            Renderer body = null;
-            int most = -1;
+            var all = root.GetComponentsInChildren<Renderer>(true).Where(r => !TextureOptimization.EditorHelper(r)).ToList();
+            var renderers = all.Where(r => r is SkinnedMeshRenderer || r is MeshRenderer).ToList();
+            // What Hidden objects and Disabled components take out, by their own rules (read only when something is hidden).
+            AvatarUsage usage = null;
+            bool usageFailed = false;
+            (bool Hidden, bool Disabled) Gone(Renderer renderer)
+            {
+                if (renderer.enabled && renderer.gameObject.activeInHierarchy || usageFailed) return (false, false);
+                try { usage ??= new AvatarUsage(root); }
+                catch (Exception ex) { usageFailed = true; Debug.LogWarning("[My Avatar] Reach a rank: hidden objects are not estimated (" + ex.Message + ")."); return (false, false); }
+                // Not what an animation toggles or a build tool names (it may show it).
+                if (Toggles(renderer) || Named(renderer.transform, root.transform, referenced)) return (false, false);
+                return (ComponentCleanup.Removes(usage, renderer, true, false), ComponentCleanup.Removes(usage, renderer, false, true));
+            }
+            bool Toggles(Renderer renderer)
+            {
+                for (var t = renderer.transform; t != null && t != root.transform; t = t.parent) if (toggled.Contains(t.name)) return true;
+                return false;
+            }
+            var gone = new Dictionary<Renderer, (bool Hidden, bool Disabled)>();
+            foreach (var renderer in all) gone[renderer] = Gone(renderer);
             foreach (var renderer in renderers)
             {
                 var mesh = MeshOptimization.MeshOf(renderer);
                 if (mesh == null) continue;
                 int triangles = RankContributors.Triangles(mesh);
-                if (triangles > most) { most = triangles; body = renderer; }
-                bool toggles = false;
-                for (var t = renderer.transform; t != null && t != root.transform; t = t.parent) if (toggled.Contains(t.name)) { toggles = true; break; }
+                bool toggles = Toggles(renderer);
                 facts.Renderers.Add(new RendererFact
                 {
                     Path = AnimationUtility.CalculateTransformPath(renderer.transform, root.transform), Skinned = renderer is SkinnedMeshRenderer,
@@ -111,20 +142,50 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     Cloth = renderer.GetComponent<Cloth>() != null, Triangles = triangles, BlendShapes = mesh.blendShapeCount, Materials = renderer.sharedMaterials.Length,
                     Referenced = Named(renderer.transform, root.transform, referenced),
                 });
+                var fact = facts.Renderers[facts.Renderers.Count - 1];
+                (fact.HiddenGone, fact.DisabledGone) = gone[renderer];
             }
-            var bodyTextures = new HashSet<Texture>(body != null ? Shown(body) : Enumerable.Empty<Texture>());
-            var meters = avatar ? TextureDensity.Known(avatar) : null;
-            foreach (var texture in renderers.SelectMany(Shown).Distinct())
+            // Every texture the materials show, as the rank counts texture memory; each as the upload's texture rules see it
+            // (TextureOptimization.States: its density measured, as Small's estimate would, and kept for it).
+            List<TextureSlot> slots = null;
+            Dictionary<Texture, TextureOptimization.TextureState> pc = null, mobile = null;
+            if (avatar)
             {
-                var importer = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter;
-                var size = importer != null ? TextureOptimization.BuildSize(texture, importer, false) : new Vector2Int(texture.width, texture.height);
+                slots = TextureMatching.Slots(avatar);
+                pc = TextureOptimization.States(avatar, false, true, true, slots);
+                mobile = TextureOptimization.States(avatar, true, true, true, slots);
+            }
+            TextureOptimization.TextureState Fixed(Texture texture, bool onMobile) =>
+                new TextureOptimization.TextureState { Before = TextureOptimization.BuildBytes(texture, onMobile), Width = texture.width, Height = texture.height };
+            // What Unused textures and Duplicate textures take out, by their own rules.
+            var declared = new HashSet<Texture>();
+            foreach (var material in all.SelectMany(r => r.sharedMaterials).Where(m => m != null).Distinct())
+            {
+                var unused = new HashSet<string>(MaterialCleanup.UnusedTextures(material), StringComparer.Ordinal);
+                foreach (string property in material.GetTexturePropertyNames())
+                    if (!unused.Contains(property) && material.GetTexture(property) is Texture held && held != null) declared.Add(held);
+            }
+            Dictionary<Texture, Texture> duplicates;
+            try { duplicates = MaterialCleanup.DuplicateTextures(root); }
+            catch (Exception ex) { duplicates = new Dictionary<Texture, Texture>(); Debug.LogWarning("[My Avatar] Reach a rank: duplicate textures are not estimated (" + ex.Message + ")."); }
+            var showing = new Dictionary<Texture, List<Renderer>>();
+            foreach (var renderer in all)
+                foreach (var texture in Shown(renderer))
+                {
+                    if (!showing.TryGetValue(texture, out var list)) showing[texture] = list = new List<Renderer>();
+                    list.Add(renderer);
+                }
+            foreach (var pair in showing)
+            {
+                var texture = pair.Key;
                 facts.Textures.Add(new TextureFact
                 {
-                    Name = texture.name, Width = size.x, Height = size.y,
-                    PcBytes = TextureOptimization.BuildBytes(texture, false), MobileBytes = TextureOptimization.BuildBytes(texture, true),
-                    Meters = meters != null && meters.TryGetValue(texture, out float m) ? m : -1f, Body = bodyTextures.Contains(texture),
-                    Normal = importer != null && importer.textureType == TextureImporterType.NormalMap, Linear = importer != null && !importer.sRGBTexture,
-                    Surface = importer != null && !importer.sRGBTexture && TextureDensity.SurfaceMap(texture.name),
+                    Name = texture.name,
+                    Pc = pc != null && pc.TryGetValue(texture, out var p) ? p : Fixed(texture, false),
+                    Mobile = mobile != null && mobile.TryGetValue(texture, out var q) ? q : Fixed(texture, true),
+                    HiddenGone = pair.Value.All(r => gone[r].Hidden),
+                    DisabledGone = pair.Value.All(r => gone[r].Hidden || gone[r].Disabled),
+                    Unused = !declared.Contains(texture), Duplicate = duplicates.ContainsKey(texture),
                 });
             }
             return facts;
@@ -197,20 +258,22 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             var now = current.Passes; var then = candidate.Passes;
             bool Adds(OptimizationPasses pass) => (then & pass) != 0 && (now & pass) == 0;
 
-            // Objects hidden at rest that nothing shows leave the upload.
-            var hidden = facts.Renderers.Where(r => !r.Shown && !r.Toggled && !r.Referenced).ToList();
-            if (Adds(OptimizationPasses.HiddenObjects))
+            // What Hidden objects and Disabled components take out leaves the upload.
+            bool Gone(RendererFact r, OptimizationPasses passes) =>
+                (passes & OptimizationPasses.HiddenObjects) != 0 && r.HiddenGone || (passes & OptimizationPasses.DisabledComponents) != 0 && r.DisabledGone;
+            var hidden = facts.Renderers.Where(r => Gone(r, then) && !Gone(r, now)).ToList();
+            if (hidden.Count > 0)
             {
                 Save(Category.PolyCount, hidden.Sum(r => r.Triangles));
                 Save(Category.SkinnedMeshCount, hidden.Count(r => r.Skinned));
                 Save(Category.MeshCount, hidden.Count(r => !r.Skinned));
                 Save(Category.MaterialCount, hidden.Sum(r => r.Materials));
             }
-            var kept = (then & OptimizationPasses.HiddenObjects) != 0 ? facts.Renderers.Except(hidden).ToList() : facts.Renderers;
+            var kept = facts.Renderers.Where(r => !Gone(r, then)).ToList();
 
             // Polygons: each mesh's share for the budget, scaled to what the current estimate measured when it simplified.
             float Predicted(UploadOptimization settings) => (settings.Passes & OptimizationPasses.FewerPolygons) == 0 ? 0f
-                : kept.Where(r => r.Triangles >= MinTriangles).Sum(r => r.Triangles * Share(settings.PolygonQuality) / (1f + r.BlendShapes / ShapesLock));
+                : kept.Sum(r => Removed(r, settings.PolygonQuality));
             float predictedNow = Predicted(current), predictedThen = Predicted(candidate);
             if ((now & OptimizationPasses.FewerPolygons) != 0 && predictedNow > 0f) predictedThen *= removedPolygons / predictedNow;
             Save(Category.PolyCount, predictedThen - ((now & OptimizationPasses.FewerPolygons) != 0 ? removedPolygons : 0));
@@ -244,37 +307,29 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             Save(Category.SkinnedMeshCount, Math.Min(skinnedSaved, skinnedNow - 1));
             Save(Category.MeshCount, Math.Min(meshesSaved, meshesNow));
 
-            // Texture memory: each texture at the size the candidate's rules give it, never larger than it is now.
-            bool resizes = (then & OptimizationPasses.ResizeTextures) != 0, half = (then & OptimizationPasses.HalfSurfaceMaps) != 0;
-            bool quest = mobile && (then & OptimizationPasses.QuestTextures) != 0;
-            if (resizes || half || quest)
-            {
-                double total = 0;
-                foreach (var texture in facts.Textures) total += Bytes(texture, mobile, resizes, half, quest, candidate.SharpFrom);
-                Save(Category.TextureMegabytes, stats.Value(Category.TextureMegabytes) - (float)(total / 1048576d));
-            }
+            // Texture memory: each texture as the upload's rules make it under each setting (TextureOptimization.Copy),
+            // nothing for one only what leaves the upload shows.
+            double change = 0;
+            foreach (var texture in facts.Textures) change += Bytes(texture, mobile, current) - Bytes(texture, mobile, candidate);
+            Save(Category.TextureMegabytes, (float)(change / 1048576d));
             return saves;
         }
 
-        /// <summary>A texture's memory under a candidate's texture rules (TextureOptimization.Build's, simplified).</summary>
-        internal static long Bytes(TextureFact texture, bool mobile, bool resizes, bool half, bool quest, float sharpFrom)
+        /// <summary>A texture's memory in the upload under <paramref name="settings"/>, for PC or mobile.</summary>
+        internal static long Bytes(TextureFact texture, bool mobile, UploadOptimization settings)
         {
-            long bytes = mobile ? texture.MobileBytes : texture.PcBytes;
-            if (texture.Width <= 0 || texture.Height <= 0) return bytes;
-            var size = new Vector2Int(texture.Width, texture.Height);
-            if (resizes) size = TextureOptimization.Capped(size.x, size.y, TextureDensity.Cap(texture.Meters > 0f ? texture.Meters : (float?)null, texture.Body, false, sharpFrom));
-            if (half && texture.Surface) size = TextureOptimization.Half(size, 64);
-            double area = (double)size.x * size.y, before = (double)texture.Width * texture.Height;
-            long after;
-            if (quest)
-            {
-                size = TextureOptimization.Capped(Mathf.Max(64, size.x / 2), Mathf.Max(64, size.y / 2), 1024);
-                area = (double)size.x * size.y;
-                after = (long)(area * 4d / 3d * (texture.Linear && !texture.Normal ? Astc8 : Astc6) / 8d);
-            }
-            else after = (long)(bytes * area / before);
-            return Math.Min(bytes, after);
+            var passes = settings.Passes;
+            if ((passes & OptimizationPasses.HiddenObjects) != 0 && texture.HiddenGone ||
+                (passes & (OptimizationPasses.HiddenObjects | OptimizationPasses.DisabledComponents)) == (OptimizationPasses.HiddenObjects | OptimizationPasses.DisabledComponents) && texture.DisabledGone)
+                return 0;
+            if ((passes & OptimizationPasses.UnusedTextures) != 0 && texture.Unused || (passes & OptimizationPasses.DuplicateTextures) != 0 && texture.Duplicate) return 0;
+            var state = texture.State(mobile);
+            return state == null ? 0 : TextureOptimization.Copy(state, passes, TextureDensity.Clamp(settings.SharpFrom), mobile).After;
         }
+
+        /// <summary>The triangles the simplifier is estimated to remove from the mesh at this polygon quality.</summary>
+        internal static float Removed(RendererFact renderer, float quality) =>
+            renderer.Triangles < MinTriangles ? 0f : renderer.Triangles * Share(quality) * Mathf.Exp(-renderer.BlendShapes / ShapesKeep);
 
         // The share of a mesh's triangles the budget of this polygon quality removes (log-linear between the stops).
         internal static float Share(float quality)

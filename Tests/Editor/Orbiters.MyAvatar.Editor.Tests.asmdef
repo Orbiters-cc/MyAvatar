@@ -4,7 +4,7 @@
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "overrideReferences": true,
-  "precompiledReferences": ["nunit.framework.dll", "VRCSDKBase.dll", "VRCSDK3A.dll", "VRC.Dynamics.dll", "VRC.SDK3.Dynamics.PhysBone.dll"],
+  "precompiledReferences": ["nunit.framework.dll", "Newtonsoft.Json.dll", "VRCSDKBase.dll", "VRCSDK3A.dll", "VRC.Dynamics.dll", "VRC.SDK3.Dynamics.PhysBone.dll"],
   "versionDefines": [
     { "name": "com.vrchat.core.vpm-resolver", "expression": "0.1.0", "define": "MYAVATAR_VPM" }
   ]

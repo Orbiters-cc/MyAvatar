@@ -248,8 +248,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
         private static RankFacts Facts(params RendererFact[] renderers) => new RankFacts { Renderers = renderers.ToList() };
 
+        // Hidden and never toggled: what Hidden objects takes out (Read asks Toolkit's own rule; here it is given).
         private static RendererFact Mesh(string path, int triangles, bool skinned = true, bool shown = true, bool toggled = false, int shapes = 0) =>
-            new RendererFact { Path = path, Skinned = skinned, Shown = shown, Toggled = toggled, Triangles = triangles, BlendShapes = shapes, Materials = 1 };
+            new RendererFact { Path = path, Skinned = skinned, Shown = shown, Toggled = toggled, Triangles = triangles, BlendShapes = shapes, Materials = 1, HiddenGone = !shown && !toggled };
 
         private static OptimizationEstimate.Snapshot Upload(int skinned, int meshes, int polygons, float textures = 0f)
         {
@@ -258,23 +259,37 @@ namespace Orbiters.MyAvatar.Editor.Tests
             return new OptimizationEstimate.Snapshot { PcRank = Stats(false, values), MobileRank = Stats(true, values) };
         }
 
-        [Test] public void TexturesAreEstimatedByTheDistanceRule()
+        // The estimate sizes each texture by the upload's own rule (TextureOptimization.Copy), from what Read keeps of it.
+        [Test] public void TexturesAreEstimatedByTheUploadsOwnRule()
         {
-            var texture = new TextureFact { Name = "Shirt", Width = 2048, Height = 2048, PcBytes = 4 << 20, MobileBytes = 4 << 20 };
-            // Not measured: the sizes My Avatar uses at one meter (512 px for all but the body), scaled with the distance.
-            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 1f), Is.EqualTo((4 << 20) / 16));
-            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 3f), Is.EqualTo((4 << 20) / 256), "512 / 3 m: 128 px");
-            texture.Body = true;
-            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 1f), Is.EqualTo(4 << 20), "the body keeps 2048 px at 1 m");
-            // Measured meters: a texel per screen pixel from the distance (1,000 px per meter at 1 m, a tenth of slack).
-            texture.Body = false; texture.Meters = 1f;
-            Assert.That(RankEstimates.Bytes(texture, false, true, false, false, 1f), Is.EqualTo((4 << 20) / 4), "909 texels needed: 1024 px");
-            Assert.That(RankEstimates.Bytes(texture, false, false, false, false, 1f), Is.EqualTo(4 << 20), "no resize: as it is");
-            // Quest: half the size in ASTC 6x6, 1024 px at most.
-            long quest = RankEstimates.Bytes(new TextureFact { Width = 2048, Height = 2048, PcBytes = 4 << 20, MobileBytes = 4 << 20 }, true, false, false, true, 1f);
-            Assert.That(quest, Is.EqualTo((long)(1024d * 1024d * 4d / 3d * (128d / 36d) / 8d)));
-            var surface = new TextureFact { Width = 1024, Height = 1024, PcBytes = 1 << 20, MobileBytes = 1 << 20, Meters = 2f, Surface = true, Linear = true };
-            Assert.That(RankEstimates.Bytes(surface, false, true, true, false, 1f), Is.EqualTo((1 << 20) / 4), "metallic and roughness at half");
+            long Bytes(TextureFormat format, int size) => TextureOptimization.FormatBytes(format, size, size, true);
+            var pc = new TextureOptimization.TextureState { Changeable = true, Width = 2048, Height = 2048, Format = TextureFormat.DXT5, Before = Bytes(TextureFormat.DXT5, 2048) };
+            var mobile = new TextureOptimization.TextureState { Changeable = true, Width = 2048, Height = 2048, Format = TextureFormat.ASTC_6x6, Before = Bytes(TextureFormat.ASTC_6x6, 2048) };
+            var shirt = new TextureFact { Name = "Shirt", Pc = pc, Mobile = mobile };
+            var off = new UploadOptimization();
+            var small = new UploadOptimization { level = OptimizationLevel.Small };
+            var big = new UploadOptimization { level = OptimizationLevel.Big };
+            Assert.That(RankEstimates.Bytes(shirt, false, off), Is.EqualTo(pc.Before), "Off: as it is");
+            // Density not measured: 512 px at 1 m for all but the body, in the format with the best quality per byte (no alpha: DXT1).
+            Assert.That(RankEstimates.Bytes(shirt, false, small), Is.EqualTo(Bytes(TextureFormat.DXT1, 512)));
+            pc.Body = true;
+            Assert.That(RankEstimates.Bytes(shirt, false, small), Is.EqualTo(Bytes(TextureFormat.DXT1, 2048)), "the body keeps 2048 px at 1 m");
+            // Measured: a texel per screen pixel from the distance (1,000 px per meter at 1 m, a tenth of slack).
+            pc.Body = false; pc.Meters = 1f;
+            Assert.That(RankEstimates.Bytes(shirt, false, small), Is.EqualTo(Bytes(TextureFormat.DXT1, 1024)), "909 texels needed: 1024 px");
+            // Mobile keeps its own format and size; Big's Quest textures halve them again (sharp from 3 m: 512 px, then 256).
+            mobile.Meters = 1f;
+            Assert.That(RankEstimates.Bytes(shirt, true, small), Is.EqualTo(Bytes(TextureFormat.ASTC_6x6, 1024)));
+            Assert.That(RankEstimates.Bytes(shirt, true, big), Is.EqualTo(Bytes(TextureFormat.ASTC_6x6, 256)));
+            // A ramp or glyph atlas uploads as it is.
+            var ramp = new TextureFact { Name = "Ramp", Pc = new TextureOptimization.TextureState { Width = 256, Height = 4, Before = 4096 } };
+            Assert.That(RankEstimates.Bytes(ramp, false, big), Is.EqualTo(4096));
+            // What changes is saved, and a texture only a hidden object shows leaves with it; nothing else counts (0.9.23 took
+            // the rank's whole texture memory minus these, so every texture the facts don't hold counted as saved).
+            var old = new TextureFact { Name = "Old shirt", Pc = new TextureOptimization.TextureState { Width = 512, Height = 512, Before = 1 << 20 }, HiddenGone = true };
+            var facts = new RankFacts { Textures = { shirt, old } };
+            var saves = RankEstimates.Saves(facts, Upload(0, 0, 0, 40f), 0, off, small, false);
+            Assert.That(saves[AvatarPerformanceCategory.TextureMegabytes], Is.EqualTo((pc.Before - Bytes(TextureFormat.DXT1, 1024) + (1 << 20)) / 1048576f).Within(1e-4f));
         }
 
         [Test] public void PolygonsAreEstimatedFromTrianglesAndScaledToWhatWasMeasured()
@@ -284,15 +299,19 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var small = new UploadOptimization { level = OptimizationLevel.Small };
             var saves = RankEstimates.Saves(facts, upload, 0, new UploadOptimization(), small, false);
             float share = RankEstimates.Share(UploadOptimization.SmallPolygonQuality);
-            Assert.That(share, Is.EqualTo(.08f).Within(1e-4f), "4 mm");
-            Assert.That(saves[AvatarPerformanceCategory.PolyCount], Is.EqualTo(10000 * share / 11f + 6000 * share).Within(1f),
-                "40 blendshapes keep ten elevenths of the body; a mesh under 2,000 triangles is never simplified");
-            // Small measured 300 polygons fewer where the rule said 553: Big's estimate is scaled the same way.
-            float predictedSmall = 10000 * share / 11f + 6000 * share, predictedBig = (10000 / 11f + 6000) * RankEstimates.Share(UploadOptimization.BigPolygonQuality);
+            Assert.That(share, Is.EqualTo(.004f).Within(1e-5f), "4 mm");
+            Assert.That(RankEstimates.Share(UploadOptimization.BigPolygonQuality), Is.EqualTo(.19f).Within(1e-4f), "8 mm");
+            float body = Mathf.Exp(-1f);
+            Assert.That(saves[AvatarPerformanceCategory.PolyCount], Is.EqualTo((10000 * body + 6000) * share).Within(1f),
+                "40 blendshapes keep all but e^-1 of the body's share; a mesh under 2,000 triangles is never simplified");
+            // Small measured 300 polygons fewer where the rule said 39: Big's estimate is scaled the same way.
+            float predictedSmall = (10000 * body + 6000) * share, predictedBig = (10000 * body + 6000) * RankEstimates.Share(UploadOptimization.BigPolygonQuality);
             var big = RankEstimates.Saves(facts, upload, 300, small, new UploadOptimization { level = OptimizationLevel.Big }, false);
             Assert.That(big[AvatarPerformanceCategory.PolyCount], Is.EqualTo(predictedBig * 300f / predictedSmall - 300f).Within(1f));
             var none = RankEstimates.Saves(facts, upload, 0, small, new UploadOptimization { level = OptimizationLevel.Big }, false);
             Assert.That(none.ContainsKey(AvatarPerformanceCategory.PolyCount), Is.False, "nothing simplified at 4 mm: no more expected at 8 mm");
+            // Under 2 mm next to nothing goes: ½ mm removes none.
+            Assert.That(RankEstimates.Share(1f), Is.EqualTo(0f));
         }
 
         [Test] public void MergesAreEstimatedByMeshMergesRules()
@@ -317,7 +336,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var apart = RankEstimates.Saves(Facts(body, tail), Upload(2, 0, 200), 0, off, big, false);
             Assert.That(apart.ContainsKey(AvatarPerformanceCategory.SkinnedMeshCount), Is.False, "two that stay where they are");
             // Hidden at rest and never shown: gone at upload with Small already, unless a build tool may show it.
-            var toggledByTool = Mesh("Mane", 80, shown: false); toggledByTool.Referenced = true;
+            var toggledByTool = Mesh("Mane", 80, shown: false); toggledByTool.Referenced = true; toggledByTool.HiddenGone = false;
             var keptByTool = RankEstimates.Saves(Facts(Mesh("Body", 100), toggledByTool), Upload(2, 0, 180), 0, off,
                 new UploadOptimization { level = OptimizationLevel.Small }, false);
             Assert.That(keptByTool.ContainsKey(AvatarPerformanceCategory.PolyCount), Is.False);
@@ -373,6 +392,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(facts.Renderers.Single(r => r.Path == "Body").BlendShapes, Is.EqualTo(1));
             Assert.That(facts.Renderers.Single(r => r.Path == "Body").Referenced, Is.True, "the descriptor's visemes");
             Assert.That(facts.Renderers.Single(r => r.Path == "Old shirt").Referenced, Is.False);
+            Assert.That(facts.Renderers.Single(r => r.Path == "Old shirt").HiddenGone, Is.True, "hidden for good: Hidden objects takes it out");
+            Assert.That(facts.Renderers.Single(r => r.Path == "Hat").HiddenGone, Is.False, "an animation shows it");
+            Assert.That(facts.Renderers.Single(r => r.Path == "Body").HiddenGone, Is.False);
             Assert.That(facts.Textures, Is.Empty, "Standard materials without textures");
             Assert.That(hat, Is.Not.Null);
         }

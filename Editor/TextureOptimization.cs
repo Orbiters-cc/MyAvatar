@@ -214,92 +214,141 @@ namespace Orbiters.MyAvatar.Editor
         /// <summary>The plan for the platform the project builds for (mobile when Android or iOS).</summary>
         internal static Plan Build(MyAvatar avatar) => Build(avatar, Mobile);
 
-        /// <summary>The plan for a PC or a mobile (Quest, or iOS when the project builds for it) upload.</summary>
-        internal static Plan Build(MyAvatar avatar, bool mobile)
+        /// <summary>
+        /// What decides a texture's copy for one platform besides the settings: its kind, where it shows, its measured density
+        /// and how it is imported for the platform. Read once (<see cref="States"/>); a rank plan's estimates keep it.
+        /// </summary>
+        internal sealed class TextureState
         {
-            var settings = avatar.uploadOptimization;
-            var passes = settings.Passes;
-            var plan = new Plan { sharpFrom = SharpFrom(avatar), mobile = mobile };
-            bool resize = (passes & OptimizationPasses.ResizeTextures) != 0, crunch = (passes & OptimizationPasses.CrunchTextures) != 0;
-            bool half = (passes & OptimizationPasses.HalfSurfaceMaps) != 0, quest = mobile && (passes & OptimizationPasses.QuestTextures) != 0;
-            // Only the texture passes change textures: under Custom with "Hidden objects" alone, formats stay too.
-            bool changes = resize || crunch || half || quest;
-            var candidates = new List<(Texture2D texture, TextureImporter importer, bool view, bool surface)>();
-            // Images left as they are: a duplicate of one of them keeps its size too.
-            var asIs = new List<Texture2D>();
-            var slots = TextureMatching.Slots(avatar);
+            /// <summary>False where it uploads as it is whatever the settings (not a plain image, a ramp, a glyph atlas...).</summary>
+            public bool Changeable;
+            public bool Normal, Linear, View, Surface, Body, AlphaUsed;
+            /// <summary>Meters of surface its width covers on its most demanding use; null where that can't be measured.</summary>
+            public float? Meters;
+            /// <summary>As imported for the platform: its size, format, whether crunched and the crunch quality, and its memory.</summary>
+            public int Width, Height, Quality;
+            public TextureFormat Format;
+            public bool Crunched;
+            public long Before;
+        }
+
+        /// <summary>
+        /// The state of each texture the avatar's materials show (<see cref="TextureMatching.Slots"/>), for a PC or a mobile
+        /// upload. Its density is measured with <paramref name="meters"/> (only resizing needs it), whether it uses alpha with
+        /// <paramref name="alpha"/> (only a new format does).
+        /// </summary>
+        internal static Dictionary<Texture, TextureState> States(MyAvatar avatar, bool mobile, bool meters, bool alpha, List<TextureSlot> slots = null)
+        {
+            slots ??= TextureMatching.Slots(avatar);
+            var states = new Dictionary<Texture, TextureState>();
+            var candidates = new List<(Texture2D texture, TextureImporter importer)>();
             foreach (var group in slots.Where(s => s.existing).GroupBy(s => s.existing))
             {
                 var texture = group.Key;
-                long bytes = BuildBytes(texture, mobile);
-                plan.before += bytes; plan.after += bytes;
-                if (!changes) continue;
+                var state = states[texture] = new TextureState { Before = BuildBytes(texture, mobile), Width = texture.width, Height = texture.height };
                 if (!Compressible(texture, out var importer) ||
                     group.Any(s => Exclusion(importer.assetPath, texture.name, s.property + " " + s.description, texture.width, texture.height) != null))
-                {
-                    if (texture is Texture2D image) asIs.Add(image);
                     continue;
-                }
+                state.Changeable = true;
+                state.Normal = importer.textureType == TextureImporterType.NormalMap;
+                state.Linear = !importer.sRGBTexture;
                 // Metallic and roughness maps, by the slots showing them or, for linear data, by name.
-                bool surface = group.All(s => TextureDensity.SurfaceMap(s.property + " " + s.description)) || !importer.sRGBTexture && TextureDensity.SurfaceMap(texture.name);
+                state.Surface = group.All(s => TextureDensity.SurfaceMap(s.property + " " + s.description)) || !importer.sRGBTexture && TextureDensity.SurfaceMap(texture.name);
                 // A texture read by direction (a matcap) everywhere it is used has no surface density.
-                candidates.Add(((Texture2D)texture, importer, group.All(s => TextureDensity.ViewMapped(s.property + " " + s.description)), surface));
-            }
-            if (candidates.Count == 0) return plan;
-            var bodyTextures = BodyTextures(avatar, slots);
-            var meters = resize ? TextureDensity.MetersPerTexture(avatar, slots) : new Dictionary<Texture, float>();
-            var alpha = AlphaUsed(candidates.Where(c => c.importer.textureType != TextureImporterType.NormalMap).Select(c => (c.texture, c.importer)));
-            // Every texture has an entry: its change, or null where it uploads as it is.
-            var entries = new Dictionary<Texture2D, TexturePlan>();
-            foreach (var (texture, importer, view, surface) in candidates)
-            {
-                bool normal = importer.textureType == TextureImporterType.NormalMap, alphaUsed = !normal && alpha[texture];
-                var (current, currentlyCrunched, currentQuality) = BuildFormat(texture, mobile);
+                state.View = group.All(s => TextureDensity.ViewMapped(s.property + " " + s.description));
+                (state.Format, state.Crunched, state.Quality) = BuildFormat(texture, mobile);
                 var size = BuildSize(texture, importer, mobile);
-                // Only ever smaller: never larger than the texture is imported for the platform, then halved from there.
-                var target = resize ? Capped(size.x, size.y, TextureDensity.Cap(meters.TryGetValue(texture, out float m) ? m : (float?)null, bodyTextures.Contains(texture), view, plan.sharpFrom)) : size;
-                if (half && surface) target = Half(target, SurfaceMinSize);
-                var format = current;
-                int quality = currentlyCrunched ? currentQuality : EncodeQuality;
-                if (mobile)
+                state.Width = size.x; state.Height = size.y;
+                candidates.Add(((Texture2D)texture, importer));
+            }
+            if (candidates.Count == 0) return states;
+            var bodyTextures = BodyTextures(avatar, slots);
+            var density = meters ? TextureDensity.MetersPerTexture(avatar, slots) : new Dictionary<Texture, float>();
+            var alphas = alpha ? AlphaUsed(candidates.Where(c => c.importer.textureType != TextureImporterType.NormalMap)) : new Dictionary<Texture2D, bool>();
+            foreach (var (texture, _) in candidates)
+            {
+                var state = states[texture];
+                state.Body = bodyTextures.Contains(texture);
+                state.Meters = density.TryGetValue(texture, out float m) ? m : (float?)null;
+                state.AlphaUsed = !state.Normal && alphas.TryGetValue(texture, out bool used) && used;
+            }
+            return states;
+        }
+
+        /// <summary>
+        /// The copy a texture gets under <paramref name="passes"/> (sharp from <paramref name="sharpFrom"/> meters), for a PC or
+        /// a mobile upload: its size, format, quality and memory, and whether it changes at all (never into more memory:
+        /// turning mipmaps on can outweigh the saving on a small one).
+        /// </summary>
+        internal static (int Width, int Height, TextureFormat Format, int Quality, long After, bool Change) Copy(TextureState state,
+            OptimizationPasses passes, float sharpFrom, bool mobile)
+        {
+            bool resize = (passes & OptimizationPasses.ResizeTextures) != 0, crunch = (passes & OptimizationPasses.CrunchTextures) != 0;
+            bool half = (passes & OptimizationPasses.HalfSurfaceMaps) != 0, quest = mobile && (passes & OptimizationPasses.QuestTextures) != 0;
+            // Only the texture passes change textures: under Custom with "Hidden objects" alone, formats stay too.
+            if (!state.Changeable || !(resize || crunch || half || quest)) return (state.Width, state.Height, state.Format, state.Quality, state.Before, false);
+            var size = new Vector2Int(state.Width, state.Height);
+            // Only ever smaller: never larger than the texture is imported for the platform, then halved from there.
+            var target = resize ? Capped(size.x, size.y, TextureDensity.Cap(state.Meters, state.Body, state.View, sharpFrom)) : size;
+            if (half && state.Surface) target = Half(target, SurfaceMinSize);
+            var format = state.Format;
+            int quality = state.Crunched ? state.Quality : EncodeQuality;
+            if (mobile)
+            {
+                if (quest)
                 {
-                    if (quest)
-                    {
-                        target = Half(target, MobileMinSize);
-                        target = Capped(target.x, target.y, view ? 256 : MobileMaxSize);
-                        format = !normal && !importer.sRGBTexture ? TextureFormat.ASTC_8x8 : TextureFormat.ASTC_6x6;
-                        quality = EncodeQuality;
-                    }
-                    else if (crunch && !normal && !currentlyCrunched) { format = MobileCrunch(alphaUsed); quality = CrunchQuality; }
+                    target = Half(target, MobileMinSize);
+                    target = Capped(target.x, target.y, state.View ? 256 : MobileMaxSize);
+                    format = !state.Normal && state.Linear ? TextureFormat.ASTC_8x8 : TextureFormat.ASTC_6x6;
+                    quality = EncodeQuality;
                 }
-                else if (normal)
-                    // A normal map keeps how its channels are laid out where it can (BC5, DXT5nm with X in alpha, crunched
-                    // DXT5nm); any other becomes BC5, its copy taking X from where the texture keeps it.
-                    format = current == TextureFormat.BC5 || current == TextureFormat.DXT5 || current == TextureFormat.DXT5Crunched ? current : TextureFormat.BC5;
-                else
+                else if (crunch && !state.Normal && !state.Crunched) { format = MobileCrunch(state.AlphaUsed); quality = CrunchQuality; }
+            }
+            else if (state.Normal)
+                // A normal map keeps how its channels are laid out where it can (BC5, DXT5nm with X in alpha, crunched
+                // DXT5nm); any other becomes BC5, its copy taking X from where the texture keeps it.
+                format = state.Format == TextureFormat.BC5 || state.Format == TextureFormat.DXT5 || state.Format == TextureFormat.DXT5Crunched ? state.Format : TextureFormat.BC5;
+            else
+            {
+                // Resized: the format with the best quality per byte; crunched: from it. Otherwise the format stays.
+                if (resize || crunch && !state.Crunched) format = Format(false, state.AlphaUsed);
+                if (crunch || state.Crunched)
                 {
-                    // Resized: the format with the best quality per byte; crunched: from it. Otherwise the format stays.
-                    if (resize || crunch && !currentlyCrunched) format = Format(false, alphaUsed);
-                    if (crunch || currentlyCrunched)
-                    {
-                        format = Crunch(format);
-                        quality = currentlyCrunched ? currentQuality : CrunchQuality;
-                    }
+                    format = Crunch(format);
+                    quality = state.Crunched ? state.Quality : CrunchQuality;
                 }
-                long before = BuildBytes(texture, mobile), after = FormatBytes(format, target.x, target.y, true);
-                bool change = target != size || format != current || Crunched(format) && quality != currentQuality;
-                // Nothing that takes more memory (turning mipmaps on can outweigh the saving on a small one).
-                entries[texture] = !change || after > before ? null : new TexturePlan
+            }
+            long after = FormatBytes(format, target.x, target.y, true);
+            bool change = (target != size || format != state.Format || Crunched(format) && quality != state.Quality) && after <= state.Before;
+            return change ? (target.x, target.y, format, quality, after, true) : (state.Width, state.Height, state.Format, state.Quality, state.Before, false);
+        }
+
+        /// <summary>The plan for a PC or a mobile (Quest, or iOS when the project builds for it) upload.</summary>
+        internal static Plan Build(MyAvatar avatar, bool mobile)
+        {
+            var passes = avatar.uploadOptimization.Passes;
+            var plan = new Plan { sharpFrom = SharpFrom(avatar), mobile = mobile };
+            bool resize = (passes & OptimizationPasses.ResizeTextures) != 0;
+            // Only the texture passes change textures: under Custom with "Hidden objects" alone, formats stay too.
+            bool measure = resize || (passes & (OptimizationPasses.CrunchTextures | OptimizationPasses.HalfSurfaceMaps)) != 0 ||
+                           mobile && (passes & OptimizationPasses.QuestTextures) != 0;
+            var slots = TextureMatching.Slots(avatar);
+            var states = States(avatar, mobile, resize, measure, slots);
+            // Every texture has an entry: its change, or null where it uploads as it is (a duplicate of one of those keeps its size too).
+            var entries = new Dictionary<Texture2D, TexturePlan>();
+            foreach (var pair in states)
+            {
+                plan.before += pair.Value.Before; plan.after += pair.Value.Before;
+                if (!measure || !(pair.Key is Texture2D texture)) continue;
+                var state = pair.Value;
+                var (width, height, format, quality, after, change) = Copy(state, passes, plan.sharpFrom, mobile);
+                entries[texture] = !change ? null : new TexturePlan
                 {
-                    texture = texture, path = importer.assetPath, format = format, width = target.x, height = target.y, quality = quality,
-                    before = before, after = after, linear = normal || !importer.sRGBTexture, normal = normal,
+                    texture = texture, path = AssetDatabase.GetAssetPath(texture), format = format, width = width, height = height, quality = quality,
+                    before = state.Before, after = after, linear = state.Normal || state.Linear, normal = state.Normal,
                 };
             }
-            if ((passes & OptimizationPasses.DuplicateTextures) != 0)
-            {
-                foreach (var image in asIs) entries[image] = null;
-                Duplicates(entries);
-            }
+            if ((passes & OptimizationPasses.DuplicateTextures) != 0) Duplicates(entries);
             foreach (var change in entries.Values.Where(c => c != null))
             {
                 plan.changes.Add(change);
