@@ -62,7 +62,8 @@ namespace Orbiters.MyAvatar.Editor
             header.RegisterCallback<PointerDownEvent>(evt => { if (evt.button == 0) Show(!Open, remember: true); });
             Show(Open, remember: false);
             // Back on screen (docked again, the Inspector rebuilt): it listens again and looks again.
-            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); projectChanged = true; Schedule(); });
+            // The first attach is the constructor's look below; a later one (docked again) looks again.
+            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); if (attached) { projectChanged = true; Schedule(); } attached = true; });
             RegisterCallback<DetachFromPanelEvent>(_ => Unsubscribe());
             // Once on screen: fixing materials creates assets, which waits until the Inspector is built.
             style.display = DisplayStyle.None;
@@ -78,20 +79,22 @@ namespace Orbiters.MyAvatar.Editor
             body.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
+        private bool attached;
+        private System.IDisposable changes;
+
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule;
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy | AvatarFacets.Undo, _ => { pending?.Pause(); Refresh(); });
             // A shader installed or a material fixed elsewhere (MCP, the material's own inspector) changes what renders.
             EditorApplication.projectChanged += ProjectChanged;
-            Undo.undoRedoPerformed += Schedule;
             OrbitersFeatures.Changed += FeatureChanged;
         }
 
         private void Unsubscribe()
         {
-            EditorApplication.hierarchyChanged -= Schedule; EditorApplication.projectChanged -= ProjectChanged;
-            Undo.undoRedoPerformed -= Schedule; OrbitersFeatures.Changed -= FeatureChanged;
+            changes?.Dispose(); changes = null; EditorApplication.projectChanged -= ProjectChanged;
+            OrbitersFeatures.Changed -= FeatureChanged;
         }
 
         private void FeatureChanged(string key) { if (key == AutoFix) { shown = null; Schedule(); } }

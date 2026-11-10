@@ -11,7 +11,8 @@ namespace Orbiters.MyAvatar.Editor
     {
         private readonly HashSet<int> closedTextures = new HashSet<int>();
 
-        private void TextureCard(VisualElement entry, OrbitersAttachment item)
+        // avatarSlots: TextureMatching.Slots(avatar, includeAll: true).
+        private void TextureCard(VisualElement entry, OrbitersAttachment item, List<TextureSlot> avatarSlots)
         {
             var broken = item.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials)
                 .Where(m => MaterialRepair.Reason(m) != null).Distinct().ToArray();
@@ -32,7 +33,7 @@ namespace Orbiters.MyAvatar.Editor
                 repair.tooltip = "Rebuild with VRChat Toon Standard and keep the texture maps. Undo restores the original.";
                 repairRow.Add(repair);
             }
-            var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar, includeAll: true), new List<Transform> { item.transform })
+            var slots = TextureChanges.Scoped(avatarSlots, new List<Transform> { item.transform })
                 .Where(s => s.existing).ToList();
             if (slots.Count == 0) return;
             int id = item.GetInstanceID();

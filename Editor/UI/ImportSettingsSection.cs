@@ -60,7 +60,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Changed;
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, _ => { pending?.Pause(); Refresh(); });
             EditorApplication.projectChanged += ProjectChanged;
             OrbitersFeatures.Changed += FeatureChanged;
             VrchatImportSettings.Fixed += FixedElsewhere;
@@ -68,11 +68,11 @@ namespace Orbiters.MyAvatar.Editor
 
         private void Unsubscribe()
         {
-            EditorApplication.hierarchyChanged -= Changed; EditorApplication.projectChanged -= ProjectChanged;
+            changes?.Dispose(); changes = null; EditorApplication.projectChanged -= ProjectChanged;
             OrbitersFeatures.Changed -= FeatureChanged; VrchatImportSettings.Fixed -= FixedElsewhere;
         }
 
-        private void Changed() => Schedule(400);
+        private System.IDisposable changes;
         // Imports and saves come in bursts: looked at once they settle.
         private void ProjectChanged() => Schedule(1500);
         private void FeatureChanged(string key) { if (key == VrchatImportSettings.Feature) Schedule(0); }

@@ -37,26 +37,27 @@ namespace Orbiters.MyAvatar.Editor
             BuildLooks();
             Subscribe();
             // Listening while on screen: docked again (or the Inspector rebuilt), it listens again and catches up.
-            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); undone = true; Schedule(); });
+            // The constructor just looked: only a later attach (docked again) catches up on what changed meanwhile.
+            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); if (attached) { undone = true; Schedule(); } attached = true; });
             RegisterCallback<DetachFromPanelEvent>(_ => Unsubscribe());
             Refresh();
         }
 
+        private bool attached;
+        private System.IDisposable changes;
+
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule;
-            Undo.undoRedoPerformed += Undone;
+            // An Undo or Redo may also take back what the looks read (a copy of the parameters, a part's toggle).
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy | AvatarFacets.Undo, facets =>
+            {
+                if ((facets & AvatarFacets.Undo) != 0) undone = true;
+                pending?.Pause(); Refresh();
+            });
         }
 
-        private void Unsubscribe()
-        {
-            EditorApplication.hierarchyChanged -= Schedule;
-            Undo.undoRedoPerformed -= Undone;
-        }
-
-        // An Undo or Redo may also take back what the looks read (a copy of the parameters, a part's toggle).
-        private void Undone() { undone = true; Schedule(); }
+        private void Unsubscribe() { changes?.Dispose(); changes = null; }
 
         private void Schedule()
         {

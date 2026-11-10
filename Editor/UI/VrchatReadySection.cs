@@ -38,18 +38,22 @@ namespace Orbiters.MyAvatar.Editor
             AddToClassList("chk");
             AddToClassList("vr-ready");
             hero = new VisualElement(); Body.Add(hero);
-            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); Schedule(); });
+            // The constructor just looked: only a later attach (docked again) catches up on what changed meanwhile.
+            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); if (attached) Schedule(); attached = true; });
             RegisterCallback<DetachFromPanelEvent>(_ => Unsubscribe());
             Refresh();
         }
 
+        private bool attached;
+        private System.IDisposable changes;
+
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule;
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy | AvatarFacets.Undo, _ => { pending?.Pause(); Refresh(); });
         }
 
-        private void Unsubscribe() { EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; }
+        private void Unsubscribe() { changes?.Dispose(); changes = null; }
 
         private void Schedule()
         {

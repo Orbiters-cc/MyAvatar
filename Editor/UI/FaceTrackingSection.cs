@@ -56,17 +56,19 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         private bool detached;
+        private System.IDisposable changes;
 
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule; PackageSetup.Finished += SetupFinished;
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy | AvatarFacets.Undo, _ => { pending?.Pause(); Refresh(); });
+            PackageSetup.Finished += SetupFinished;
             FaceTrackingTest.Changed += TestChanged; FaceTrackingTest.Rendered += Repaint;
         }
 
         private void Unsubscribe()
         {
-            EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; PackageSetup.Finished -= SetupFinished;
+            changes?.Dispose(); changes = null; PackageSetup.Finished -= SetupFinished;
             FaceTrackingTest.Changed -= TestChanged; FaceTrackingTest.Rendered -= Repaint;
         }
 
