@@ -19,6 +19,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
         {
             foreach (var watch in watches) watch.Dispose();
             watches.Clear();
+            AvatarChanges.Clock = () => UnityEditor.EditorApplication.timeSinceStartup;
             EditorSceneManager.ClosePreviewScene(scene);
         }
 
@@ -71,6 +72,52 @@ namespace Orbiters.MyAvatar.Editor.Tests
             AvatarChanges.HierarchyChanged();
             AvatarChanges.Flush(now: true);
             CollectionAssert.AreEqual(new[] { ("A", AvatarFacets.Hierarchy) }, heard, "a disposed watch hears nothing");
+        }
+
+        // A script replacing a component without Undo (removed, then one of the same type added): same count, other component.
+        [Test] public void ASignatureSeesAComponentReplaced()
+        {
+            var avatar = Avatar("A");
+            var hair = avatar.transform.Find("Hair").gameObject;
+            hair.AddComponent<BoxCollider>();
+            long signature = AvatarChanges.Signature(avatar);
+            Object.DestroyImmediate(hair.GetComponent<BoxCollider>());
+            hair.AddComponent<BoxCollider>();
+            Assert.AreNotEqual(signature, AvatarChanges.Signature(avatar));
+        }
+
+        // Without Flush(now): an avatar's change is told once its own burst settles, whatever changes elsewhere, and a burst
+        // that goes on is told within MaxLatency.
+        [Test] public void ChangesElsewhereDoNotHoldAnAvatarBack()
+        {
+            double time = 100;
+            AvatarChanges.Clock = () => time;
+            MyAvatar a = Avatar("A");
+            var elsewhere = new GameObject("Light");
+            SceneManager.MoveGameObjectToScene(elsewhere, scene);
+            var heard = new List<(double, AvatarFacets)>();
+            watches.Add(AvatarChanges.Watch(a, AvatarFacets.Hierarchy | AvatarFacets.Components, f => heard.Add((time, f))));
+            AvatarChanges.Touched(a.transform.Find("Hair").gameObject.GetInstanceID(), AvatarFacets.Hierarchy);
+            for (int step = 1; step <= 10 && heard.Count == 0; step++)
+            {
+                time = 100 + step * .1;
+                AvatarChanges.Touched(elsewhere.GetInstanceID(), AvatarFacets.Components);
+                AvatarChanges.Flush(now: false);
+            }
+            Assert.AreEqual(1, heard.Count, "told although another object kept changing");
+            Assert.That(heard[0].Item1, Is.InRange(100.3, 100.41));
+            Assert.AreEqual(AvatarFacets.Hierarchy, heard[0].Item2);
+
+            heard.Clear();
+            time = 200;
+            for (int step = 0; step <= 30 && heard.Count == 0; step++)
+            {
+                time = 200 + step * .1;
+                AvatarChanges.Touched(a.gameObject.GetInstanceID(), AvatarFacets.Components);
+                AvatarChanges.Flush(now: false);
+            }
+            Assert.AreEqual(1, heard.Count, "a burst that goes on is told");
+            Assert.That(heard[0].Item1 - 200, Is.InRange(AvatarChanges.MaxLatency - .01, AvatarChanges.MaxLatency + .11));
         }
     }
 }

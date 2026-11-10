@@ -37,6 +37,11 @@ namespace Orbiters.MyAvatar.Editor
     internal static class AvatarChanges
     {
         private const double Delay = .3;
+        // However long a burst goes on (Play mode, a tool editing every frame), its watchers hear by then.
+        internal const double MaxLatency = 1.5;
+
+        /// <summary>The time in seconds (tests set their own).</summary>
+        internal static Func<double> Clock = () => EditorApplication.timeSinceStartup;
 
         private sealed class Watcher
         {
@@ -54,10 +59,11 @@ namespace Orbiters.MyAvatar.Editor
             // The hierarchy changed somewhere: compare the signature at the flush.
             public bool check;
             public long signature;
+            // When the pending change of this avatar is told (-1: none), and when its burst started.
+            public double due = -1, first = -1;
         }
 
         private static readonly Dictionary<int, Watched> Avatars = new Dictionary<int, Watched>();
-        private static double due = -1;
         private static bool hooked, updating;
 
         /// <summary>
@@ -108,13 +114,15 @@ namespace Orbiters.MyAvatar.Editor
             ObjectChangeEvents.changesPublished -= Published;
             Undo.undoRedoPerformed -= Undone;
             if (updating) { EditorApplication.update -= Flush; updating = false; }
-            due = -1;
         }
 
-        // Each change moves the flush: watchers hear once a burst settles, as the sections' own timers did.
-        private static void Arm()
+        // A change of this avatar moves its own flush: its watchers hear once its burst settles, as the sections' own timers
+        // did, and at most MaxLatency after the burst started. Changes elsewhere move nothing.
+        private static void Arm(Watched watched)
         {
-            due = EditorApplication.timeSinceStartup + Delay;
+            double now = Clock();
+            if (watched.first < 0) watched.first = now;
+            watched.due = now + Delay;
             if (updating) return;
             updating = true;
             EditorApplication.update += Flush;
@@ -122,30 +130,33 @@ namespace Orbiters.MyAvatar.Editor
 
         internal static void HierarchyChanged()
         {
-            foreach (var watched in Avatars.Values) watched.check = true;
-            Arm();
+            foreach (var watched in Avatars.Values) { watched.check = true; Arm(watched); }
         }
 
         private static void Undone()
         {
-            foreach (var watched in Avatars.Values) watched.pending |= AvatarFacets.Undo;
-            Arm();
+            foreach (var watched in Avatars.Values) { watched.pending |= AvatarFacets.Undo; Arm(watched); }
         }
 
         private static void All(AvatarFacets facet)
         {
-            foreach (var watched in Avatars.Values) watched.pending |= facet;
+            foreach (var watched in Avatars.Values) { watched.pending |= facet; Arm(watched); }
         }
 
-        // The avatars holding this object get the facet; an object that cannot be found any more may have been under any.
-        private static void Mark(int instanceId, AvatarFacets facet)
+        /// <summary>
+        /// An object changed: the avatars holding it get the facet; an object that cannot be found any more may have been
+        /// under any of them.
+        /// </summary>
+        internal static void Touched(int instanceId, AvatarFacets facet)
         {
             var found = EditorUtility.InstanceIDToObject(instanceId);
             var transform = found is GameObject go ? go.transform : found is Component component ? component.transform : null;
             if (!transform) { All(facet); return; }
             foreach (var watched in Avatars.Values)
-                if (watched.avatar && transform.IsChildOf(TextureOptimization.AvatarRoot(watched.avatar).transform)) watched.pending |= facet;
+                if (watched.avatar && transform.IsChildOf(TextureOptimization.AvatarRoot(watched.avatar).transform)) { watched.pending |= facet; Arm(watched); }
         }
+
+        private static void Mark(int instanceId, AvatarFacets facet) => Touched(instanceId, facet);
 
         private static void Published(ref ObjectChangeEventStream stream)
         {
@@ -187,7 +198,6 @@ namespace Orbiters.MyAvatar.Editor
                         All(AvatarFacets.Hierarchy); break;
                 }
             }
-            Arm();
         }
 
         /// <summary>Imports that may change what an avatar shows (see <see cref="TextureOptimization.ImportMatters"/>).</summary>
@@ -199,7 +209,6 @@ namespace Orbiters.MyAvatar.Editor
                 if (!Array.Exists(imported, TextureOptimization.ImportMatters) && !Array.Exists(deleted, TextureOptimization.ImportMatters) &&
                     !Array.Exists(moved, TextureOptimization.ImportMatters)) return;
                 All(AvatarFacets.Imports);
-                Arm();
             }
         }
 
@@ -208,14 +217,25 @@ namespace Orbiters.MyAvatar.Editor
 
         private static void Flush() => Flush(false);
 
-        /// <summary>Tells the watchers now (tests), or once the burst settled.</summary>
+        /// <summary>
+        /// Tells the watchers of each avatar whose burst settled or went on for MaxLatency; of every avatar with a pending
+        /// change with <paramref name="now"/>.
+        /// </summary>
         internal static void Flush(bool now)
         {
-            if (!now && EditorApplication.timeSinceStartup < due) return;
-            EditorApplication.update -= Flush; updating = false; due = -1;
-            Flushing.Clear(); Flushing.AddRange(Avatars.Values);
+            double time = Clock();
+            bool waiting = false;
+            Flushing.Clear();
+            foreach (var watched in Avatars.Values)
+            {
+                if (watched.due < 0) continue;
+                if (now || time >= watched.due || time - watched.first >= MaxLatency) Flushing.Add(watched);
+                else waiting = true;
+            }
+            if (!waiting && updating) { EditorApplication.update -= Flush; updating = false; }
             foreach (var watched in Flushing)
             {
+                watched.due = watched.first = -1;
                 if (!watched.avatar) continue;
                 if (watched.check)
                 {
@@ -241,9 +261,11 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly List<Transform> Transforms = new List<Transform>();
         private static readonly List<Renderer> Renderers = new List<Renderer>();
         private static readonly List<Material> Materials = new List<Material>();
+        private static readonly List<Component> Components = new List<Component>();
 
         /// <summary>
-        /// A number that changes with the avatar's objects (their names, whether shown, children and components) and its
+        /// A number that changes with the avatar's objects (their names, whether shown, children, and which components they
+        /// hold: one replaced by another counts, whatever their number) and its
         /// renderers (shown, meshes, materials). Reads values only.
         /// </summary>
         internal static long Signature(MyAvatar avatar)
@@ -258,7 +280,11 @@ namespace Orbiters.MyAvatar.Editor
             {
                 var go = t.gameObject;
                 Add(t.GetInstanceID()); Add(go.name.GetHashCode());
-                Add((go.activeSelf ? 1 : 0) | t.childCount << 1 | go.GetComponentCount() << 16);
+                Add((go.activeSelf ? 1 : 0) | t.childCount << 1);
+                Components.Clear();
+                go.GetComponents(Components);
+                Add(Components.Count);
+                foreach (var component in Components) Add(component ? component.GetInstanceID() : 0);
             }
             Renderers.Clear();
             root.GetComponentsInChildren(true, Renderers);
@@ -272,7 +298,7 @@ namespace Orbiters.MyAvatar.Editor
                 Add(Materials.Count);
                 foreach (var material in Materials) Add(material ? material.GetInstanceID() : 0);
             }
-            Transforms.Clear(); Renderers.Clear(); Materials.Clear();
+            Transforms.Clear(); Renderers.Clear(); Materials.Clear(); Components.Clear();
             return (long)hash;
         }
     }
