@@ -119,6 +119,45 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.IsFalse(TextureMatching.Slots(avatar)[0].fillOnly, "each call has its own slots");
         }
 
+        // What slots read beyond object identities (architecture review follow-up): a texture made in memory renamed or
+        // resized, a material's original-shader GUID tag, and a locked material's stripped-texture tags.
+        [Test] public void KeptSlotsFollowTagsAndTextureFacts()
+        {
+            var avatar = Avatar();
+            var body = avatar.transform.Find("Body").GetComponent<MeshRenderer>();
+            var main = body.sharedMaterials[0].GetTexture("_MainTex") as Texture2D;
+            TextureMatching.Slots(avatar);
+            int builds = TextureSlotCache.Builds;
+            void Changed(string what)
+            {
+                AssertSameSlots(TextureMatchingReference.Slots(avatar), TextureMatching.Slots(avatar));
+                Assert.AreEqual(builds + 1, TextureSlotCache.Builds, what);
+                builds = TextureSlotCache.Builds;
+                TextureMatching.Slots(avatar);
+                Assert.AreEqual(builds, TextureSlotCache.Builds, what + ", then unchanged");
+            }
+            main.name = "Renamed in memory";
+            Changed("a texture renamed");
+            main.Reinitialize(8, 8);
+            Changed("a texture resized");
+            body.sharedMaterials[0].SetOverrideTag("OriginalShaderGUID", "0123456789abcdef0123456789abcdef");
+            Changed("the original shader's GUID tag");
+
+            // A locked material: its slots come from its original shader, and a slot its own shader lacks shows the texture
+            // its stripped tag names.
+            var images = UnityEditor.AssetDatabase.FindAssets("t:Texture2D").Take(2).ToArray();
+            if (images.Length < 2) Assert.Ignore("needs two texture assets in the project");
+            var locked = Own(UnityEditor.ShaderUtil.CreateShaderAsset("Shader \"Hidden/Locked/My Avatar Test\" { SubShader { Pass { } } }"));
+            var material = Own(new Material(locked) { name = "Locked" });
+            material.SetOverrideTag("OriginalShader", "Standard");
+            material.SetOverrideTag("_stripped_tex__MainTex", images[0]);
+            var materials = body.sharedMaterials; materials[1] = material; body.sharedMaterials = materials;
+            Changed("a locked material");
+            Assert.AreEqual(UnityEditor.AssetDatabase.GUIDToAssetPath(images[0]), TextureMatching.Slots(avatar).First(s => s.material == material && s.property == "_MainTex").existingPath);
+            material.SetOverrideTag("_stripped_tex__MainTex", images[1]);
+            Changed("a stripped texture's tag");
+        }
+
         private static void AssertSameSlots(List<TextureSlot> before, List<TextureSlot> now)
         {
             Assert.AreEqual(before.Count, now.Count, "slots");

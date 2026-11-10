@@ -9,8 +9,9 @@ namespace Orbiters.MyAvatar.Editor
     /// <summary>
     /// <see cref="TextureMatching.Slots"/> once per avatar state. What a shader's texture properties say about themselves
     /// (cleaned description, role, secondary) is worked out once per shader; an avatar's slots are kept until its renderers,
-    /// their names and the objects above them, their meshes, bones or materials, a material's shader, name or textures, or
-    /// any project asset change. Checking that is reading those values, with no text work and no asset lookups.
+    /// their names and the objects above them, their meshes, bones or materials, a material's shader, name, tags or textures
+    /// (each texture's name and size included), or any project asset change. Checking that is reading those values, with no
+    /// text work and no asset lookups.
     /// </summary>
     internal static class TextureSlotCache
     {
@@ -22,13 +23,21 @@ namespace Orbiters.MyAvatar.Editor
             public bool tex2D, hidden, secondary;
         }
 
+        /// <summary>What Build read of one material: the texture properties it has, and the tags of those it keeps aside.</summary>
+        internal sealed class Reads
+        {
+            public int[] ids;
+            // "_stripped_tex_<property>" of a locked material's slots its shader no longer has.
+            public string[] strippedTags;
+        }
+
         private sealed class Entry
         {
             public MyAvatar avatar;
             public int assets;
             public long[] state;
             // The texture properties each material's slots read, in slot order, to see textures change.
-            public Dictionary<Material, int[]> textures;
+            public Dictionary<Material, Reads> textures;
             public List<TextureSlot> slots;
         }
 
@@ -53,7 +62,7 @@ namespace Orbiters.MyAvatar.Editor
                 Fill(State, avatar, renderers, entry.textures);
                 if (Same(State, entry.state)) return Copy(entry.slots);
             }
-            var textures = new Dictionary<Material, int[]>();
+            var textures = new Dictionary<Material, Reads>();
             var slots = TextureMatching.Build(avatar, renderers, includeAll, textures);
             Builds++;
             Fill(State, avatar, renderers, textures);
@@ -104,7 +113,7 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Everything Build reads from the scene, as numbers. Names count by their hash code.
-        private static void Fill(List<long> state, MyAvatar avatar, List<Renderer> renderers, Dictionary<Material, int[]> textures)
+        private static void Fill(List<long> state, MyAvatar avatar, List<Renderer> renderers, Dictionary<Material, Reads> textures)
         {
             state.Clear(); Seen.Clear();
             var root = avatar.transform;
@@ -140,12 +149,17 @@ namespace Orbiters.MyAvatar.Editor
                     state.Add(shader ? shader.GetInstanceID() : 0);
                     state.Add(material.name.GetHashCode());
                     state.Add(material.GetTag("OriginalShader", false).GetHashCode());
-                    if (!textures.TryGetValue(material, out var ids)) { state.Add(long.MinValue); continue; }
-                    foreach (int id in ids)
+                    state.Add(material.GetTag("OriginalShaderGUID", false).GetHashCode());
+                    if (!textures.TryGetValue(material, out var reads)) { state.Add(long.MinValue); continue; }
+                    foreach (int id in reads.ids)
                     {
                         var texture = material.HasProperty(id) ? material.GetTexture(id) : null;
-                        state.Add(texture ? texture.GetInstanceID() : 0);
+                        if (!texture) { state.Add(0); continue; }
+                        // A texture made in memory can be renamed or resized without any import.
+                        state.Add(texture.GetInstanceID()); state.Add(texture.name.GetHashCode());
+                        state.Add((long)texture.width << 32 | (uint)texture.height);
                     }
+                    foreach (string tag in reads.strippedTags) state.Add(material.GetTag(tag, false).GetHashCode());
                 }
             }
         }

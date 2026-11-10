@@ -52,13 +52,14 @@ namespace Orbiters.MyAvatar.Editor
         internal static List<TextureSlot> Slots(MyAvatar avatar, bool includeAll = false) => TextureSlotCache.Slots(avatar, includeAll);
 
         // The slots of these renderers; `textures` receives, per material, the texture properties its slots read.
-        internal static List<TextureSlot> Build(MyAvatar avatar, List<Renderer> renderers, bool includeAll, Dictionary<Material, int[]> textures)
+        internal static List<TextureSlot> Build(MyAvatar avatar, List<Renderer> renderers, bool includeAll, Dictionary<Material, TextureSlotCache.Reads> textures)
         {
             var result = new List<TextureSlot>();
             var byMaterial = new Dictionary<Material, List<TextureSlot>>();
             var owners = new Owners(avatar.transform, renderers);
             var paths = new Dictionary<Texture, string>();
             var read = new List<int>();
+            var stripped = new List<string>();
             foreach (var renderer in renderers)
             {
                 var (ownerWords, namingWords) = owners.Of(renderer);
@@ -89,13 +90,13 @@ namespace Orbiters.MyAvatar.Editor
                     var shader = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.OriginalShader(material) ?? material.shader;
                     string shaderName = ShaderName(material);
                     rendererPath ??= AnimationUtility.CalculateTransformPath(renderer.transform, avatar.transform);
-                    read.Clear();
+                    read.Clear(); stripped.Clear();
                     foreach (var template in TextureSlotCache.Of(shader))
                     {
                         if (!includeAll && (!template.tex2D || template.hidden)) continue;
                         Texture texture;
                         if (material.HasProperty(template.id)) { texture = material.GetTexture(template.id); read.Add(template.id); }
-                        else texture = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, template.property);
+                        else { texture = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, template.property); stripped.Add("_stripped_tex_" + template.property); }
                         string path = "";
                         if (texture && !paths.TryGetValue(texture, out path)) paths[texture] = path = AssetDatabase.GetAssetPath(texture);
                         var slot = new TextureSlot { material = material, materialName = material.name,
@@ -107,7 +108,7 @@ namespace Orbiters.MyAvatar.Editor
                         slot.ownerWords.UnionWith(ownerWords); slot.namingWords.UnionWith(namingWords);
                         slots.Add(slot); result.Add(slot);
                     }
-                    textures[material] = read.ToArray();
+                    textures[material] = new TextureSlotCache.Reads { ids = read.ToArray(), strippedTags = stripped.ToArray() };
                 }
             }
             return result;
