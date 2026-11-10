@@ -590,6 +590,38 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(deltas.Count(d => d != Vector3.zero), Is.EqualTo(smile.Count(d => d != Vector3.zero)), "The expression moves the same vertices.");
         }
 
+        // MAF-24: the switch between the simplifiers. Both keep the surface within the budget and the expression's triangles;
+        // the run (the default) does it from one simplification, the old one from up to five.
+        [Test] public void BothSimplifiersKeepTheSurfaceAndWhatExpressionsMove([Values(false, true)] bool meshia)
+        {
+            Assert.That(PolygonReduction.UseOldMeshiaSimplifier, Is.False, "the run is the default");
+            const int cells = 40;
+            var plane = Plane("Plane", cells);
+            var mesh = plane.sharedMesh;
+            var smile = mesh.vertices.Select(v => v.x < .2f && v.y < .2f ? Vector3.forward * .01f : Vector3.zero).ToArray();
+            mesh.AddBlendShapeFrame("Smile", 100, smile, null, null);
+            var clip = Own(new AnimationClip());
+            AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Plane", typeof(SkinnedMeshRenderer), "blendShape.Smile"), AnimationCurve.Constant(0, 1, 100));
+            fx.layers[0].stateMachine.AddState("Smile").motion = clip;
+            var corner = new HashSet<Vector3>(Centers(mesh, v => v.x < .2f && v.y < .2f));
+            var made = new List<Mesh>();
+            PolygonReduction.UseOldMeshiaSimplifier = meshia;
+            try
+            {
+                int removed = PolygonReduction.Reduce(new Toolkit.Editor.VRChat.Optimization.AvatarUsage(root), 1f, made);
+                owned.AddRange(made);
+                Debug.Log("[My Avatar] " + (meshia ? "Meshia" : "SimplificationRun") + ": " + removed + " of " + 2 * cells * cells + " triangles removed.");
+                var reduced = plane.sharedMesh;
+                Assert.That(removed, Is.GreaterThan(cells * cells));
+                Assert.That(Toolkit.Editor.VRChat.Optimization.MeshParts.Within(mesh.vertices, reduced.vertices, reduced.triangles, PolygonReduction.Budget(1f)));
+                Assert.That(Centers(reduced, _ => true), Is.SupersetOf(corner));
+                var deltas = new Vector3[reduced.vertexCount];
+                reduced.GetBlendShapeFrameVertices(0, 0, deltas, null, null);
+                Assert.That(deltas.Count(d => d != Vector3.zero), Is.EqualTo(smile.Count(d => d != Vector3.zero)));
+            }
+            finally { PolygonReduction.UseOldMeshiaSimplifier = false; }
+        }
+
         // The budget is measured on the avatar through the bones' bind poses: a mesh switched off at rest, or with a culling
         // box a tool enlarged (Modular Avatar's Mesh Settings), loses the same polygons.
         [Test] public void FewerPolygonsDontDependOnBoundsOrBeingShown()
