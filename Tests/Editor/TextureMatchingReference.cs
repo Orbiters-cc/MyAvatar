@@ -1,0 +1,641 @@
+// Generated from Editor/TextureMatching.cs at 2f83320; do not edit except to delete it with its tests.
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+using Orbiters.Toolkit.Editor;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Orbiters.MyAvatar.Editor.Tests
+{
+    // TextureMatching as it was before slots were cached and matching stopped re-tokenizing names (architecture review
+    // MAC-24, MAC-25), kept verbatim: TextureMatchingEquivalenceTests compare today's results with it.
+    internal static class TextureMatchingReference
+    {
+        internal const string RememberedReason = "Your earlier choice for this file on this avatar.";
+        internal const string ChosenReason = "Chosen by you.";
+        internal const string MissingSlotReason = "The rest of this texture set matched ";
+        internal const string NoClearMatchReason = "No clear material and texture-slot match.";
+
+        internal static bool CanAutoAssign(TextureEntry entry, TextureSlot slot) => !slot.fillOnly ||
+            slot.existing && slot.existing == entry.texture ||
+            !slot.existing && !slot.secondary && (entry.role == slot.role || entry.role == "unknown" || MaterialSurfaceMaps.CanAssign(entry.role, slot.property));
+
+        internal static List<TextureSlot> Slots(MyAvatar avatar, bool includeAll = false)
+        {
+            var result = new List<TextureSlot>();
+            var byMaterial = new Dictionary<Material, List<TextureSlot>>();
+            var renderers = avatar.GetComponentsInChildren<Renderer>(true)
+                .Where(r => (r.hideFlags & HideFlags.DontSave) == 0 && (r.gameObject.hideFlags & HideFlags.DontSave) == 0).ToList();
+            var owners = new Owners(avatar.transform, renderers);
+            foreach (var renderer in renderers)
+            {
+                var (ownerWords, namingWords) = owners.Of(renderer);
+                string kind = renderer is SkinnedMeshRenderer ? "skinned" : renderer is MeshRenderer ? "mesh" :
+                    renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer ? "effect" : "other";
+                bool visible = renderer.enabled && renderer.gameObject.activeInHierarchy;
+                var materials = renderer.sharedMaterials;
+                for (int index = 0; index < materials.Length; index++)
+                {
+                    var material = materials[index];
+                    // Locked/optimized shaders (e.g. Poiyomi's Hidden/Locked/...) are the norm on avatars. They keep only the features
+                    // that were on when locked, so slots come from the shader they were made from (hair locked with emission off
+                    // still takes an emission map); applying a texture unlocks the copy.
+                    if (!material || !material.shader || material.shader.name == "Hidden/InternalErrorShader") continue;
+                    if (byMaterial.TryGetValue(material, out var known))
+                    {
+                        foreach (var slot in known)
+                        {
+                            if (!slot.renderers.Contains(renderer.name)) slot.renderers.Add(renderer.name);
+                            if (slot.rendererKind == "effect" && kind != "effect") slot.rendererKind = kind;
+                            slot.active |= visible; slot.parts.Add((renderer, index));
+                            slot.ownerWords.UnionWith(ownerWords); slot.namingWords.UnionWith(namingWords);
+                        }
+                        continue;
+                    }
+                    var slots = byMaterial[material] = new List<TextureSlot>();
+                    var shader = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.OriginalShader(material) ?? material.shader;
+                    string shaderName = ShaderName(material);
+                    for (int i = 0; i < shader.GetPropertyCount(); i++)
+                    {
+                        if (shader.GetPropertyType(i) != ShaderPropertyType.Texture || !includeAll && (shader.GetPropertyTextureDimension(i) != TextureDimension.Tex2D ||
+                            (shader.GetPropertyFlags(i) & ShaderPropertyFlags.HideInInspector) != 0)) continue;
+                        string property = shader.GetPropertyName(i), description = CleanDescription(shader.GetPropertyDescription(i));
+                        var texture = material.HasProperty(property) ? material.GetTexture(property) : Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, property);
+                        var slot = new TextureSlot { material = material, materialName = material.name,
+                            shader = shaderName, property = property, description = description, role = SlotRole(property, description),
+                            secondary = Secondary(property, description), existing = texture, existingName = texture ? texture.name : "",
+                            existingPath = texture ? AssetDatabase.GetAssetPath(texture) : "", existingWidth = texture ? texture.width : 0, existingHeight = texture ? texture.height : 0,
+                            rendererPath = AnimationUtility.CalculateTransformPath(renderer.transform, avatar.transform), rendererKind = kind, active = visible };
+                        slot.renderers.Add(renderer.name); slot.parts.Add((renderer, index));
+                        slot.ownerWords.UnionWith(ownerWords); slot.namingWords.UnionWith(namingWords);
+                        slots.Add(slot); result.Add(slot);
+                    }
+                }
+            }
+            return result;
+        }
+
+        // What holds each renderer: the objects above it that are not the skeleton, and the model file of its mesh.
+        private sealed class Owners
+        {
+            private readonly Transform root, hips;
+            private readonly HashSet<Transform> bones;
+            private readonly List<Renderer> renderers;
+            private readonly Dictionary<string, int> modelMaterials;
+            private readonly Dictionary<Transform, int> heldMaterials = new Dictionary<Transform, int>();
+            // The avatar's own name and those of models holding many of its materials ("Rexouium" for every part of a
+            // Rexouium) say nothing about one part.
+            private readonly HashSet<string> shared;
+
+            internal Owners(Transform root, List<Renderer> renderers)
+            {
+                this.root = root; this.renderers = renderers;
+                var animator = root.GetComponent<Animator>();
+                hips = animator && animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;
+                bones = new HashSet<Transform>(renderers.OfType<SkinnedMeshRenderer>().SelectMany(r => r.bones).Where(b => b));
+                modelMaterials = renderers.Select(r => (renderer: r, model: Model(r))).Where(p => p.model != null)
+                    .GroupBy(p => p.model).ToDictionary(g => g.Key, g => Materials(g.Select(p => p.renderer)));
+                shared = new HashSet<string>(Identity(root.name).Concat(modelMaterials.Where(p => p.Value > 2).SelectMany(p => Identity(ModelName(p.Key)))));
+            }
+
+            internal (HashSet<string> all, HashSet<string> naming) Of(Renderer renderer)
+            {
+                var all = new HashSet<string>(); var naming = new HashSet<string>();
+                void Add(string name, bool names)
+                {
+                    var words = Identity(name).Where(w => !shared.Contains(w)).ToList();
+                    all.UnionWith(words); if (names) naming.UnionWith(words);
+                }
+                if (renderer.transform != root)
+                    for (var t = renderer.transform.parent; t && t != root; t = t.parent)
+                        if (!bones.Contains(t) && !(hips && hips.IsChildOf(t))) Add(t.name, Held(t) <= 2);
+                string model = Model(renderer);
+                if (model != null) Add(ModelName(model), modelMaterials[model] <= 2);
+                return (all, naming);
+            }
+
+            private int Held(Transform t)
+            {
+                if (!heldMaterials.TryGetValue(t, out int count))
+                    heldMaterials[t] = count = Materials(renderers.Where(r => r.transform.IsChildOf(t)));
+                return count;
+            }
+
+            private static int Materials(IEnumerable<Renderer> held) => held.SelectMany(r => r.sharedMaterials).Where(m => m).Distinct().Count();
+
+            private static string ModelName(string path) => System.IO.Path.GetFileNameWithoutExtension(path);
+
+            private static string Model(Renderer renderer)
+            {
+                var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null;
+                string path = mesh ? AssetDatabase.GetAssetPath(mesh) : null;
+                return !string.IsNullOrEmpty(path) && AssetImporter.GetAtPath(path) is ModelImporter ? path : null;
+            }
+        }
+
+        // Locked shaders report the shader they were generated from (Poiyomi stores it in the OriginalShader tag).
+        internal static string ShaderName(Material material)
+        {
+            string original = material.GetTag("OriginalShader", false);
+            return string.IsNullOrEmpty(original) ? material.shader.name : original;
+        }
+
+        // Shader GUI frameworks append metadata to display names, e.g. Thry/Poiyomi "Normal Map--{reference_properties:[...]}".
+        internal static string CleanDescription(string description)
+        {
+            string value = description ?? "";
+            int metadata = value.IndexOf("--{", StringComparison.Ordinal);
+            if (metadata >= 0) value = value.Substring(0, metadata);
+            return Regex.Replace(value, @"\s*\((?:expand|click to expand)\)|\s*\[click to expand\]", "", RegexOptions.IgnoreCase).Trim();
+        }
+
+        // ---- Roles -------------------------------------------------------------------------------------------
+
+        private static readonly (string role, string[] words)[] RoleWords = {
+            ("normal", new[] { "normal", "nrm", "norm", "nor", "bump", "normalmap", "bumpmap" }),
+            ("emission", new[] { "emission", "emissive", "emit", "glow", "emissionmap" }),
+            ("metallic", new[] { "metallic", "metal", "metalness", "metallicsmoothness", "metallicgloss" }),
+            ("roughness", new[] { "roughness", "rough" }),
+            ("smoothness", new[] { "smoothness", "smooth", "gloss", "glossiness" }),
+            ("occlusion", new[] { "occlusion", "ao", "ambientocclusion" }),
+            ("height", new[] { "height", "displacement", "disp", "parallax", "heightmap" }),
+            ("specular", new[] { "specular", "spec", "specgloss" }),
+            ("mask", new[] { "mask", "opacity", "alpha", "transparency" }),
+            ("color", new[] { "basecolor", "basecolour", "albedo", "diffuse", "diff", "color", "colour", "col", "basemap", "maintex", "base" }),
+        };
+
+        private static readonly Dictionary<char, string> LetterRoles = new Dictionary<char, string> {
+            ['d'] = "color", ['c'] = "color", ['a'] = "color", ['n'] = "normal", ['e'] = "emission", ['m'] = "metallic", ['r'] = "roughness",
+            ['s'] = "smoothness", ['h'] = "height", ['o'] = "occlusion" };
+
+        // Role of an incoming image, from its filename tokens; the last role word wins ("Normal_Emission" → emission).
+        internal static string FileRole(string fileName)
+        {
+            if (MaterialSurfaceMaps.IsPackedFile(fileName)) return "metallic";
+            var tokens = Tokens(System.IO.Path.GetFileNameWithoutExtension(fileName ?? ""), stem: false);
+            string role = "unknown"; int position = -1;
+            foreach (var (candidate, words) in RoleWords)
+                for (int i = tokens.Count - 1; i > position; i--)
+                    if (words.Contains(tokens[i]) || words.Contains(Stem(tokens[i]))) { role = candidate; position = i; break; }
+            // Game-art suffix letters as the final token: Body_D / _N / _E / _M / _R / _S / _H / _O.
+            if (role == "unknown" && tokens.Count > 1 && tokens[tokens.Count - 1].Length == 1 && LetterRoles.TryGetValue(tokens[tokens.Count - 1][0], out var letterRole)) role = letterRole;
+            return role;
+        }
+
+        internal static string SlotRole(string property, string description)
+        {
+            string s = Regex.Replace(property + " " + description, "[^a-zA-Z0-9]", "").ToLowerInvariant();
+            // Masks first: "_EmissionMask" or "_DetailMask" restrict another effect, they are not emission or detail maps.
+            if (s.Contains("mask") && !s.Contains("maskmap")) return "mask";
+            if (s.Contains("normal") || s.Contains("bump")) return "normal";
+            if (s.Contains("emission") || s.Contains("emissive")) return "emission";
+            if (s.Contains("metallic") || s.Contains("packed") || s.Contains("maskmap")) return "metallic";
+            if (s.Contains("occlusion") || s.Contains("aomap")) return "occlusion";
+            if (s.Contains("roughness")) return "roughness";
+            if (s.Contains("smoothness") || s.Contains("gloss") && !s.Contains("specgloss")) return "smoothness";
+            if (s.Contains("height") || s.Contains("parallax")) return "height";
+            if (s.Contains("specular") || s.Contains("specgloss")) return "specular";
+            if (s.Contains("alpha") || s.Contains("opacity")) return "mask";
+            if (s.Contains("basecolor") || s.Contains("basemap") || s.Contains("maintex") || s.Contains("albedo") || s.Contains("diffuse") ||
+                s.Contains("colormap") || s.StartsWith("maintexture", StringComparison.Ordinal)) return "color";
+            return "unknown";
+        }
+
+        private static readonly string[] SecondaryWords = { "detail", "matcap", "rim", "distortion", "decal", "flipbook", "gradation", "sdf", "shadow", "lighting",
+            "cubemap", "refl", "curve", "glitter", "dissolve", "outline", "layer", "flow", "noise", "ramp", "adjust", "sparkle", "iridescence", "backface", "vertex",
+            "audiolink", "secondary", "second", "overlay", "stencil", "fur", "clearcoat", "sheen", "subsurface", "thickness", "anisotropy", "panosphere" };
+
+        // Effect layers and extra slots; a plain texture set belongs in the primary slots.
+        private static bool Secondary(string property, string description)
+        {
+            string s = (property + " " + description).ToLowerInvariant();
+            return SecondaryWords.Any(s.Contains) || Regex.IsMatch(property ?? "", @"\d+$") || Regex.IsMatch(property ?? "", @"\d+(?:Map|Tex|Texture)$");
+        }
+
+        private static readonly string[] Primary = { "_MainTex", "_BaseMap", "_BaseColorMap", "_Albedo", "_BumpMap", "_NormalMap", "_EmissionMap", "_EmissiveColorMap",
+            "_MetallicGlossMap", "_MochieMetallicMaps", "_OcclusionMap", "_ParallaxMap", "_SpecGlossMap", "_MaskMap" };
+
+        private static readonly string[] ColorFamily = { "color", "emission" };
+        private static readonly string[] SurfaceFamily = { "roughness", "smoothness", "specular", "occlusion" };
+
+        private static double RoleFit(string textureRole, string slotRole)
+        {
+            if (textureRole == slotRole && textureRole != "unknown") return 0;
+            if (ColorFamily.Contains(textureRole) && ColorFamily.Contains(slotRole)) return -1;
+            if (textureRole == "unknown" && slotRole != "normal") return -.75;
+            if (slotRole == "unknown" && textureRole != "normal") return -.75;
+            return double.NaN;
+        }
+
+        internal static bool Compatible(string textureRole, string slotRole) => !double.IsNaN(RoleFit(textureRole, slotRole));
+        internal static bool Compatible(string role, TextureSlot slot) => !double.IsNaN(RoleFit(role, slot));
+        private static double RoleFit(string role, TextureSlot slot) => MaterialSurfaceMaps.CanAssign(role, slot.property) ? 0 : RoleFit(role, slot.role);
+
+        // A metallic slot packs several maps in its channels (Standard: metallic in red, smoothness in alpha), so a single
+        // roughness, smoothness, specular or occlusion image put there as it is renders wrong. Never chosen automatically;
+        // the slot menu offers it apart, for an image that is already packed that way.
+        internal static bool Packed(string textureRole, string slotRole) => SurfaceFamily.Contains(textureRole) && slotRole == "metallic";
+
+        // ---- Names ------------------------------------------------------------------------------------------
+
+        private static readonly HashSet<string> Generic = new HashSet<string>(RoleWords.SelectMany(r => r.words).Concat(new[] {
+            "t", "tx", "tex", "texture", "textures", "map", "maps", "mat", "material", "materials", "png", "jpg", "jpeg", "tga", "psd", "img", "image",
+            "srgb", "linear", "dx", "gl", "ogl", "packed", "orm", "arm", "mra", "rgb", "rgba", "copy", "final", "new", "default", "the", "and", "for",
+            "hi", "lo", "high", "low", "res", "lod", "udim", "tile", "mesh", "tiled", "rgb", "channel", "main" }));
+
+        // Common avatar part names that creators use interchangeably. Synonym evidence counts less than a direct match.
+        private static readonly string[][] Synonyms = { new[] { "hair", "feather", "tuft", "mane" }, new[] { "eye", "iris", "pupil" }, new[] { "body", "skin" },
+            new[] { "cloth", "clothe", "clothing", "outfit", "garment" }, new[] { "teeth", "tooth" }, new[] { "shoe", "boot" } };
+
+        // Letters and digits of any script ("髪_Normal", "Cheveux_été"); a run of Chinese, Japanese or Korean is its own token.
+        internal static List<string> Tokens(string value, bool stem = true) =>
+            Words(value).Where(t => !t.All(char.IsDigit)).Select(t => stem ? Stem(t) : t).ToList();
+
+        // Tokens with their numbers ("material", "002").
+        private static List<string> Words(string value)
+        {
+            value = Regex.Replace(value ?? "", @"(\p{Ll})(\p{Lu})", "$1 $2");
+            value = Regex.Replace(value, @"(\p{Lu}+)(\p{Lu}\p{Ll})", "$1 $2");
+            value = Regex.Replace(value, @"(\p{L})(\p{Nd})", "$1 $2");
+            value = Regex.Replace(value, @"(\p{Nd})(\p{L})", "$1 $2");
+            var split = new System.Text.StringBuilder(value.Length + 8);
+            for (int i = 0; i < value.Length; i++) { if (i > 0 && Wordless(value[i]) != Wordless(value[i - 1])) split.Append(' '); split.Append(value[i]); }
+            return Regex.Split(split.ToString().ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(t => t.Length > 0).ToList();
+        }
+
+        // Chinese, Japanese and Korean are written without spaces between words.
+        private static bool Wordless(char c) => c >= '\u3040' && c <= '\u30FF' || c >= '\u31F0' && c <= '\u31FF' || c >= '\u3400' && c <= '\u4DBF' ||
+            c >= '\u4E00' && c <= '\u9FFF' || c >= '\uAC00' && c <= '\uD7AF' || c == '\u3005';
+        private static bool Ideograph(char c) => c >= '\u3400' && c <= '\u4DBF' || c >= '\u4E00' && c <= '\u9FFF' || c == '\u3005';
+
+        private static string Stem(string token) => token.Length > 3 && token.EndsWith("s", StringComparison.Ordinal) && !token.EndsWith("ss", StringComparison.Ordinal) &&
+            !token.EndsWith("is", StringComparison.Ordinal) && !token.EndsWith("us", StringComparison.Ordinal) ? token.Substring(0, token.Length - 1) : token;
+
+        // One ideograph is already a word ("髪" hair, "体" body). A word with its number is a name of its own, generic words
+        // included: "Material.002" is "material#2", which ties "hair_Material.002_Normal" to that material and not to
+        // "Material.001". Map words with a number ("Normal 1", "Height_4") are copies, not names.
+        private static HashSet<string> Identity(string name)
+        {
+            var words = Words(name);
+            var identity = new HashSet<string>(words.Where(t => !t.All(char.IsDigit)).Select(Stem).Where(t => (t.Length > 1 || Ideograph(t[0])) && !Generic.Contains(t)));
+            for (int i = 0; i + 1 < words.Count; i++)
+                if (words[i].Length > 1 && !words[i].All(char.IsDigit) && words[i + 1].All(char.IsDigit) && !RoleWords.Any(r => r.words.Contains(words[i])))
+                    identity.Add(Stem(words[i]) + "#" + (words[i + 1].TrimStart('0') is var number && number.Length > 0 ? number : "0"));
+            return identity;
+        }
+
+        // 1 for equal tokens or a prefix of at least three letters ("bodymatt" ~ "body", "ulti" ~ "ultiv"), 0.6 for synonyms.
+        // Names written without spaces match when one contains the other ("髪" ~ "髪の毛"), 0.6 when they share most of
+        // the shorter one's ideographs ("前髪" ~ "髪の毛").
+        private static double Similarity(string a, string b)
+        {
+            if (a == b) return 1;
+            // Numbered names match only exactly ("material#2" is neither "material#21" nor "material").
+            if (a.IndexOf('#') >= 0 || b.IndexOf('#') >= 0) return 0;
+            if (Math.Min(a.Length, b.Length) >= 3 && (a.StartsWith(b, StringComparison.Ordinal) || b.StartsWith(a, StringComparison.Ordinal))) return 1;
+            if (a.Any(Wordless) || b.Any(Wordless))
+            {
+                if (a.Contains(b) || b.Contains(a)) return 1;
+                var shorter = (a.Length <= b.Length ? a : b).Where(Ideograph).Distinct().ToList();
+                string longer = a.Length <= b.Length ? b : a;
+                return shorter.Count > 0 && shorter.Count(longer.Contains) * 2 >= shorter.Count ? .6 : 0;
+            }
+            foreach (var group in Synonyms) if (group.Any(a.StartsWith) && group.Any(b.StartsWith)) return .6;
+            return 0;
+        }
+
+        // Main, normal, emission, metallic, occlusion and other well-known maps first, then any slot whose role is known.
+        internal static int Commonness(TextureSlot slot) => Primary.Contains(slot.property) ? 2 : slot.role != "unknown" ? 1 : 0;
+
+        private static double Best(string token, IEnumerable<string> bag) => bag.Select(b => Similarity(token, b)).DefaultIfEmpty(0).Max();
+
+        // Identities of names (without extension) starting with an export prefix: leading words names of different sets share
+        // (the next words differ), when they are a name of two words or more or start three sets or more. A single shared
+        // word ("Hair_Front", "Hair_Back") still names the part. The names come from the dropped files and from the images
+        // already in the avatar's slots, so a drop of one set ("<model> hairs for substance_EyeMatt.001_…") still finds the
+        // prefix it shares with the sets already there ("…_MiscMatt.001_…"). Within one prefix, words its sets all share in
+        // part ("Matt" and ".001" of "EyeMatt.001", "MiscMatt.001") do not tell them apart either: "Eye" and "Misc" do.
+        private static Dictionary<string, HashSet<string>> ExportIdentities(IEnumerable<string> names)
+        {
+            var words = names.Where(n => !string.IsNullOrEmpty(n)).Distinct().ToDictionary(n => n, n => Words(n));
+            HashSet<string> Rest(List<string> name, int skip) => Identity(string.Join(" ", name.Skip(skip)));
+            var prefixes = new Dictionary<string, (int Length, HashSet<string> Sets)>();
+            var list = words.Keys.ToList();
+            for (int i = 0; i < list.Count; i++)
+                for (int j = i + 1; j < list.Count; j++)
+                {
+                    var a = words[list[i]]; var b = words[list[j]];
+                    int k = 0;
+                    while (k < a.Count && k < b.Count && a[k] == b[k]) k++;
+                    if (k == 0) continue;
+                    var restA = Rest(a, k); var restB = Rest(b, k);
+                    // Files of one set ("…EyeMatt_BaseColor", "…EyeMatt_Normal") differ only by their map.
+                    if (restA.Count == 0 || restB.Count == 0 || restA.SetEquals(restB)) continue;
+                    string key = string.Join(" ", a.Take(k));
+                    if (!prefixes.TryGetValue(key, out var prefix)) prefixes[key] = prefix = (k, new HashSet<string>());
+                    prefix.Sets.Add(string.Join(" ", restA.OrderBy(w => w, StringComparer.Ordinal)));
+                    prefix.Sets.Add(string.Join(" ", restB.OrderBy(w => w, StringComparer.Ordinal)));
+                }
+            var exports = prefixes.Where(p => p.Value.Sets.Count >= 3 || Identity(p.Key).Count >= 2).OrderByDescending(p => p.Value.Length).ToList();
+            var result = new Dictionary<string, HashSet<string>>();
+            var family = new Dictionary<string, string>();
+            foreach (var pair in words)
+            {
+                var export = exports.FirstOrDefault(p => p.Value.Length < pair.Value.Count && string.Join(" ", pair.Value.Take(p.Value.Length)) == p.Key);
+                if (export.Key == null) continue;
+                var rest = Rest(pair.Value, export.Value.Length);
+                if (rest.Count == 0) continue;
+                result[pair.Key] = rest; family[pair.Key] = export.Key;
+            }
+            foreach (var members in family.GroupBy(f => f.Value))
+            {
+                var sets = members.Select(m => string.Join(" ", result[m.Key].OrderBy(w => w, StringComparer.Ordinal))).Distinct().ToList();
+                var shared = new HashSet<string>(sets.SelectMany(set => set.Split(' ')).GroupBy(w => w).Where(g => g.Count() >= 2).Select(g => g.Key));
+                foreach (var member in members)
+                {
+                    var kept = new HashSet<string>(result[member.Key].Where(w => !shared.Contains(w)));
+                    if (kept.Count > 0) result[member.Key] = kept;
+                }
+            }
+            return result;
+        }
+
+        // ---- Matching ---------------------------------------------------------------------------------------
+
+        private sealed class Candidate { public TextureSlot slot; public double evidence, score; }
+
+        internal static void Match(List<TextureEntry> textures, List<TextureSlot> slots, Dictionary<Texture2D, TextureStats> stats, Dictionary<string, List<TextureMemory.Slot>> memory)
+        {
+            var materials = slots.GroupBy(s => s.material).ToList();
+            // A mesh name identifies a material only when that mesh has one or two materials ("HairFrontMesh"), not a whole-avatar "Body".
+            var materialsPerRenderer = slots.SelectMany(s => s.renderers.Select(r => (r, s.material))).Distinct().GroupBy(p => p.r).ToDictionary(g => g.Key, g => g.Count());
+            // So does an object or model file holding the mesh with one or two materials ("Spiky hair" above "NurbsPath.001").
+            var nameBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(Identity(g.Key.name)
+                .Concat(g.First().renderers.Where(r => materialsPerRenderer[r] <= 2).SelectMany(Identity)).Concat(g.First().namingWords)));
+            // Every mesh name still adds a little evidence: shared by all of a mesh's materials, it only separates meshes.
+            var meshBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.First().renderers.SelectMany(Identity).Concat(g.First().ownerWords)));
+            // An image an earlier drop copied in only shows where that drop's guess put it: its name is no evidence there, or
+            // a wrong guess would pull the same files back on every drop ("hair_Material.002_Normal" left on the body's
+            // MiscMatt by a drop that missed the hair). Slots you chose for a file are remembered and keep theirs.
+            var chosen = new HashSet<TextureSlot>(memory.Values.SelectMany(m => m)
+                .SelectMany(m => slots.Where(s => s.materialName == m.material && s.shader == m.shader && s.property == m.property)));
+            // So is a project image a drop put in its own material copy without copying the image ("…_EyeMatt_BaseColor" used
+            // from its folder): it is among the files dropped again.
+            var dropping = new HashSet<Texture>(textures.Where(t => t.texture).Select(t => (Texture)t.texture));
+            bool Guessed(TextureSlot s) => TextureImport.Dropped(s.existingPath) || s.existing && dropping.Contains(s.existing) && TextureImport.DropMaterial(s.material);
+            var shown = slots.ToDictionary(s => s, s => Guessed(s) && !chosen.Contains(s) ? "" : s.existingName);
+            // Export prefixes (see ExportIdentities), found among the dropped files and the images in the slots.
+            string Bare(TextureEntry t) => System.IO.Path.GetFileNameWithoutExtension(t.fileName ?? "");
+            var exported = ExportIdentities(textures.Select(Bare).Concat(shown.Values));
+            HashSet<string> Named(string name) => exported.TryGetValue(name ?? "", out var known) ? new HashSet<string>(known) : Identity(name);
+            var contextBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.SelectMany(s => Named(shown[s]))));
+            // Hidden objects (disabled variants, toggled outfits) neither receive a set first nor dilute evidence for visible ones.
+            var visible = materials.Where(g => g.Any(s => s.active)).Select(g => g.Key).ToList();
+            var slotBag = slots.ToDictionary(s => s, s => Named(shown[s]));
+            // Tokens shared by most of the dropped files (a common export prefix) do not tell files apart, nor do the words
+            // several sets start with ("<model> hairs for substance_EyeMatt…", "…_MiscMatt…"): what follows does.
+            var identities = textures.ToDictionary(t => t, t => Named(Bare(t)));
+            if (textures.Count >= 4)
+                foreach (var common in identities.Values.SelectMany(i => i).GroupBy(w => w).Where(g => g.Count() > textures.Count / 2).Select(g => g.Key).ToList())
+                    foreach (var identity in identities.Values) identity.Remove(common);
+
+            var linked = new List<TextureEntry>();
+            var grouped = new List<TextureEntry>();
+            var layout = new UvLayouts();
+            foreach (var texture in textures)
+            {
+                var remembered = TextureMemory.Find(memory, texture, slots);
+                if (remembered.Count > 0)
+                {
+                    Assign(texture, remembered[0], 1f, RememberedReason);
+                    foreach (var extra in remembered.Skip(1)) linked.Add(Link(texture, extra, RememberedReason));
+                    continue;
+                }
+                var identity = identities[texture];
+                // A default material name with its number ("Material.002") names one material: a set made for one this avatar
+                // doesn't have (a part since removed) is not guessed onto another part.
+                string missing = identity.FirstOrDefault(w => w.IndexOf('#') > 0 && Generic.Contains(w.Substring(0, w.IndexOf('#'))) &&
+                    !materials.Any(g => nameBag[g.Key].Contains(w) || contextBag[g.Key].Contains(w)));
+                if (missing != null)
+                {
+                    string word = missing.Substring(0, missing.IndexOf('#'));
+                    texture.reason = "Made for a material named “" + char.ToUpperInvariant(word[0]) + word.Substring(1) + "." + missing.Substring(missing.IndexOf('#') + 1).PadLeft(3, '0') +
+                                     "”, which this avatar doesn't have. Choose a slot below.";
+                    continue;
+                }
+                // A token that appears on many materials (a base or author name) is weak evidence for any one of them.
+                var weight = identity.ToDictionary(w => w, w => {
+                    bool Mentions(Material m) => Best(w, nameBag[m]) > 0 || Best(w, contextBag[m]) > 0;
+                    int count = visible.Count(Mentions);
+                    if (count == 0) count = materials.Count(g => Mentions(g.Key));
+                    return count == 0 ? 0 : 1.0 / count; });
+                double Evidence(IEnumerable<string> bag) => identity.Sum(w => weight[w] * Best(w, bag));
+                string plainName = System.IO.Path.GetFileNameWithoutExtension(texture.fileName).ToLowerInvariant();
+                var ranked = new List<Candidate>();
+                foreach (var slot in slots)
+                {
+                    if (!CanAutoAssign(texture, slot)) continue;
+                    double fit = RoleFit(texture.role, slot);
+                    if (double.IsNaN(fit)) continue;
+                    double evidence = Evidence(slotBag[slot]) * 3 + Evidence(nameBag[slot.material]) * 3 + Evidence(contextBag[slot.material]) * 1.5 + Evidence(meshBag[slot.material]);
+                    if (shown[slot].ToLowerInvariant() == plainName) evidence += 10;
+                    // A variant of the texture now in the slot keeps its whole name and adds to it ("Body_BaseMap" ->
+                    // "Body_BaseMap_Green"): the strongest sign short of the same name.
+                    else if (VariantOf(System.IO.Path.GetFileNameWithoutExtension(texture.fileName), shown[slot])) evidence += 8;
+                    ranked.Add(new Candidate { slot = slot, evidence = evidence, score = evidence + fit + Preference(texture, slot) });
+                }
+                ranked = ranked.OrderByDescending(c => c.score).ToList();
+                var best = ranked.FirstOrDefault();
+                if (best == null && slots.Any(s => Packed(texture.role, s.role)))
+                { texture.reason = $"No {texture.role} slot here: metallic maps pack metallic and smoothness in their channels. Choose a slot below if this image is packed that way."; continue; }
+                if (best == null || best.evidence < 1) { texture.reason = NoClearMatchReason + " Choose a slot below."; if (best != null) Suggest(texture, best.slot); continue; }
+                // Parts of one mesh that share a UV layout (colour variants of the same strands, for example) are one target:
+                // a single texture set covers all of them.
+                var group = ranked.Skip(1).Where(c => best.score - c.score < .5 && c.slot.property == best.slot.property && c.slot.material != best.slot.material &&
+                    layout.Siblings(best.slot, c.slot)).ToList();
+                // Slots currently showing the same texture are one target too: replacing it everywhere is expected.
+                var rival = ranked.Skip(1).FirstOrDefault(c => !group.Contains(c) && !(best.slot.existing && c.slot.existing == best.slot.existing));
+                if (rival != null && best.score - rival.score < .5)
+                {
+                    texture.reason = rival.slot.material == best.slot.material
+                        ? $"Probably {best.slot.materialName}, but its {best.slot.description} and {rival.slot.description} slots are about as likely."
+                        : $"Probably {best.slot.materialName}, but {rival.slot.materialName} is about as likely.";
+                    Suggest(texture, best.slot); continue;
+                }
+                Assign(texture, best.slot, (float)Math.Min(.99, .9 + best.evidence / 100), "Matched " + best.slot.materialName + " / " + best.slot.description + " by name.");
+                foreach (var member in group) grouped.Add(Link(texture, member.slot, "Shares its mesh and UV layout with " + best.slot.materialName + "."));
+            }
+            SeparateEmission(textures, slots, stats);
+            RejectConflicts(textures);
+            // Files that share a name stem are one exported set ("Hair_Normal", "Hair_BaseColor"): an undecided member follows
+            // the material its siblings matched, when that material has a free compatible slot.
+            foreach (var texture in textures.Where(t => !t.material && identities[t].Count > 0).ToList())
+            {
+                bool SameSet(TextureEntry other) => other != texture && identities[other].SetEquals(identities[texture]);
+                var siblings = textures.Where(t => t.material && SameSet(t)).Select(t => t.material)
+                    .Concat(grouped.Where(g => textures.Any(t => t.texture == g.texture && SameSet(t))).Select(g => g.material)).Distinct().ToList();
+                if (siblings.Count == 0) continue;
+                // Siblings on several materials must be one layout group (see above); otherwise the set's home is unclear.
+                var home = slots.First(s => s.material == siblings[0]);
+                if (siblings.Skip(1).Any(m => !layout.Siblings(home, slots.First(s => s.material == m)))) continue;
+                var targets = siblings.Select(m => slots.Where(s => s.material == m && CanAutoAssign(texture, s) && Compatible(texture.role, s) && !textures.Concat(grouped).Any(t => t.material == s.material && t.property == s.property))
+                    .OrderByDescending(s => RoleFit(texture.role, s) + Preference(texture, s)).FirstOrDefault())
+                    .Where(t => t != null && RoleFit(texture.role, t) + Preference(texture, t) > -1).ToList();
+                if (targets.Count > 0)
+                {
+                    Assign(texture, targets[0], .93f, "Same texture set as the other " + string.Join(" ", identities[texture]) + " files on " + targets[0].materialName + ".");
+                    foreach (var extra in targets.Skip(1)) grouped.Add(Link(texture, extra, "Same texture set, and shares its mesh and UV layout with " + targets[0].materialName + "."));
+                }
+                else
+                {
+                    // Locked/optimized shaders only keep the features that were enabled, so the slot may simply not exist yet.
+                    texture.suggestedMaterialName = siblings[0].name; texture.suggestedProperty = null;
+                    texture.reason = MissingSlotReason + string.Join(", ", siblings.Select(m => m.name)) + ", which has no free " + texture.role + " slot. Enable that feature on the material (unlock its shader if it is locked), then drop again, or choose a slot below.";
+                }
+            }
+            // Layout-group members only fill slots nothing else targets.
+            foreach (var member in grouped)
+                if (!textures.Concat(linked).Any(t => t.material == member.material && t.property == member.property)) linked.Add(member);
+            // Propagate each confident match to other slots of the same kind that currently use the texture being replaced.
+            foreach (var texture in textures.Concat(linked).Where(t => t.material && !t.applied).ToList())
+            {
+                var slot = slots.FirstOrDefault(s => s.material == texture.material && s.property == texture.property);
+                if (slot?.existing == null) continue;
+                foreach (var other in slots.Where(s => s != slot && s.existing == slot.existing && s.role == slot.role &&
+                    CanAutoAssign(texture, s) &&
+                    !textures.Concat(linked).Any(t => t.material == s.material && t.property == s.property)))
+                    linked.Add(Link(texture, other, "Replaces " + slot.existingName + " here too, like on " + slot.materialName + "."));
+            }
+            textures.AddRange(linked);
+        }
+
+        private static bool VariantOf(string file, string existing)
+        {
+            var existingTokens = Tokens(existing, stem: false);
+            if (existingTokens.Count == 0 || existingTokens.All(Generic.Contains)) return false;
+            var fileTokens = Tokens(file, stem: false);
+            return fileTokens.Count > existingTokens.Count && existingTokens.All(fileTokens.Contains);
+        }
+
+        private static double Preference(TextureEntry texture, TextureSlot slot)
+        {
+            string file = texture.fileName.ToLowerInvariant();
+            double value = 0;
+            if (slot.secondary && !SecondaryWords.Any(w => file.Contains(w) && (slot.property + " " + slot.description).ToLowerInvariant().Contains(w))) value -= 2.5;
+            else if (Primary.Contains(slot.property)) value += .5;
+            if (slot.existing) value += .3;
+            if (slot.rendererKind == "effect") value -= 1.5;
+            if (!slot.active) value -= 3;
+            return value;
+        }
+
+        // Coarse UV coverage per mesh submesh; two submeshes of one mesh with nearly the same coverage share a layout.
+        private sealed class UvLayouts
+        {
+            private const int Size = 32;
+            private readonly Dictionary<(Mesh, int), bool[]> cache = new Dictionary<(Mesh, int), bool[]>();
+
+            internal bool Siblings(TextureSlot a, TextureSlot b)
+            {
+                foreach (var (renderer, indexA) in a.parts)
+                foreach (var (other, indexB) in b.parts)
+                {
+                    if (renderer != other) continue;
+                    var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.GetComponent<MeshFilter>()?.sharedMesh;
+                    if (!mesh || indexA >= mesh.subMeshCount || indexB >= mesh.subMeshCount) continue;
+                    bool[] first = Grid(mesh, indexA), second = Grid(mesh, indexB);
+                    int both = 0, countA = 0, countB = 0;
+                    for (int i = 0; i < first.Length; i++) { if (first[i]) countA++; if (second[i]) countB++; if (first[i] && second[i]) both++; }
+                    if (Math.Min(countA, countB) > 0 && both >= .8 * Math.Max(countA, countB)) return true;
+                }
+                return false;
+            }
+
+            // The cells each triangle covers, not just its corners: complementary halves of an atlas stay apart. A tiled
+            // triangle moves into the 0–1 square as a whole, so a corner at exactly 1 is never folded back onto 0.
+            private bool[] Grid(Mesh mesh, int submesh)
+            {
+                if (cache.TryGetValue((mesh, submesh), out var grid)) return grid;
+                grid = new bool[Size * Size];
+                var uv = new List<Vector2>();
+                mesh.GetUVs(0, uv);
+                var indices = uv.Count > 0 ? mesh.GetIndices(submesh) : Array.Empty<int>();
+                var topology = mesh.GetTopology(submesh);
+                int corners = topology == MeshTopology.Triangles ? 3 : topology == MeshTopology.Quads ? 4 : 1;
+                for (int i = 0; i + corners <= indices.Length; i += corners)
+                {
+                    bool valid = true;
+                    for (int c = i; c < i + corners; c++) valid &= indices[c] < uv.Count;
+                    if (!valid) continue;
+                    var first = uv[indices[i]];
+                    if (corners == 1) { Cover(grid, first, first, first); continue; }
+                    Cover(grid, first, uv[indices[i + 1]], uv[indices[i + 2]]);
+                    if (corners == 4) Cover(grid, first, uv[indices[i + 2]], uv[indices[i + 3]]);
+                }
+                return cache[(mesh, submesh)] = grid;
+            }
+
+            private static void Cover(bool[] grid, Vector2 a, Vector2 b, Vector2 c)
+            {
+                var tile = new Vector2(Mathf.Floor((a.x + b.x + c.x) / 3), Mathf.Floor((a.y + b.y + c.y) / 3));
+                a = (a - tile) * Size; b = (b - tile) * Size; c = (c - tile) * Size;
+                int Cell(float v) => Mathf.Clamp(Mathf.FloorToInt(v), 0, Size - 1);
+                // Corners always count, so triangles smaller than a cell still leave a mark.
+                grid[Cell(a.y) * Size + Cell(a.x)] = grid[Cell(b.y) * Size + Cell(b.x)] = grid[Cell(c.y) * Size + Cell(c.x)] = true;
+                float Side(Vector2 p, Vector2 q, Vector2 r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+                float area = Side(a, b, c);
+                if (Mathf.Abs(area) < 1e-6f) return;
+                for (int y = Cell(Mathf.Min(a.y, Mathf.Min(b.y, c.y))), yEnd = Cell(Mathf.Max(a.y, Mathf.Max(b.y, c.y))); y <= yEnd; y++)
+                for (int x = Cell(Mathf.Min(a.x, Mathf.Min(b.x, c.x))), xEnd = Cell(Mathf.Max(a.x, Mathf.Max(b.x, c.x))); x <= xEnd; x++)
+                {
+                    var center = new Vector2(x + .5f, y + .5f);
+                    float u = Side(b, c, center) / area, v = Side(c, a, center) / area, w = Side(a, b, center) / area;
+                    if (u > 0 && v > 0 && w > 0) grid[y * Size + x] = true;
+                }
+            }
+        }
+
+        private static TextureEntry Link(TextureEntry source, TextureSlot slot, string reason)
+        {
+            var entry = new TextureEntry { texture = source.texture, sourceKey = source.sourceKey, fileName = source.fileName, role = source.role };
+            Assign(entry, slot, source.confidence > 0 ? source.confidence : .95f, reason);
+            return entry;
+        }
+
+        private static void Suggest(TextureEntry texture, TextureSlot slot) { texture.suggestedMaterialName = slot.materialName; texture.suggestedProperty = slot.property; }
+
+        private static void Assign(TextureEntry texture, TextureSlot slot, float confidence, string reason)
+        {
+            texture.material = slot.material; texture.property = slot.property; texture.confidence = confidence;
+            texture.suggestedMaterialName = slot.materialName; texture.suggestedProperty = slot.property; texture.reason = reason;
+        }
+
+        // Two colour images aimed at one colour slot, where exactly one is mostly black with bright details and the
+        // material has a free emission slot: the dark one is the emission map (e.g. Eyes_BaseColor vs Eyes_BaseColor3).
+        private static void SeparateEmission(List<TextureEntry> textures, List<TextureSlot> slots, Dictionary<Texture2D, TextureStats> stats)
+        {
+            foreach (var group in textures.Where(t => t.material && !t.applied && t.role == "color").GroupBy(t => (t.material, t.property)).Where(g => g.Count() == 2).ToList())
+            {
+                var emissive = group.Where(t => stats.TryGetValue(t.texture, out var s) && s.LooksEmissive).ToList();
+                if (emissive.Count != 1) continue;
+                var other = group.First(t => t != emissive[0]);
+                if (!stats.TryGetValue(other.texture, out var otherStats) || otherStats.black > .3f) continue;
+                var target = slots.Where(s => s.material == group.Key.material && s.role == "emission" && CanAutoAssign(emissive[0], s) && !textures.Any(t => t.material == s.material && t.property == s.property))
+                    .OrderByDescending(s => Preference(emissive[0], s)).FirstOrDefault();
+                if (target == null) continue;
+                Assign(emissive[0], target, .92f, "Mostly black with bright details: matched as " + target.materialName + " / " + target.description + ".");
+            }
+        }
+
+        internal static void RejectConflicts(List<TextureEntry> textures)
+        {
+            foreach (var conflict in textures.Where(t => t.material && !t.applied).GroupBy(t => (t.material, t.property))
+                .Where(g => g.Count() > 1 && !MaterialSurfaceMaps.CanCombine(g.Key.property, g.Select(e => e.role).ToArray())))
+                foreach (var entry in conflict) { entry.material = null; entry.property = null; entry.confidence = 0;
+                    entry.reason = "Several images point at " + entry.suggestedMaterialName + " / " + entry.suggestedProperty + ". Choose the target below."; }
+        }
+    }
+}

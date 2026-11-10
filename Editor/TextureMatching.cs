@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Orbiters.Toolkit.Editor;
@@ -27,6 +28,9 @@ namespace Orbiters.MyAvatar.Editor
         // Images bundled with an accessory fill gaps; they are not a request to replace its setup.
         public bool fillOnly;
         public string Label => materialName + " / " + description + " (" + property + ") · " + rendererPath;
+
+        // A slot of its own over the same collections (see TextureMatching.Slots).
+        internal TextureSlot Copy() => (TextureSlot)MemberwiseClone();
     }
 
     internal static class TextureMatching
@@ -40,19 +44,28 @@ namespace Orbiters.MyAvatar.Editor
             slot.existing && slot.existing == entry.texture ||
             !slot.existing && !slot.secondary && (entry.role == slot.role || entry.role == "unknown" || MaterialSurfaceMaps.CanAssign(entry.role, slot.property));
 
-        internal static List<TextureSlot> Slots(MyAvatar avatar, bool includeAll = false)
+        /// <summary>
+        /// Every texture slot of the avatar's materials, one per (material, texture property), in renderer order. Kept per
+        /// avatar state (<see cref="TextureSlotCache"/>): each call hands out its own copies, whose collections are shared and
+        /// must not be changed.
+        /// </summary>
+        internal static List<TextureSlot> Slots(MyAvatar avatar, bool includeAll = false) => TextureSlotCache.Slots(avatar, includeAll);
+
+        // The slots of these renderers; `textures` receives, per material, the texture properties its slots read.
+        internal static List<TextureSlot> Build(MyAvatar avatar, List<Renderer> renderers, bool includeAll, Dictionary<Material, int[]> textures)
         {
             var result = new List<TextureSlot>();
             var byMaterial = new Dictionary<Material, List<TextureSlot>>();
-            var renderers = avatar.GetComponentsInChildren<Renderer>(true)
-                .Where(r => (r.hideFlags & HideFlags.DontSave) == 0 && (r.gameObject.hideFlags & HideFlags.DontSave) == 0).ToList();
             var owners = new Owners(avatar.transform, renderers);
+            var paths = new Dictionary<Texture, string>();
+            var read = new List<int>();
             foreach (var renderer in renderers)
             {
                 var (ownerWords, namingWords) = owners.Of(renderer);
                 string kind = renderer is SkinnedMeshRenderer ? "skinned" : renderer is MeshRenderer ? "mesh" :
                     renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer ? "effect" : "other";
                 bool visible = renderer.enabled && renderer.gameObject.activeInHierarchy;
+                string rendererPath = null;
                 var materials = renderer.sharedMaterials;
                 for (int index = 0; index < materials.Length; index++)
                 {
@@ -75,21 +88,26 @@ namespace Orbiters.MyAvatar.Editor
                     var slots = byMaterial[material] = new List<TextureSlot>();
                     var shader = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.OriginalShader(material) ?? material.shader;
                     string shaderName = ShaderName(material);
-                    for (int i = 0; i < shader.GetPropertyCount(); i++)
+                    rendererPath ??= AnimationUtility.CalculateTransformPath(renderer.transform, avatar.transform);
+                    read.Clear();
+                    foreach (var template in TextureSlotCache.Of(shader))
                     {
-                        if (shader.GetPropertyType(i) != ShaderPropertyType.Texture || !includeAll && (shader.GetPropertyTextureDimension(i) != TextureDimension.Tex2D ||
-                            (shader.GetPropertyFlags(i) & ShaderPropertyFlags.HideInInspector) != 0)) continue;
-                        string property = shader.GetPropertyName(i), description = CleanDescription(shader.GetPropertyDescription(i));
-                        var texture = material.HasProperty(property) ? material.GetTexture(property) : Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, property);
+                        if (!includeAll && (!template.tex2D || template.hidden)) continue;
+                        Texture texture;
+                        if (material.HasProperty(template.id)) { texture = material.GetTexture(template.id); read.Add(template.id); }
+                        else texture = Orbiters.Toolkit.Editor.MaterialSurfaceMaps.StrippedTexture(material, template.property);
+                        string path = "";
+                        if (texture && !paths.TryGetValue(texture, out path)) paths[texture] = path = AssetDatabase.GetAssetPath(texture);
                         var slot = new TextureSlot { material = material, materialName = material.name,
-                            shader = shaderName, property = property, description = description, role = SlotRole(property, description),
-                            secondary = Secondary(property, description), existing = texture, existingName = texture ? texture.name : "",
-                            existingPath = texture ? AssetDatabase.GetAssetPath(texture) : "", existingWidth = texture ? texture.width : 0, existingHeight = texture ? texture.height : 0,
-                            rendererPath = AnimationUtility.CalculateTransformPath(renderer.transform, avatar.transform), rendererKind = kind, active = visible };
+                            shader = shaderName, property = template.property, description = template.description, role = template.role,
+                            secondary = template.secondary, existing = texture, existingName = texture ? texture.name : "",
+                            existingPath = path, existingWidth = texture ? texture.width : 0, existingHeight = texture ? texture.height : 0,
+                            rendererPath = rendererPath, rendererKind = kind, active = visible };
                         slot.renderers.Add(renderer.name); slot.parts.Add((renderer, index));
                         slot.ownerWords.UnionWith(ownerWords); slot.namingWords.UnionWith(namingWords);
                         slots.Add(slot); result.Add(slot);
                     }
+                    textures[material] = read.ToArray();
                 }
             }
             return result;
@@ -161,12 +179,14 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Shader GUI frameworks append metadata to display names, e.g. Thry/Poiyomi "Normal Map--{reference_properties:[...]}".
+        private static readonly Regex ExpandHint = new Regex(@"\s*\((?:expand|click to expand)\)|\s*\[click to expand\]", RegexOptions.IgnoreCase);
+
         internal static string CleanDescription(string description)
         {
             string value = description ?? "";
             int metadata = value.IndexOf("--{", StringComparison.Ordinal);
             if (metadata >= 0) value = value.Substring(0, metadata);
-            return Regex.Replace(value, @"\s*\((?:expand|click to expand)\)|\s*\[click to expand\]", "", RegexOptions.IgnoreCase).Trim();
+            return ExpandHint.Replace(value, "").Trim();
         }
 
         // ---- Roles -------------------------------------------------------------------------------------------
@@ -202,9 +222,11 @@ namespace Orbiters.MyAvatar.Editor
             return role;
         }
 
+        private static readonly Regex AsciiLettersAndDigits = new Regex("[^a-zA-Z0-9]");
+
         internal static string SlotRole(string property, string description)
         {
-            string s = Regex.Replace(property + " " + description, "[^a-zA-Z0-9]", "").ToLowerInvariant();
+            string s = AsciiLettersAndDigits.Replace(property + " " + description, "").ToLowerInvariant();
             // Masks first: "_EmissionMask" or "_DetailMask" restrict another effect, they are not emission or detail maps.
             if (s.Contains("mask") && !s.Contains("maskmap")) return "mask";
             if (s.Contains("normal") || s.Contains("bump")) return "normal";
@@ -226,10 +248,12 @@ namespace Orbiters.MyAvatar.Editor
             "audiolink", "secondary", "second", "overlay", "stencil", "fur", "clearcoat", "sheen", "subsurface", "thickness", "anisotropy", "panosphere" };
 
         // Effect layers and extra slots; a plain texture set belongs in the primary slots.
-        private static bool Secondary(string property, string description)
+        private static readonly Regex Numbered = new Regex(@"\d+$"), NumberedMap = new Regex(@"\d+(?:Map|Tex|Texture)$");
+
+        internal static bool Secondary(string property, string description)
         {
             string s = (property + " " + description).ToLowerInvariant();
-            return SecondaryWords.Any(s.Contains) || Regex.IsMatch(property ?? "", @"\d+$") || Regex.IsMatch(property ?? "", @"\d+(?:Map|Tex|Texture)$");
+            return SecondaryWords.Any(s.Contains) || Numbered.IsMatch(property ?? "") || NumberedMap.IsMatch(property ?? "");
         }
 
         private static readonly string[] Primary = { "_MainTex", "_BaseMap", "_BaseColorMap", "_Albedo", "_BumpMap", "_NormalMap", "_EmissionMap", "_EmissiveColorMap",
@@ -271,16 +295,53 @@ namespace Orbiters.MyAvatar.Editor
         internal static List<string> Tokens(string value, bool stem = true) =>
             Words(value).Where(t => !t.All(char.IsDigit)).Select(t => stem ? Stem(t) : t).ToList();
 
-        // Tokens with their numbers ("material", "002").
+        // Tokens with their numbers ("material", "002"), lower-cased. Runs of letters and digits of any script, split where a
+        // lower-case letter meets an upper-case one ("bodyMap"), before the last capital of a run followed by a lower-case
+        // letter ("BODYMap" -> "body", "map"), between letters and decimal digits, and where a Chinese, Japanese or Korean run
+        // starts or ends. One pass: this runs for every name a drop compares.
         private static List<string> Words(string value)
         {
-            value = Regex.Replace(value ?? "", @"(\p{Ll})(\p{Lu})", "$1 $2");
-            value = Regex.Replace(value, @"(\p{Lu}+)(\p{Lu}\p{Ll})", "$1 $2");
-            value = Regex.Replace(value, @"(\p{L})(\p{Nd})", "$1 $2");
-            value = Regex.Replace(value, @"(\p{Nd})(\p{L})", "$1 $2");
-            var split = new System.Text.StringBuilder(value.Length + 8);
-            for (int i = 0; i < value.Length; i++) { if (i > 0 && Wordless(value[i]) != Wordless(value[i - 1])) split.Append(' '); split.Append(value[i]); }
-            return Regex.Split(split.ToString().ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(t => t.Length > 0).ToList();
+            var words = new List<string>();
+            if (string.IsNullOrEmpty(value)) return words;
+            int start = -1;
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (!WordChar(value[i]))
+                {
+                    if (start >= 0) { words.Add(value.Substring(start, i - start).ToLowerInvariant()); start = -1; }
+                    continue;
+                }
+                if (start < 0) start = i;
+                else if (WordBreak(value, i)) { words.Add(value.Substring(start, i - start).ToLowerInvariant()); start = i; }
+            }
+            if (start >= 0) words.Add(value.Substring(start).ToLowerInvariant());
+            return words;
+        }
+
+        private static bool WordChar(char c)
+        {
+            switch (char.GetUnicodeCategory(char.ToLowerInvariant(c)))
+            {
+                case UnicodeCategory.UppercaseLetter: case UnicodeCategory.LowercaseLetter: case UnicodeCategory.TitlecaseLetter:
+                case UnicodeCategory.ModifierLetter: case UnicodeCategory.OtherLetter:
+                case UnicodeCategory.DecimalDigitNumber: case UnicodeCategory.LetterNumber: case UnicodeCategory.OtherNumber:
+                    return true;
+                default: return false;
+            }
+        }
+
+        private static bool Letter(UnicodeCategory c) => c <= UnicodeCategory.OtherLetter;
+
+        // Between two word characters at i - 1 and i.
+        private static bool WordBreak(string value, int i)
+        {
+            char before = value[i - 1], at = value[i];
+            UnicodeCategory b = char.GetUnicodeCategory(before), a = char.GetUnicodeCategory(at);
+            if (b == UnicodeCategory.LowercaseLetter && a == UnicodeCategory.UppercaseLetter) return true;
+            if (b == UnicodeCategory.UppercaseLetter && a == UnicodeCategory.UppercaseLetter && i + 1 < value.Length &&
+                char.GetUnicodeCategory(value[i + 1]) == UnicodeCategory.LowercaseLetter) return true;
+            if (Letter(b) && a == UnicodeCategory.DecimalDigitNumber || b == UnicodeCategory.DecimalDigitNumber && Letter(a)) return true;
+            return Wordless(before) != Wordless(at);
         }
 
         // Chinese, Japanese and Korean are written without spaces between words.
@@ -335,37 +396,79 @@ namespace Orbiters.MyAvatar.Editor
         // already in the avatar's slots, so a drop of one set ("<model> hairs for substance_EyeMatt.001_…") still finds the
         // prefix it shares with the sets already there ("…_MiscMatt.001_…"). Within one prefix, words its sets all share in
         // part ("Matt" and ".001" of "EyeMatt.001", "MiscMatt.001") do not tell them apart either: "Eye" and "Misc" do.
+        //
+        // Two names share exactly their first k words when they part at a node of depth k of the tree of word lists, so each
+        // node with several branches looks at its names once instead of every pair of names being compared.
         private static Dictionary<string, HashSet<string>> ExportIdentities(IEnumerable<string> names)
         {
-            var words = names.Where(n => !string.IsNullOrEmpty(n)).Distinct().ToDictionary(n => n, n => Words(n));
-            HashSet<string> Rest(List<string> name, int skip) => Identity(string.Join(" ", name.Skip(skip)));
-            var prefixes = new Dictionary<string, (int Length, HashSet<string> Sets)>();
-            var list = words.Keys.ToList();
-            for (int i = 0; i < list.Count; i++)
-                for (int j = i + 1; j < list.Count; j++)
+            var list = names.Where(n => !string.IsNullOrEmpty(n)).Distinct().ToList();
+            var words = list.Select(Words).ToList();
+            var rests = new Dictionary<(int name, int skip), HashSet<string>>();
+            HashSet<string> Rest(int name, int skip)
+            {
+                if (!rests.TryGetValue((name, skip), out var rest)) rests[(name, skip)] = rest = Identity(string.Join(" ", words[name].Skip(skip)));
+                return rest;
+            }
+            string Sorted(HashSet<string> set) => string.Join(" ", set.OrderBy(w => w, StringComparer.Ordinal));
+            var root = new PrefixNode(0);
+            for (int n = 0; n < list.Count; n++)
+            {
+                var node = root;
+                foreach (var word in words[n])
                 {
-                    var a = words[list[i]]; var b = words[list[j]];
-                    int k = 0;
-                    while (k < a.Count && k < b.Count && a[k] == b[k]) k++;
-                    if (k == 0) continue;
-                    var restA = Rest(a, k); var restB = Rest(b, k);
-                    // Files of one set ("…EyeMatt_BaseColor", "…EyeMatt_Normal") differ only by their map.
-                    if (restA.Count == 0 || restB.Count == 0 || restA.SetEquals(restB)) continue;
-                    string key = string.Join(" ", a.Take(k));
-                    if (!prefixes.TryGetValue(key, out var prefix)) prefixes[key] = prefix = (k, new HashSet<string>());
-                    prefix.Sets.Add(string.Join(" ", restA.OrderBy(w => w, StringComparer.Ordinal)));
-                    prefix.Sets.Add(string.Join(" ", restB.OrderBy(w => w, StringComparer.Ordinal)));
+                    if (!node.children.TryGetValue(word, out var child)) node.children[word] = child = new PrefixNode(node.depth + 1);
+                    node = child; node.names.Add(n);
                 }
-            var exports = prefixes.Where(p => p.Value.Sets.Count >= 3 || Identity(p.Key).Count >= 2).OrderByDescending(p => p.Value.Length).ToList();
+            }
+            // A node's sets: the rests of names under it that part there from a name with another rest. Files of one set
+            // ("…EyeMatt_BaseColor", "…EyeMatt_Normal") differ only by their map.
+            var stack = new Stack<(PrefixNode node, string key)>();
+            foreach (var pair in root.children) stack.Push((pair.Value, pair.Key));
+            while (stack.Count > 0)
+            {
+                var (node, key) = stack.Pop();
+                foreach (var pair in node.children) stack.Push((pair.Value, key + " " + pair.Key));
+                if (node.children.Count < 2) continue;
+                var parting = new List<(string branch, string set)>();
+                foreach (int n in node.names)
+                {
+                    if (words[n].Count == node.depth) continue;
+                    var rest = Rest(n, node.depth);
+                    if (rest.Count > 0) parting.Add((words[n][node.depth], Sorted(rest)));
+                }
+                var total = new Dictionary<string, int>();
+                var perBranch = new Dictionary<string, int>();
+                var inBranch = new Dictionary<(string, string), int>();
+                foreach (var (branch, set) in parting)
+                {
+                    total[set] = total.TryGetValue(set, out int t) ? t + 1 : 1;
+                    perBranch[branch] = perBranch.TryGetValue(branch, out int b) ? b + 1 : 1;
+                    inBranch[(branch, set)] = inBranch.TryGetValue((branch, set), out int i) ? i + 1 : 1;
+                }
+                foreach (var (branch, set) in parting)
+                {
+                    int others = parting.Count - perBranch[branch], othersAlike = total[set] - inBranch[(branch, set)];
+                    if (othersAlike < others) node.sets.Add(set);
+                }
+                node.key = key;
+                node.export = node.sets.Count >= 3 || node.sets.Count > 0 && Identity(key).Count >= 2;
+            }
             var result = new Dictionary<string, HashSet<string>>();
             var family = new Dictionary<string, string>();
-            foreach (var pair in words)
+            for (int n = 0; n < list.Count; n++)
             {
-                var export = exports.FirstOrDefault(p => p.Value.Length < pair.Value.Count && string.Join(" ", pair.Value.Take(p.Value.Length)) == p.Key);
-                if (export.Key == null) continue;
-                var rest = Rest(pair.Value, export.Value.Length);
+                // The longest export prefix shorter than the name.
+                PrefixNode export = null;
+                var node = root;
+                for (int k = 0; k + 1 < words[n].Count; k++)
+                {
+                    node = node.children[words[n][k]];
+                    if (node.export) export = node;
+                }
+                if (export == null) continue;
+                var rest = Rest(n, export.depth);
                 if (rest.Count == 0) continue;
-                result[pair.Key] = rest; family[pair.Key] = export.Key;
+                result[list[n]] = rest; family[list[n]] = export.key;
             }
             foreach (var members in family.GroupBy(f => f.Value))
             {
@@ -380,6 +483,18 @@ namespace Orbiters.MyAvatar.Editor
             return result;
         }
 
+        private sealed class PrefixNode
+        {
+            public readonly int depth;
+            public readonly Dictionary<string, PrefixNode> children = new Dictionary<string, PrefixNode>();
+            // Names whose first `depth` words are this node's.
+            public readonly List<int> names = new List<int>();
+            public readonly HashSet<string> sets = new HashSet<string>();
+            public string key;
+            public bool export;
+            public PrefixNode(int depth) { this.depth = depth; }
+        }
+
         // ---- Matching ---------------------------------------------------------------------------------------
 
         private sealed class Candidate { public TextureSlot slot; public double evidence, score; }
@@ -390,15 +505,29 @@ namespace Orbiters.MyAvatar.Editor
             // A mesh name identifies a material only when that mesh has one or two materials ("HairFrontMesh"), not a whole-avatar "Body".
             var materialsPerRenderer = slots.SelectMany(s => s.renderers.Select(r => (r, s.material))).Distinct().GroupBy(p => p.r).ToDictionary(g => g.Key, g => g.Count());
             // So does an object or model file holding the mesh with one or two materials ("Spiky hair" above "NurbsPath.001").
-            var nameBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(Identity(g.Key.name)
-                .Concat(g.First().renderers.Where(r => materialsPerRenderer[r] <= 2).SelectMany(Identity)).Concat(g.First().namingWords)));
+            // Each name is tokenized once per call; these sets are shared and only read.
+            var identityOf = new Dictionary<string, HashSet<string>>();
+            HashSet<string> IdentityOf(string name)
+            {
+                name ??= "";
+                if (!identityOf.TryGetValue(name, out var known)) identityOf[name] = known = Identity(name);
+                return known;
+            }
+            var nameBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(IdentityOf(g.Key.name)
+                .Concat(g.First().renderers.Where(r => materialsPerRenderer[r] <= 2).SelectMany(IdentityOf)).Concat(g.First().namingWords)));
             // Every mesh name still adds a little evidence: shared by all of a mesh's materials, it only separates meshes.
-            var meshBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.First().renderers.SelectMany(Identity).Concat(g.First().ownerWords)));
+            var meshBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.First().renderers.SelectMany(IdentityOf).Concat(g.First().ownerWords)));
             // An image an earlier drop copied in only shows where that drop's guess put it: its name is no evidence there, or
             // a wrong guess would pull the same files back on every drop ("hair_Material.002_Normal" left on the body's
             // MiscMatt by a drop that missed the hair). Slots you chose for a file are remembered and keep theirs.
+            var byName = new Dictionary<(string material, string shader, string property), List<TextureSlot>>();
+            foreach (var slot in slots)
+            {
+                if (!byName.TryGetValue((slot.materialName, slot.shader, slot.property), out var named)) byName[(slot.materialName, slot.shader, slot.property)] = named = new List<TextureSlot>();
+                named.Add(slot);
+            }
             var chosen = new HashSet<TextureSlot>(memory.Values.SelectMany(m => m)
-                .SelectMany(m => slots.Where(s => s.materialName == m.material && s.shader == m.shader && s.property == m.property)));
+                .SelectMany(m => byName.TryGetValue((m.material, m.shader, m.property), out var named) ? named : Enumerable.Empty<TextureSlot>()));
             // So is a project image a drop put in its own material copy without copying the image ("…_EyeMatt_BaseColor" used
             // from its folder): it is among the files dropped again.
             var dropping = new HashSet<Texture>(textures.Where(t => t.texture).Select(t => (Texture)t.texture));
@@ -407,17 +536,32 @@ namespace Orbiters.MyAvatar.Editor
             // Export prefixes (see ExportIdentities), found among the dropped files and the images in the slots.
             string Bare(TextureEntry t) => System.IO.Path.GetFileNameWithoutExtension(t.fileName ?? "");
             var exported = ExportIdentities(textures.Select(Bare).Concat(shown.Values));
-            HashSet<string> Named(string name) => exported.TryGetValue(name ?? "", out var known) ? new HashSet<string>(known) : Identity(name);
+            // Shared and only read, like IdentityOf's.
+            var namedOf = new Dictionary<string, HashSet<string>>();
+            HashSet<string> Named(string name)
+            {
+                name ??= "";
+                if (!namedOf.TryGetValue(name, out var known)) namedOf[name] = known = exported.TryGetValue(name, out var export) ? export : Identity(name);
+                return known;
+            }
             var contextBag = materials.ToDictionary(g => g.Key, g => new HashSet<string>(g.SelectMany(s => Named(shown[s]))));
             // Hidden objects (disabled variants, toggled outfits) neither receive a set first nor dilute evidence for visible ones.
             var visible = materials.Where(g => g.Any(s => s.active)).Select(g => g.Key).ToList();
             var slotBag = slots.ToDictionary(s => s, s => Named(shown[s]));
             // Tokens shared by most of the dropped files (a common export prefix) do not tell files apart, nor do the words
             // several sets start with ("<model> hairs for substance_EyeMatt…", "…_MiscMatt…"): what follows does.
-            var identities = textures.ToDictionary(t => t, t => Named(Bare(t)));
+            var identities = textures.ToDictionary(t => t, t => new HashSet<string>(Named(Bare(t))));
             if (textures.Count >= 4)
                 foreach (var common in identities.Values.SelectMany(i => i).GroupBy(w => w).Where(g => g.Count() > textures.Count / 2).Select(g => g.Key).ToList())
                     foreach (var identity in identities.Values) identity.Remove(common);
+
+            // What a slot's names and texts are, worked out once for every file.
+            var lowered = new Dictionary<string, string>();
+            var shownTokens = new Dictionary<string, List<string>>();
+            var slotText = new Dictionary<TextureSlot, string>();
+            foreach (var name in shown.Values)
+                if (!lowered.ContainsKey(name)) { lowered[name] = name.ToLowerInvariant(); shownTokens[name] = Tokens(name, stem: false); }
+            foreach (var slot in slots) slotText[slot] = (slot.property + " " + slot.description).ToLowerInvariant();
 
             var linked = new List<TextureEntry>();
             var grouped = new List<TextureEntry>();
@@ -449,23 +593,42 @@ namespace Orbiters.MyAvatar.Editor
                     int count = visible.Count(Mentions);
                     if (count == 0) count = materials.Count(g => Mentions(g.Key));
                     return count == 0 ? 0 : 1.0 / count; });
-                double Evidence(IEnumerable<string> bag) => identity.Sum(w => weight[w] * Best(w, bag));
-                string plainName = System.IO.Path.GetFileNameWithoutExtension(texture.fileName).ToLowerInvariant();
+                // Bags are shared by the slots of a material, and by the slots showing one name: each is weighed once.
+                var evidenceOf = new Dictionary<HashSet<string>, double>();
+                double Evidence(HashSet<string> bag)
+                {
+                    if (!evidenceOf.TryGetValue(bag, out double value)) evidenceOf[bag] = value = identity.Sum(w => weight[w] * Best(w, bag));
+                    return value;
+                }
+                string bare = System.IO.Path.GetFileNameWithoutExtension(texture.fileName), plainName = bare.ToLowerInvariant();
+                var fileTokens = Tokens(bare, stem: false);
+                var variantOf = new Dictionary<string, bool>();
+                bool Variant(string name)
+                {
+                    if (!variantOf.TryGetValue(name, out bool value)) variantOf[name] = value = VariantOf(fileTokens, shownTokens[name]);
+                    return value;
+                }
+                string file = texture.fileName.ToLowerInvariant();
+                var fileSecondary = SecondaryWords.Where(file.Contains).ToList();
                 var ranked = new List<Candidate>();
+                Candidate best = null;
                 foreach (var slot in slots)
                 {
                     if (!CanAutoAssign(texture, slot)) continue;
                     double fit = RoleFit(texture.role, slot);
                     if (double.IsNaN(fit)) continue;
                     double evidence = Evidence(slotBag[slot]) * 3 + Evidence(nameBag[slot.material]) * 3 + Evidence(contextBag[slot.material]) * 1.5 + Evidence(meshBag[slot.material]);
-                    if (shown[slot].ToLowerInvariant() == plainName) evidence += 10;
+                    string current = shown[slot];
+                    if (lowered[current] == plainName) evidence += 10;
                     // A variant of the texture now in the slot keeps its whole name and adds to it ("Body_BaseMap" ->
                     // "Body_BaseMap_Green"): the strongest sign short of the same name.
-                    else if (VariantOf(System.IO.Path.GetFileNameWithoutExtension(texture.fileName), shown[slot])) evidence += 8;
-                    ranked.Add(new Candidate { slot = slot, evidence = evidence, score = evidence + fit + Preference(texture, slot) });
+                    else if (Variant(current)) evidence += 8;
+                    var candidate = new Candidate { slot = slot, evidence = evidence, score = evidence + fit + Preference(fileSecondary, slotText[slot], slot) };
+                    ranked.Add(candidate);
+                    if (best == null || candidate.score > best.score) best = candidate;
                 }
-                ranked = ranked.OrderByDescending(c => c.score).ToList();
-                var best = ranked.FirstOrDefault();
+                // Only candidates within .5 of the best can join its group or rival it: the rest is never sorted.
+                if (best != null) ranked = ranked.Where(c => best.score - c.score < .5).OrderByDescending(c => c.score).ToList();
                 if (best == null && slots.Any(s => Packed(texture.role, s.role)))
                 { texture.reason = $"No {texture.role} slot here: metallic maps pack metallic and smoothness in their channels. Choose a slot below if this image is packed that way."; continue; }
                 if (best == null || best.evidence < 1) { texture.reason = NoClearMatchReason + " Choose a slot below."; if (best != null) Suggest(texture, best.slot); continue; }
@@ -529,19 +692,24 @@ namespace Orbiters.MyAvatar.Editor
             textures.AddRange(linked);
         }
 
-        private static bool VariantOf(string file, string existing)
+        // Tokens without stems of the file name and of the name now in the slot.
+        private static bool VariantOf(List<string> fileTokens, List<string> existingTokens)
         {
-            var existingTokens = Tokens(existing, stem: false);
             if (existingTokens.Count == 0 || existingTokens.All(Generic.Contains)) return false;
-            var fileTokens = Tokens(file, stem: false);
             return fileTokens.Count > existingTokens.Count && existingTokens.All(fileTokens.Contains);
         }
 
         private static double Preference(TextureEntry texture, TextureSlot slot)
         {
             string file = texture.fileName.ToLowerInvariant();
+            return Preference(SecondaryWords.Where(file.Contains).ToList(), (slot.property + " " + slot.description).ToLowerInvariant(), slot);
+        }
+
+        // fileSecondary: the secondary words in the lower-cased file name; slotText: the slot's lower-cased property and description.
+        private static double Preference(List<string> fileSecondary, string slotText, TextureSlot slot)
+        {
             double value = 0;
-            if (slot.secondary && !SecondaryWords.Any(w => file.Contains(w) && (slot.property + " " + slot.description).ToLowerInvariant().Contains(w))) value -= 2.5;
+            if (slot.secondary && !fileSecondary.Any(slotText.Contains)) value -= 2.5;
             else if (Primary.Contains(slot.property)) value += .5;
             if (slot.existing) value += .3;
             if (slot.rendererKind == "effect") value -= 1.5;
