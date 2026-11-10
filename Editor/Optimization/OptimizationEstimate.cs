@@ -838,12 +838,27 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const string EditsKey = "Orbiters.MyAvatar.OptimizationEstimate.Edits.";
         private static readonly Dictionary<int, int> edits = new Dictionary<int, int>();
 
-        private static int Edits(GameObject root)
+        // What the estimates of the avatar are keyed by: its components' settings edited, and the animations and meshes edited
+        // anywhere (an asset the avatar may play or show: which avatars use it is not looked up).
+        private static int Edits(GameObject root) => RootEdits(root) + AssetEdits;
+
+        private static int RootEdits(GameObject root)
         {
             int id = root.GetInstanceID();
             if (!edits.TryGetValue(id, out int count)) edits[id] = count = SessionState.GetInt(EditsKey + id, 0);
             return count;
         }
+
+        // Clips, controllers and their states and trees, masks and meshes of the project edited in the editor (the Animation
+        // window, an Inspector, a tool with Undo), saved or not yet: only their import was counted before.
+        private const string AssetEditsKey = "Orbiters.MyAvatar.OptimizationEstimate.AssetEdits";
+        private static int? assetEdits;
+        private static int AssetEdits => assetEdits ??= SessionState.GetInt(AssetEditsKey, 0);
+
+        // A project asset: what builds and estimates make in memory changes no avatar's estimate.
+        private static bool AnimationOrMesh(Object asset) =>
+            asset != null && EditorUtility.IsPersistent(asset) && (asset is Motion || asset is RuntimeAnimatorController || asset is UnityEditor.Animations.AnimatorState || asset is UnityEditor.Animations.AnimatorStateMachine ||
+            asset is UnityEditor.Animations.AnimatorTransitionBase || asset is AvatarMask || asset is Mesh);
 
         [InitializeOnLoadMethod]
         private static void WatchEdits() => ObjectChangeEvents.changesPublished += Published;
@@ -853,17 +868,29 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             HashSet<GameObject> edited = null;
             // Objects whose parents were walked already in this stream.
             var seen = new HashSet<Transform>();
+            bool assets = false;
             for (int i = 0; i < stream.length; i++)
             {
+                if (stream.GetEventType(i) == ObjectChangeKind.ChangeAssetObjectProperties)
+                {
+                    stream.GetChangeAssetObjectPropertiesEvent(i, out var asset);
+                    assets |= AnimationOrMesh(EditorUtility.InstanceIDToObject(asset.instanceId));
+                    continue;
+                }
                 if (stream.GetEventType(i) != ObjectChangeKind.ChangeGameObjectOrComponentProperties) continue;
                 stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var change);
                 if (!(EditorUtility.InstanceIDToObject(change.instanceId) is Component component) || !SettingsMatter(component)) continue;
                 foreach (var root in RootsOf(component.transform, seen)) (edited ??= new HashSet<GameObject>()).Add(root);
             }
+            if (assets)
+            {
+                assetEdits = AssetEdits + 1;
+                SessionState.SetInt(AssetEditsKey, assetEdits.Value);
+            }
             if (edited == null) return;
             foreach (var root in edited)
             {
-                int id = root.GetInstanceID(), count = Edits(root) + 1;
+                int id = root.GetInstanceID(), count = RootEdits(root) + 1;
                 edits[id] = count;
                 SessionState.SetInt(EditsKey + id, count);
             }
