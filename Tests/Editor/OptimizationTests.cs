@@ -1108,8 +1108,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             int save = steps.FindIndex(s => s.GetType().FullName == "Orbiters.Toolkit.Editor.VRChat.Attachments.BuildCopyAssetsHook");
             Assert.That(steps[structure].Phase, Is.EqualTo(BuildPhase.Structure));
             Assert.That(BuildPhases.Order(BuildPhase.Structure), Is.GreaterThan(-8800).And.LessThan(-1025));
-            Assert.That(steps[materials].Phase, Is.EqualTo(BuildPhase.SaveBuildData));
-            Assert.That(BuildPhases.Order(BuildPhase.SaveBuildData), Is.GreaterThan(100));
+            Assert.That(steps[materials].Phase, Is.EqualTo(BuildPhase.Materials));
+            Assert.That(BuildPhases.Order(BuildPhase.Materials), Is.GreaterThan(100).And.LessThan(9500), "after Poiyomi's locks, before N4N0 hides its wearer");
             Assert.That(save, Is.GreaterThan(materials), "the material copies are made before the build data is written");
             Assert.That(steps.Where(s => s.Phase == BuildPhase.Structure).Select(s => s.GetType()), Is.EqualTo(new[] { typeof(UploadOptimizer.Structure) }),
                 "the optimizer's phase is its own");

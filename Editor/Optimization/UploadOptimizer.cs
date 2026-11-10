@@ -145,14 +145,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         }
 
         /// <summary>
-        /// The material step: in the build's SaveBuildData phase, after Poiyomi locks its materials (100), before Toolkit writes
-        /// the build's in-memory assets (its BuildCopyAssetsHook). That type is internal to Toolkit, so this step cannot name
-        /// it in Before: inside the phase it runs first by type name (pinned by TheOptimizerStepsRunWhereItsCallbacksRan),
-        /// until Toolkit's Materials phase (before SaveBuildData) lands and this step moves there.
+        /// The material step: in the build's Materials phase, where its callback ran (9000): after Poiyomi locks its
+        /// materials (100), before N4N0 hides its wearer (9500) and before Toolkit writes the build's in-memory assets.
         /// </summary>
         internal sealed class Materials : BuildStep
         {
-            public override BuildPhase Phase => BuildPhase.SaveBuildData;
+            public override BuildPhase Phase => BuildPhase.Materials;
             public override string Owner => "My Avatar";
 
             public override bool Run(BuildContext context)
