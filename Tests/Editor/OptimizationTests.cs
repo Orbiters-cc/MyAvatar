@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using NUnit.Framework;
 using Orbiters.MyAvatar.Editor.Optimization;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
@@ -590,6 +591,38 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(deltas.Count(d => d != Vector3.zero), Is.EqualTo(smile.Count(d => d != Vector3.zero)), "The expression moves the same vertices.");
         }
 
+        // MAF-24: the switch between the simplifiers. Both keep the surface within the budget and the expression's triangles;
+        // the run does it from one simplification, the old one (the default for now) from up to five.
+        [Test] public void BothSimplifiersKeepTheSurfaceAndWhatExpressionsMove([Values(false, true)] bool meshia)
+        {
+            Assert.That(PolygonReduction.UseOldMeshiaSimplifier, Is.True, "the old simplifier stays the default until the two are compared in Unity");
+            const int cells = 40;
+            var plane = Plane("Plane", cells);
+            var mesh = plane.sharedMesh;
+            var smile = mesh.vertices.Select(v => v.x < .2f && v.y < .2f ? Vector3.forward * .01f : Vector3.zero).ToArray();
+            mesh.AddBlendShapeFrame("Smile", 100, smile, null, null);
+            var clip = Own(new AnimationClip());
+            AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Plane", typeof(SkinnedMeshRenderer), "blendShape.Smile"), AnimationCurve.Constant(0, 1, 100));
+            fx.layers[0].stateMachine.AddState("Smile").motion = clip;
+            var corner = new HashSet<Vector3>(Centers(mesh, v => v.x < .2f && v.y < .2f));
+            var made = new List<Mesh>();
+            PolygonReduction.UseOldMeshiaSimplifier = meshia;
+            try
+            {
+                int removed = PolygonReduction.Reduce(new Toolkit.Editor.VRChat.Optimization.AvatarUsage(root), 1f, made);
+                owned.AddRange(made);
+                Debug.Log("[My Avatar] " + (meshia ? "Meshia" : "SimplificationRun") + ": " + removed + " of " + 2 * cells * cells + " triangles removed.");
+                var reduced = plane.sharedMesh;
+                Assert.That(removed, Is.GreaterThan(cells * cells));
+                Assert.That(Toolkit.Editor.VRChat.Optimization.MeshParts.Within(mesh.vertices, reduced.vertices, reduced.triangles, PolygonReduction.Budget(1f)));
+                Assert.That(Centers(reduced, _ => true), Is.SupersetOf(corner));
+                var deltas = new Vector3[reduced.vertexCount];
+                reduced.GetBlendShapeFrameVertices(0, 0, deltas, null, null);
+                Assert.That(deltas.Count(d => d != Vector3.zero), Is.EqualTo(smile.Count(d => d != Vector3.zero)));
+            }
+            finally { PolygonReduction.UseOldMeshiaSimplifier = true; }
+        }
+
         // The budget is measured on the avatar through the bones' bind poses: a mesh switched off at rest, or with a culling
         // box a tool enlarged (Modular Avatar's Mesh Settings), loses the same polygons.
         [Test] public void FewerPolygonsDontDependOnBoundsOrBeingShown()
@@ -700,7 +733,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             int objects = root.GetComponentsInChildren<Transform>(true).Length;
 
             Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null, "Measured over editor frames.");
-            OptimizationEstimate.Finish();
+            FinishKeepingTheKey();
             var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
 
             Assert.That(result, Is.Not.Null);
@@ -873,7 +906,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null, "The avatar edited live waits.");
             }
             finally { Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.LiveEditing -= editing; }
-            OptimizationEstimate.Finish();
+            FinishKeepingTheKey();
             var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
             Assert.That(result, Is.Not.Null, "Measured once the live edits are over.");
             Assert.That(result.Error, Is.Null);
@@ -913,7 +946,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Skinned("Body");
             settings.uploadOptimization.level = OptimizationLevel.Small;
             OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
-            OptimizationEstimate.Finish();
+            FinishKeepingTheKey();
             foreach (bool quest in new[] { false, true })
             {
                 OptimizationSection.ShowQuest = quest;
@@ -1058,11 +1091,28 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
-        // Both upload steps, as the SDK calls them.
+        // Both upload steps, as the build runs them, on one build's context.
         private static void Upload(GameObject avatar)
         {
-            new UploadOptimizer.Structure().OnPreprocessAvatar(avatar);
-            new UploadOptimizer.Materials().OnPreprocessAvatar(avatar);
+            var context = BuildContext.For(avatar);
+            new UploadOptimizer.Structure().Run(context);
+            new UploadOptimizer.Materials().Run(context);
+        }
+
+        // MAF-1: the optimizer's steps run where its callbacks ran: structure in the Structure phase (after MCB's -8800,
+        // before NDMF's optimizing -1025), materials after Poiyomi's locks (100) and before the build data is written.
+        [Test] public void TheOptimizerStepsRunWhereItsCallbacksRan()
+        {
+            var steps = AvatarBuildPipeline.Steps.ToList();
+            int structure = steps.FindIndex(s => s is UploadOptimizer.Structure), materials = steps.FindIndex(s => s is UploadOptimizer.Materials);
+            int save = steps.FindIndex(s => s.GetType().FullName == "Orbiters.Toolkit.Editor.VRChat.Attachments.BuildCopyAssetsHook");
+            Assert.That(steps[structure].Phase, Is.EqualTo(BuildPhase.Structure));
+            Assert.That(BuildPhases.Order(BuildPhase.Structure), Is.GreaterThan(-8800).And.LessThan(-1025));
+            Assert.That(steps[materials].Phase, Is.EqualTo(BuildPhase.SaveBuildData));
+            Assert.That(BuildPhases.Order(BuildPhase.SaveBuildData), Is.GreaterThan(100));
+            Assert.That(save, Is.GreaterThan(materials), "the material copies are made before the build data is written");
+            Assert.That(steps.Where(s => s.Phase == BuildPhase.Structure).Select(s => s.GetType()), Is.EqualTo(new[] { typeof(UploadOptimizer.Structure) }),
+                "the optimizer's phase is its own");
         }
 
         // A quad on each of the first two bones (the third lists without weight) with one unused blendshape.
@@ -1089,6 +1139,21 @@ namespace Orbiters.MyAvatar.Editor.Tests
             renderer.rootBone = bones[0];
             renderer.sharedMaterial = Own(new Material(Shader.Find("Standard")));
             return renderer;
+        }
+
+        // Finishes the estimates, and fails saying what changed when measuring changed what the avatar's estimate is keyed by
+        // (Get would then never find the result: it measures the avatar again).
+        private void FinishKeepingTheKey()
+        {
+            string before = OptimizationEstimate.KeyOf(settings);
+            OptimizationEstimate.Finish();
+            string after = OptimizationEstimate.KeyOf(settings);
+            if (before == after) return;
+            var was = before.Split('|', ','); var now = after.Split('|', ',');
+            var differ = Enumerable.Range(0, Math.Max(was.Length, now.Length))
+                .Where(i => i >= was.Length || i >= now.Length || was[i] != now[i])
+                .Select(i => "[" + i + "] " + (i < was.Length ? was[i] : "-") + " -> " + (i < now.Length ? now[i] : "-")).Take(8);
+            Assert.Fail("Measuring changed the avatar's estimate key: " + string.Join("; ", differ));
         }
 
         private T Own<T>(T value) where T : Object { if (value != null) owned.Add(value); return value; }

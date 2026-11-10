@@ -419,7 +419,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.False(Resources.FindObjectsOfTypeAll<AnimatorStateMachine>().Any(m => m.name == "Orbiters edits"), "the stand-in is gone");
             Assert.AreEqual(ControllerText.Describe(alone.Fx), ControllerText.Describe(batched.Fx));
             Assert.AreEqual(alone.Hat == null, batched.Hat == null);
-            Assert.AreSame(alone.Body.sharedMaterial, batched.Body.sharedMaterial);
+            // Each fixture has materials of its own: the same one of them on both bodies.
+            Assert.AreEqual(alone.Body.sharedMaterial == alone.Red ? "Red" : alone.Body.sharedMaterial == alone.Blue ? "Blue" : "other",
+                batched.Body.sharedMaterial == batched.Red ? "Red" : batched.Body.sharedMaterial == batched.Blue ? "Blue" : "other");
             CollectionAssert.AreEqual(alone.Parameters.parameters.Select(p => p.name), batched.Parameters.parameters.Select(p => p.name));
         }
 

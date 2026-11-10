@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using Orbiters.Toolkit.Editor.VRChat;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -46,7 +46,8 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             public bool Empty => Remove.Count == 0 && Parameters.Count == 0 && Icons.Count == 0 && NextIcon == null;
         }
 
-        private static readonly ConditionalWeakTable<GameObject, Plan> Plans = new ConditionalWeakTable<GameObject, Plan>();
+        // What the capture planned for the apply, kept by the build (BuildContext): a new build of the same object starts empty.
+        private sealed class Planned { public Plan Plan; }
 
         // Before NDMF (-11000) builds Modular Avatar's menu into the descriptor's: its items are still its own then.
         internal sealed class Capture : IVRCSDKPreprocessAvatarCallback
@@ -55,11 +56,12 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
             public bool OnPreprocessAvatar(GameObject avatar)
             {
-                Plans.Remove(avatar);
+                var planned = BuildContext.For(avatar).State<Planned>();
+                planned.Plan = null;
                 try
                 {
                     var plan = PlanFor(avatar);
-                    if (plan != null && !plan.Empty) Plans.Add(avatar, plan);
+                    if (plan != null && !plan.Empty) planned.Plan = plan;
                 }
                 catch (Exception ex) { Debug.LogWarning("[My Avatar] Menu: the upload keeps the menu as it is (" + ex.Message + ").\n" + ex); }
                 return true;
@@ -73,8 +75,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
             public bool OnPreprocessAvatar(GameObject avatar)
             {
-                if (!Plans.TryGetValue(avatar, out var plan)) return true;
-                Plans.Remove(avatar);
+                var planned = BuildContext.Of(avatar)?.State<Planned>();
+                var plan = planned?.Plan;
+                if (plan == null) return true;
+                planned.Plan = null;
                 try { Debug.Log("[My Avatar] Menu: " + Run(avatar, plan)); }
                 // What was done stays (each step leaves the avatar whole); the rest is uploaded as VRCFury built it.
                 catch (Exception ex) { Debug.LogWarning("[My Avatar] Menu: the upload goes on without the rest of the menu clean-up (" + ex.Message + ").\n" + ex); }

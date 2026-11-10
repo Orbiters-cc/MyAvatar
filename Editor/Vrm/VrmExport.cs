@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using Orbiters.MyAvatar.Editor.Optimization;
 using Orbiters.Toolkit.Editor.VRChat;
-using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -86,7 +86,6 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             var passes = optimization.Passes & ~VrChatOnly;
             // Custom carries the level's own distance and polygon budget, not Custom's sliders.
             float sharpFrom = optimization.SharpFrom, polygonQuality = optimization.PolygonQuality;
-            GameObject built = null;
             job.Build = HiddenAvatarBuild.Start(root, type => type.Name == "ParameterCompressorHook", copy =>
             {
                 foreach (var own in copy.GetComponentsInChildren<MyAvatar>(true))
@@ -96,12 +95,12 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                     own.uploadOptimization.sharpFrom = sharpFrom;
                     own.uploadOptimization.polygonQuality = polygonQuality;
                 }
-                // The shapes the VRM's expressions set (or all of them) survive the build steps that remove unused ones.
-                built = copy;
-                BlendShapePruning.Keep[copy] = settings.keepAllShapes
+                // The shapes the VRM's expressions set (or all of them) survive the build steps that remove unused ones: kept by
+                // this build's context, forgotten with it.
+                BuildContext.For(copy).KeepShapes(settings.keepAllShapes
                     ? new HashSet<string>(copy.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null)
                         .SelectMany(r => Enumerable.Range(0, r.sharedMesh.blendShapeCount).Select(r.sharedMesh.GetBlendShapeName)), StringComparer.Ordinal)
-                    : VrmModel.Shapes(copy);
+                    : VrmModel.Shapes(copy));
             });
             void Built()
             {
@@ -123,7 +122,6 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                 }
                 finally
                 {
-                    if (built != null) BlendShapePruning.Keep.Remove(built);
                     job.Build.Release();
                     job.Finish();
                 }

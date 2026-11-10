@@ -11,12 +11,14 @@ using Orbiters.Toolkit.Editor.VRChat.Optimization;
 using UnityEditor;
 using UnityEngine;
 using Orbiters.AlterMesh;
+using Orbiters.Toolkit.Meshes;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.Optimization
 {
     /// <summary>
-    /// Fewer polygons for the uploaded copy through AlterMesh (Orbiters' simplifier, derived from Meshia). Each mesh is
+    /// Fewer polygons for the uploaded copy through AlterMesh (one <see cref="SimplificationRun"/> per mesh, or the Meshia-derived
+    /// simplifier while <see cref="UseOldMeshiaSimplifier"/> is on). Each mesh is
     /// simplified as far as its surface stays within the quality's budget, measured: at quality 1, 99% of its points stay
     /// within half a millimetre of the simplified surface (half a pixel seen from a meter away) and none beyond twice that;
     /// each step lower doubles the budget. The triangles an expression, a viseme or a small toggle's blendshape moves stay
@@ -36,6 +38,14 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         // this many are kept, more when the avatars' last estimates need more (every mesh each of them measures).
         private const int Capacity = 16;
 
+        /// <summary>
+        /// Which simplifier Fewer polygons runs: true (the default, until the two are compared on real avatars in Unity) runs
+        /// the Meshia-derived <see cref="MeshSimplifier"/> again for each try, as before; false runs one
+        /// <see cref="SimplificationRun"/> per mesh and picks the most collapses whose surface stays within the budget among
+        /// its prefixes. Part of every cached result's key.
+        /// </summary>
+        internal static bool UseOldMeshiaSimplifier = true;
+
         private sealed class Request
         {
             public string Key;
@@ -43,6 +53,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public ICollection<string> Used, Uploaded;
             public Dictionary<string, float> Weights;
             public float Budget;
+            /// <summary>The simplifier the key was made for (<see cref="UseOldMeshiaSimplifier"/> when asked).</summary>
+            public bool Meshia;
         }
 
         // The cache and the background runs. Tests work in a state of their own (Isolated): the user's estimates keep theirs.
@@ -169,17 +181,17 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     float local = budget / units;
                     string key = MeshKey(mesh) + "|" + Names(used) + "|" + (uploaded == null ? "all" : Names(uploaded)) + "|" +
                                  string.Join(",", weights.OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => w.Key + "=" + w.Value.ToString("R", CultureInfo.InvariantCulture))) +
-                                 "@" + local.ToString("R", CultureInfo.InvariantCulture);
+                                 "@" + local.ToString("R", CultureInfo.InvariantCulture) + (UseOldMeshiaSimplifier ? "|meshia" : "|run");
                     keys.Add(key);
                     if (!Lookup(runs, key, out simplified))
                     {
                         if (background)
                         {
-                            Enqueue(runs, new Request { Key = key, Source = mesh, Used = used, Uploaded = uploaded, Weights = weights, Budget = local });
+                            Enqueue(runs, new Request { Key = key, Source = mesh, Used = used, Uploaded = uploaded, Weights = weights, Budget = local, Meshia = UseOldMeshiaSimplifier });
                             continue;
                         }
                         // A mesh the simplifier fails on keeps its polygons: remembered as one with nothing to gain.
-                        try { simplified = Simplify(runs, mesh, used, uploaded, weights, local, false, CancellationToken.None).GetAwaiter().GetResult(); }
+                        try { simplified = SimplifyAny(runs, mesh, used, uploaded, weights, local, UseOldMeshiaSimplifier, false, CancellationToken.None).GetAwaiter().GetResult(); }
                         catch (Exception ex)
                         {
                             Debug.LogWarning("[My Avatar] Optimization: " + mesh.name + " keeps its polygons (" + ex.GetBaseException().Message + ").");
@@ -315,7 +327,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     continue;
                 }
                 Mesh result = null;
-                try { result = await Simplify(runs, request.Source, request.Used, request.Uploaded, request.Weights, request.Budget, true, token); }
+                try { result = await SimplifyAny(runs, request.Source, request.Used, request.Uploaded, request.Weights, request.Budget, request.Meshia, true, token); }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: " + request.Source.name + " keeps its polygons (" + ex.GetBaseException().Message + ")."); }
                 // Released meanwhile: what this run held is gone with the rest.
@@ -365,6 +377,185 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         }
 
         // ---- Simplifying ----
+
+        private static Task<Mesh> SimplifyAny(State runs, Mesh mesh, ICollection<string> used, ICollection<string> uploaded, Dictionary<string, float> weights,
+            float budget, bool meshia, bool background, CancellationToken token) =>
+            meshia ? Simplify(runs, mesh, used, uploaded, weights, budget, background, token)
+                : SimplifyByRun(runs, mesh, used, uploaded, weights, budget, background, token);
+
+        /// <summary>
+        /// One <see cref="SimplificationRun"/> of the whole mesh, then the most collapses whose surface stays within the budget
+        /// (in the mesh's units, <see cref="MeshParts.Within"/> as before: at rest and as it stands with how it shades, and
+        /// with each broad shape alone at full weight), found among the run's prefixes; null when that removes nothing worth
+        /// it. The triangles a used narrow shape moves keep every corner (the run never moves them), so they stay exactly as
+        /// they are; every kept vertex keeps its attributes, weights and offsets, so the shapes need no matching. The keep
+        /// ratio is searched among the free triangles' share between 95% and 30%, as the old tries were.
+        /// </summary>
+        private static async Task<Mesh> SimplifyByRun(State runs, Mesh mesh, ICollection<string> used, ICollection<string> uploaded, Dictionary<string, float> weights,
+            float budget, bool background, CancellationToken token)
+        {
+            async Task Pause()
+            {
+                if (!background) return;
+                await Task.Yield();
+                token.ThrowIfCancellationRequested();
+            }
+
+            int n = mesh.vertexCount;
+            var table = mesh.blendShapeCount > 0 ? BlendShapeTable.Read(mesh) : new BlendShapeTable(n, Array.Empty<BlendShapeTable.Shape>());
+            var reach = MeshParts.Reach(table);
+            bool Used(int shape) => used.Contains(table.Shapes[shape].Name) && reach[shape] > 0;
+            bool Wide(int shape) => Used(shape) && reach[shape] >= n * Broad;
+            var locked = new bool[n];
+            for (int shape = 0; shape < reach.Length; shape++)
+                if (Used(shape) && !Wide(shape)) Moved(table.Shapes[shape], locked);
+            // A triangle with a corner a narrow shape moves stays whole: all its corners never move.
+            var pinned = (bool[])locked.Clone();
+            var free = new List<int>();
+            int pinnedTriangles = 0;
+            for (int s = 0; s < mesh.subMeshCount; s++)
+            {
+                if (mesh.GetTopology(s) != MeshTopology.Triangles) continue;
+                var indices = mesh.GetIndices(s, true);
+                for (int t = 0; t + 2 < indices.Length; t += 3)
+                {
+                    int a = indices[t], b = indices[t + 1], c = indices[t + 2];
+                    if (locked[a] || locked[b] || locked[c]) { pinned[a] = pinned[b] = pinned[c] = true; pinnedTriangles++; }
+                    else { free.Add(a); free.Add(b); free.Add(c); }
+                }
+            }
+            int freeTriangles = free.Count / 3;
+            if (freeTriangles < MinTriangles) return null;
+            var options = SimplificationOptions.Default;
+            // Borders hold (no holes), as the old simplifier's border edges did; seams slide only along themselves.
+            options.LockBorders = true;
+            options.LockedVertices = pinned;
+            options.MinTriangles = pinnedTriangles + (int)Math.Floor(freeTriangles * .3);
+            var run = SimplificationRun.Prepare(mesh, options);
+            await Pause();
+            if (background) await Task.Run(() => run.Run(token), token);
+            else run.Run(token);
+            token.ThrowIfCancellationRequested();
+            if (run.Count == 0) return null;
+
+            // Where the surface was, at the vertices of the free triangles: at rest, as it stands (each broad shape at the weight
+            // it has now) and with each broad shape alone at full weight; at rest and as it stands, how it shades too. A kept
+            // vertex is its source unchanged, so the simplified surface in a pose is the same posed vertices, other triangles.
+            var points = free.Distinct().OrderBy(v => v).ToArray();
+            var rest = mesh.vertices;
+            var restNormals = mesh.normals;
+            bool shades = restNormals.Length == n;
+            var standing = new Dictionary<int, float>();
+            var single = new List<Dictionary<int, float>>();
+            for (int shape = 0; shape < table.ShapeCount; shape++)
+            {
+                if (!Wide(shape)) continue;
+                single.Add(new Dictionary<int, float> { [shape] = 100f });
+                if (weights.TryGetValue(table.Shapes[shape].Name, out float weight)) standing[shape] = weight;
+            }
+            var poses = new List<Dictionary<int, float>> { new Dictionary<int, float>() };
+            if (standing.Count > 0) poses.Add(standing);
+            poses.AddRange(single);
+            var surfaces = new List<(Vector3[] Points, Vector3[] Normals, Vector3[] Vertices, Vector3[] VertexNormals)>();
+            foreach (var pose in poses)
+            {
+                bool shaded = shades && (pose.Count == 0 || pose == standing);
+                var vertices = Posed(table, rest, pose);
+                var normals = shaded ? Turned(table, restNormals, pose) : null;
+                // Each shape alone on a quarter of the points, as before.
+                var at = shaded ? points : points.Where((_, i) => i % 4 == 0).ToArray();
+                surfaces.Add((at.Select(v => vertices[v]).ToArray(), normals != null ? at.Select(v => normals[v]).ToArray() : null, vertices, normals));
+            }
+            await Pause();
+
+            async Task<bool> Fits(int collapses)
+            {
+                var triangles = run.SourceTriangles(collapses);
+                // Stops between poses once the runs are cancelled (a script reload): each pose's check runs whole.
+                bool All() => surfaces.All(s =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    return MeshParts.Within(s.Points, s.Vertices, triangles, budget, s.Normals, s.VertexNormals);
+                });
+                bool fits = background ? await Task.Run(All, token) : All();
+                token.ThrowIfCancellationRequested();
+                return fits;
+            }
+
+            // Nothing to gain unless a twentieth of the free triangles can go; then the most collapses that fit, down to 30%.
+            int most = run.CollapsesFor(pinnedTriangles + (int)Math.Floor(freeTriangles * .95));
+            if (most == 0 || !await Fits(most)) return null;
+            int fewest = run.CollapsesFor(pinnedTriangles + (int)Math.Floor(freeTriangles * .3));
+            int best = most;
+            if (fewest > most)
+            {
+                if (await Fits(fewest)) best = fewest;
+                else
+                    for (int bad = fewest, step = 0; step < 8 && bad - best > 1; step++)
+                    {
+                        int mid = best + (bad - best) / 2;
+                        if (await Fits(mid)) best = mid; else bad = mid;
+                    }
+            }
+            await Pause();
+            var shapes = Picked(table, shape => uploaded == null || uploaded.Contains(table.Shapes[shape].Name));
+            var result = runs.Hold(new Mesh());
+            try { run.Write(best, result, shapes); }
+            catch { runs.Free(result); throw; }
+            result.name = mesh.name;
+            if (Triangles(result) > Triangles(mesh) * .99f) { runs.Free(result); return null; }
+            return result;
+        }
+
+        // The shapes picked, in their order.
+        private static BlendShapeTable Picked(BlendShapeTable table, Func<int, bool> pick)
+        {
+            var shapes = new List<BlendShapeTable.Shape>(table.ShapeCount);
+            for (int s = 0; s < table.ShapeCount; s++) if (pick(s)) shapes.Add(table.Shapes[s]);
+            return new BlendShapeTable(table.VertexCount, shapes);
+        }
+
+        // Marks the vertices some frame of the shape moves (by more than a hundredth of a millimetre, as Reach counts them).
+        private static void Moved(BlendShapeTable.Shape shape, bool[] marks)
+        {
+            foreach (var frame in shape.Frames)
+            {
+                var indices = frame.Indices; var deltas = frame.Deltas;
+                for (int k = 0; k < indices.Length; k++) if (deltas[k].sqrMagnitude > 1e-10f) marks[indices[k]] = true;
+            }
+        }
+
+        // The vertices with these shapes (by index) at these weights: the last frame, scaled.
+        private static Vector3[] Posed(BlendShapeTable table, Vector3[] rest, Dictionary<int, float> pose)
+        {
+            var points = (Vector3[])rest.Clone();
+            foreach (var pair in pose)
+            {
+                var frames = table.Shapes[pair.Key].Frames;
+                var last = frames[frames.Count - 1];
+                float scale = pair.Value / last.Weight;
+                var indices = last.Indices; var deltas = last.Deltas;
+                for (int k = 0; k < indices.Length; k++) points[indices[k]] += deltas[k] * scale;
+            }
+            return points;
+        }
+
+        // The normals with these shapes at these weights (the last frame, scaled), normalized.
+        private static Vector3[] Turned(BlendShapeTable table, Vector3[] rest, Dictionary<int, float> pose)
+        {
+            var normals = (Vector3[])rest.Clone();
+            foreach (var pair in pose)
+            {
+                var frames = table.Shapes[pair.Key].Frames;
+                var last = frames[frames.Count - 1];
+                if (!last.HasNormals) continue;
+                float scale = pair.Value / last.Weight;
+                var indices = last.Indices; var deltas = last.Normals;
+                for (int k = 0; k < indices.Length; k++) normals[indices[k]] += deltas[k] * scale;
+            }
+            for (int i = 0; i < normals.Length; i++) normals[i] = normals[i].normalized;
+            return normals;
+        }
 
         // The part of the mesh no expression moves, simplified to the fewest triangles whose surface stays within the budget
         // (in the mesh's units), joined back to the rest; null when that removes nothing worth it. In the background, the

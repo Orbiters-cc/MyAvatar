@@ -71,7 +71,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
         {
             var shapes = VrmModel.Shapes(root);
             Assert.That(shapes, Does.Contain("jawOpen").And.Contain("vrc.v_aa").And.Not.Contain("Unused"));
-            BlendShapePruning.Keep[root] = shapes;
+            Orbiters.Toolkit.Editor.VRChat.Build.BuildContext.For(root).KeepShapes(shapes);
             var used = BlendShapePruning.Used(root, face);
             Assert.That(used, Does.Contain("jawOpen"), "Nothing animates it, but the VRM keeps it.");
             Assert.That(used, Does.Not.Contain("Unused"));
