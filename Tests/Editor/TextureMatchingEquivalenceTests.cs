@@ -32,7 +32,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             // A Substance folder: sets with one long prefix beside loose files.
             new[] { Prefix + "EyeMatt.001_BaseColor.png", Prefix + "MiscMatt.001_BaseColor.png", Prefix + "BodyMatt.001_Height.png", Prefix + "EyeMatt.001_Height.png",
                 "hair_Material.002_Normal.png", "Height.png", "Height_4.png", "Metallic.png", "Metallic_2.png", "Normal.png", "Normal_3.png", "Roughness.png", "Roughness_1.png" },
-            // One set of that export, the others already on the avatar.
+            // One set of that export again (the avatar shows it and the others already).
             new[] { Prefix + "EyeMatt.001_BaseColor.png", Prefix + "EyeMatt.001_Emissive.png" },
             // A full clothing set, a variant of the body's texture, letter suffixes.
             new[] { "Shirt_Mat_BaseColor.png", "Shirt_Mat_Normal.png", "Shirt_Mat_Roughness.png", "Shirt_Mat_Metallic.png", "Shirt_Mat_AO.png", "Shirt_Mat_Height.png",
@@ -212,7 +212,10 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var root = Own(new GameObject("Rexouium1.6 Default Setup"));
             SceneManager.MoveGameObjectToScene(root, scene);
             var parts = new[] { ("BodyMatt", Prefix + "BodyMatt.001_BaseColor"), ("EyesMap_Green Toon", "Eyes_Green"), ("FeathersMatt", "Feathers_BaseMap"),
-                ("MiscMatt Toon", Prefix + "MiscMatt.001_BaseColor"), ("EyeLensMap", "T_MainTex_D"), ("体", "Skin_A"), ("髪の毛", "Strands_B") };
+                ("MiscMatt Toon", Prefix + "MiscMatt.001_BaseColor"), ("EyeLensMap", "T_MainTex_D"), ("体", "Skin_A"), ("髪の毛", "Strands_B"),
+                // The eye set of the same export, shown already: drop 1 brings it again (a re-export) with its emission. Last,
+                // so the slots other tests change by index stay where they were.
+                ("EyeMatt", Prefix + "EyeMatt.001_BaseColor") };
             var body = new GameObject("Body"); body.transform.SetParent(root.transform, false);
             var mesh = Own(new Mesh { subMeshCount = parts.Length });
             var vertices = new List<Vector3>(); var uvs = new List<Vector2>();
