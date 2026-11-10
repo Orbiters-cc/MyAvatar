@@ -465,8 +465,15 @@ namespace Orbiters.MyAvatar.Editor
                 if (EditorHelper(renderer)) continue;
                 key.Append('|').Append(renderer.GetInstanceID());
                 var mesh = MeshOptimization.MeshOf(renderer);
-                // The mesh and its edits (an edit marks it dirty: its vertices and UVs decide the texture density).
-                if (mesh) key.Append('#').Append(mesh.GetInstanceID()).Append('.').Append(EditorUtility.GetDirtyCount(mesh));
+                // The mesh, its layout and, for an asset, its edits (an edit marks it dirty: its vertices and UVs decide the
+                // texture density). A mesh in memory is keyed by its layout only: Unity raises its dirty count when merely read
+                // or copied (an estimate's hidden copy made its avatar's key change while measuring), and a tool replacing
+                // its content gives the renderer a new mesh or changes its layout.
+                if (mesh)
+                {
+                    key.Append('#').Append(mesh.GetInstanceID()).Append(':').Append(mesh.vertexCount).Append(':').Append(mesh.subMeshCount).Append(':').Append(mesh.blendShapeCount);
+                    if (EditorUtility.IsPersistent(mesh)) key.Append('.').Append(EditorUtility.GetDirtyCount(mesh));
+                }
                 Scale(renderer.transform);
                 if (renderer is SkinnedMeshRenderer skinned)
                 {
