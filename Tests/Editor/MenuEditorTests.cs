@@ -153,6 +153,27 @@ namespace Orbiters.MyAvatar.Editor.Tests
             if (compared == 0) Assert.Ignore("No avatar VRCFury builds is open." + (skipped.Count > 0 ? " Not buildable: " + string.Join(", ", skipped) : ""));
         }
 
+        // The paths Save names items by before VRCFury's moves, read in one walk: each the one a search from the root finds.
+        [Test]
+        public void ItemPathsReadInOneWalkAreThoseASearchFinds()
+        {
+            using (var fixture = new MenuFixture())
+            {
+                var root = MenuBuild.Run(MenuInputs.Read(fixture.Root)).Root;
+                var paths = MenuSave.LivePaths(root);
+                int named = 0;
+                foreach (var entry in MenuTree.Walk(root))
+                {
+                    string searched;
+                    try { searched = MenuSave.LivePath(root, entry.Node, leaf: true); }
+                    catch (Exception) { searched = null; }
+                    Assert.AreEqual(searched, paths.TryGetValue(entry.Node.Id, out var walked) ? walked : null, entry.Node.Name);
+                    if (searched != null) named++;
+                }
+                Assert.Greater(named, 5, "the fixture's items are found");
+            }
+        }
+
         [Test]
         public void ThePreviewIsInstant()
         {

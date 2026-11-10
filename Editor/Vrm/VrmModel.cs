@@ -308,6 +308,9 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             var mesh = face.sharedMesh;
             var names = Enumerable.Range(0, mesh.blendShapeCount).Select(mesh.GetBlendShapeName).ToList();
             var index = FaceTrackingNames.Index(names);
+            // Each name compared letters and digits only, worked out once for every lookup below.
+            var plain = names.Select(FaceTrackingNames.Normalize).ToList();
+            string Named(Func<string, bool> matches) { int at = plain.FindIndex(n => matches(n)); return at < 0 ? null : names[at]; }
             foreach (var (preset, template) in new[] { (VrmPreset.BlinkLeft, "EyeClosedLeft"), (VrmPreset.BlinkRight, "EyeClosedRight") })
             {
                 string name = FaceTrackingNames.Resolve(template, index);
@@ -315,12 +318,12 @@ namespace Orbiters.MyAvatar.Editor.Vrm
             }
             if (!Expressions.Any(e => e.Preset == VrmPreset.Blink))
             {
-                string blink = FaceTrackingNames.Resolve("EyeClosed", index) ?? names.FirstOrDefault(n => FaceTrackingNames.Normalize(n) == "blink");
+                string blink = FaceTrackingNames.Resolve("EyeClosed", index) ?? Named(n => n == "blink");
                 if (blink != null) Add(VrmPreset.Blink, face, mesh.GetBlendShapeIndex(blink));
             }
             foreach (var (preset, candidates) in Emotions)
             {
-                string name = names.FirstOrDefault(n => candidates.Contains(FaceTrackingNames.Normalize(n)));
+                string name = Named(candidates.Contains);
                 if (name != null) Add(preset, face, mesh.GetBlendShapeIndex(name));
             }
             // Perfect sync: a custom expression per ARKit shape the face has (under its own name or another standard's),
@@ -333,7 +336,7 @@ namespace Orbiters.MyAvatar.Editor.Vrm
                 if (name == null) continue;
                 found.Add(arKit);
                 Add(null, Clip(arKit), face, mesh.GetBlendShapeIndex(name));
-                if (name != arKit && !names.Contains(arKit) && !renames.ContainsKey(name)) renames[name] = arKit;
+                if (name != arKit && !index.ContainsKey(" " + arKit) && !renames.ContainsKey(name)) renames[name] = arKit;
             }
             if (renames.Count > 0) arKitNames[face] = renames;
             if (found.Contains("eyeBlinkLeft") && found.Contains("eyeBlinkRight") && found.Contains("jawOpen") &&
