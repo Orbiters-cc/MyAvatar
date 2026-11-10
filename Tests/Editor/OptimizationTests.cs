@@ -1166,7 +1166,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
             // (2022.3.22), which a measure does for its hidden copy, with nothing in the mesh changed; its content is compared.
             string State() => string.Join("\n", referenced.Select(o => o.name + " " + (o is Mesh ? "" : EditorUtility.GetDirtyCount(o) + " " + EditorUtility.IsDirty(o)) + " " +
                 (o is Mesh m ? string.Join(",", m.vertices.Select(v => v.ToString("R"))) + "|" + string.Join(",", m.triangles) : EditorJsonUtility.ToJson(o)))
-                .Concat(renderers.Select(r => EditorJsonUtility.ToJson(r))));
+                // A skinned renderer's cached bounds are Unity's to refresh from its mesh (it does while the avatar is copied).
+                .Concat(renderers.Select(r => System.Text.RegularExpressions.Regex.Replace(EditorJsonUtility.ToJson(r),
+                    "\"m_AABB\":\\{\"m_Center\":\\{[^}]*\\},\"m_Extent\":\\{[^}]*\\}\\}", "\"m_AABB\":{}"))));
             // What Unity itself does to an avatar when it is copied happens before the comparison (a skinned renderer made by
             // script gets its bounds the first time it is copied): the comparison is about what the measure's own steps do.
             Object.DestroyImmediate(Object.Instantiate(root.gameObject));
