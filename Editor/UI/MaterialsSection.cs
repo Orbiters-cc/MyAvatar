@@ -14,11 +14,12 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed class MaterialsSection : VisualElement
     {
         internal const string AutoFix = "MyAvatar.AutoFixOpenSurfaces";
-        // Per avatar: whether the user opened the card. Open surfaces already tried this session are not fixed again.
+        // Per avatar: whether the user opened the card. Open surfaces already tried this session are not fixed again, also
+        // after a script reload (an auto-fix the user undid stays undone).
         private static readonly Dictionary<int, bool> Folds = new Dictionary<int, bool>();
-        private static readonly HashSet<int> Tried = new HashSet<int>();
+        private static readonly SessionSet Tried = new SessionSet("Orbiters.MyAvatar.Materials.Tried");
         // Avatars whose card opened by itself for materials that don't render: once per session, then the user decides.
-        private static readonly HashSet<int> Opened = new HashSet<int>();
+        private static readonly SessionSet Opened = new SessionSet("Orbiters.MyAvatar.Materials.Opened");
 
         private readonly MyAvatar avatar;
         private readonly VisualElement body, list;

@@ -57,8 +57,9 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly PropertyInfo LegacyBlendShapeNormals =
             typeof(ModelImporter).GetProperty("legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes", BindingFlags.Instance | BindingFlags.NonPublic);
 
-        // Files a fix was tried on this session: one that didn't take (a locked file) is not tried again and again.
-        private static readonly HashSet<string> Tried = new HashSet<string>();
+        // Files a fix was tried on this session: one that didn't take (a locked file) is not tried again and again, also
+        // after a script reload.
+        private static readonly SessionSet Tried = new SessionSet("Orbiters.MyAvatar.ImportSettings.Tried");
         // Per avatar (instance id): what was fixed by itself this session, for its card to say.
         internal static readonly Dictionary<int, string> FixedNotes = new Dictionary<int, string>();
         internal static event Action<int> Fixed;
