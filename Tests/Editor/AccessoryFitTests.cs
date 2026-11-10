@@ -355,7 +355,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
         private static IEnumerator Wait(Task task)
         {
-            for (int frames = 0; !task.IsCompleted && frames < 600; frames++) yield return null;
+            // By the clock, not by frames: a batch editor runs thousands of empty frames a second while the workers compute.
+            double deadline = UnityEditor.EditorApplication.timeSinceStartup + 60;
+            while (!task.IsCompleted && UnityEditor.EditorApplication.timeSinceStartup < deadline) yield return null;
             Assert.That(task.IsCompleted, Is.True, "The check did not finish.");
             if (task.IsFaulted) throw task.Exception.InnerException;
         }
