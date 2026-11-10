@@ -20,11 +20,11 @@ namespace Orbiters.MyAvatar.Editor
         private Button undo, save;
         private CancellationTokenSource operation, background;
         private readonly PhotoshootState photoshoot = new PhotoshootState();
-        private Func<Task> pendingAi;
+        internal Func<Task> pendingAi;
         // Transient UI state: Unity would otherwise serialize these across script reloads (turning null strings into "").
         [NonSerialized] private string note, backgroundStatus;
         [NonSerialized] private bool noteWarning;
-        [NonSerialized] private int revision;
+        [NonSerialized] internal int revision;
         [NonSerialized] private bool busy, aiConnected, aiEnabled, active, localAiChoice;
         // True from a successful Save until the next change: Undo and Save have nothing left to do.
         [NonSerialized] private bool saved;
@@ -53,7 +53,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Cancel() { active = false; Edited(); operation?.Cancel(); }
         // Any edit, Undo or Redo makes a pending AI answer stale: it must never overwrite a newer state.
         private void Edited() { revision++; saved = false; pendingAi = null; background?.Cancel(); if (active) SetBackground(null); }
-        private void ApplyAiEnabled(bool enabled)
+        internal void ApplyAiEnabled(bool enabled)
         {
             if (aiEnabled != enabled || !enabled) Edited();
             if (!enabled) accessories?.CancelAi();
@@ -286,7 +286,7 @@ namespace Orbiters.MyAvatar.Editor
                 cancellation, started);
         }
 
-        private async Task FinishImportAsync(Func<Task> next, CancellationToken cancellation, int started)
+        internal async Task FinishImportAsync(Func<Task> next, CancellationToken cancellation, int started)
         {
             await Task.Delay(260, cancellation);
             cancellation.ThrowIfCancellationRequested();
@@ -294,7 +294,7 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Runs after the local apply has released the UI; merges confident answers into the same batch.
-        private async Task ResolveAsync(string token, object payload, List<TextureEntry> entries, List<TextureEntry> sent, List<TextureSlot> slots, string folder)
+        internal async Task ResolveAsync(string token, object payload, List<TextureEntry> entries, List<TextureEntry> sent, List<TextureSlot> slots, string folder)
         {
             if (!active || !avatar || !aiEnabled) return;
             background?.Cancel();

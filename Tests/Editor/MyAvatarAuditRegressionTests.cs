@@ -53,8 +53,6 @@ namespace Orbiters.MyAvatar.Editor.Tests
             EditorSceneManager.ClosePreviewScene(scene);
         }
 
-        private object Call(string name, params object[] args) => typeof(MyAvatarEditor).GetMethod(name, Private).Invoke(editor, args);
-        private object Field(string name) => typeof(MyAvatarEditor).GetField(name, Private).GetValue(editor);
         private static IEnumerator Wait(Task task)
         {
             double deadline = EditorApplication.timeSinceStartup + 10;
@@ -68,14 +66,13 @@ namespace Orbiters.MyAvatar.Editor.Tests
         {
             using var state = new PhotoshootState();
             var section = new ThumbnailSection(avatar, state);
-            var assign = typeof(ThumbnailSection).GetMethod("Assign", Private);
             Texture2D Image(Color color)
             {
                 var image = new Texture2D(2, 2); image.SetPixels(Enumerable.Repeat(color, 4).ToArray()); image.Apply(); return image;
             }
-            Undo.IncrementCurrentGroup(); assign.Invoke(section, new object[] { Image(Color.red) }); Undo.FlushUndoRecordObjects();
+            Undo.IncrementCurrentGroup(); section.Assign(Image(Color.red)); Undo.FlushUndoRecordObjects();
             var first = avatar.thumbnail; string firstPath = AvatarThumbnail.FullPath(first); byte[] firstPixels = File.ReadAllBytes(firstPath);
-            Undo.IncrementCurrentGroup(); assign.Invoke(section, new object[] { Image(Color.blue) }); Undo.FlushUndoRecordObjects();
+            Undo.IncrementCurrentGroup(); section.Assign(Image(Color.blue)); Undo.FlushUndoRecordObjects();
             var second = avatar.thumbnail; byte[] secondPixels = File.ReadAllBytes(AvatarThumbnail.FullPath(second));
             Assert.That(second, Is.Not.SameAs(first)); Assert.That(secondPixels, Is.Not.EqualTo(firstPixels));
             Undo.PerformUndo(); Assert.That(avatar.thumbnail, Is.EqualTo(first));
@@ -122,15 +119,15 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 TextureImport.EnsureFolder(folder);
                 AssetDatabase.CreateAsset(texture, folder + "/fixture.asset");
             }
-            Call("ApplyAiEnabled", true);
+            editor.ApplyAiEnabled(true);
             var entry = new TextureEntry { texture = texture, fileName = "texture.png", sourceKey = "test:source", role = "color" };
             var entries = avatar.textures = new List<TextureEntry> { entry }; avatar.batchFolder = folder;
             var slot = new TextureSlot { material = material, materialName = "Body", property = "_MainTex", role = "color" };
             var response = new TaskCompletionSource<TextureAi.Result>(); CancellationToken requested = default;
             editor.RequestAi = (token, payload, sent, slots, cancellation) => { requested = cancellation; return response.Task; };
-            var task = (Task)Call("ResolveAsync", "fixture", new object(), entries, entries, new List<TextureSlot> { slot }, folder);
-            if (action.StartsWith("off")) Call("ApplyAiEnabled", false);
-            if (action == "off-on") Call("ApplyAiEnabled", true);
+            var task = editor.ResolveAsync("fixture", new object(), entries, entries, new List<TextureSlot> { slot }, folder);
+            if (action.StartsWith("off")) editor.ApplyAiEnabled(false);
+            if (action == "off-on") editor.ApplyAiEnabled(true);
             if (action == "close") UnityEngine.Object.DestroyImmediate(editor);
             var edited = action == "edited" ? new Texture2D(2, 2) { name = "edited" } : null;
             if (edited) material.SetTexture("_MainTex", edited);
@@ -162,24 +159,24 @@ namespace Orbiters.MyAvatar.Editor.Tests
         [UnityTest]
         public IEnumerator ClosingDuringFinalDelayCannotQueueAi()
         {
-            Call("ApplyAiEnabled", true);
+            editor.ApplyAiEnabled(true);
             using var source = new CancellationTokenSource();
             int requests = 0;
-            var finish = (Task)Call("FinishImportAsync", (Func<Task>)(() => { requests++; return Task.CompletedTask; }), source.Token, (int)Field("revision"));
+            var finish = editor.FinishImportAsync((Func<Task>)(() => { requests++; return Task.CompletedTask; }), source.Token, editor.revision);
             UnityEngine.Object.DestroyImmediate(editor);
             yield return Wait(finish);
-            Assert.That(Field("pendingAi"), Is.Null); Assert.That(requests, Is.Zero);
+            Assert.That(editor.pendingAi, Is.Null); Assert.That(requests, Is.Zero);
         }
 
         [UnityTest]
         public IEnumerator FinalDelayHonorsCancellation()
         {
-            Call("ApplyAiEnabled", true);
+            editor.ApplyAiEnabled(true);
             using var source = new CancellationTokenSource();
-            var finish = (Task)Call("FinishImportAsync", (Func<Task>)(() => Task.CompletedTask), source.Token, (int)Field("revision"));
+            var finish = editor.FinishImportAsync((Func<Task>)(() => Task.CompletedTask), source.Token, editor.revision);
             source.Cancel();
             yield return Wait(finish);
-            Assert.That(finish.IsCanceled, Is.True); Assert.That(Field("pendingAi"), Is.Null);
+            Assert.That(finish.IsCanceled, Is.True); Assert.That(editor.pendingAi, Is.Null);
         }
 
         [UnityTest]

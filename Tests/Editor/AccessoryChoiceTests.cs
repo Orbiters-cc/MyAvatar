@@ -144,7 +144,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             });
             try
             {
-                typeof(AccessoriesSection).GetMethod("RefreshNotes", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(section, null);
+                section.RefreshNotes();
                 Assert.That(avatar.accessoryNotes.Select(n => n.text), Is.EqualTo(new[] { "A refused file" }));
             }
             finally { section.Detach(); }
@@ -182,7 +182,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             });
             try
             {
-                typeof(AccessoriesSection).GetMethod("RefreshNotes", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(section, null);
+                section.RefreshNotes();
                 Assert.That(avatar.accessoryNotes.Count(n => n.fit == "ask"), Is.EqualTo(1));
                 Assert.That(avatar.accessoryNotes.Single(n => n.fit == "ask").accessory, Is.SameAs(attachment));
                 Assert.That(avatar.accessoryNotes.Any(n => n.text == "A refused file"), Is.True, "Other notes stay.");

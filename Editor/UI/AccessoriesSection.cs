@@ -47,7 +47,7 @@ namespace Orbiters.MyAvatar.Editor
         private readonly DropZone zone;
         private readonly VisualElement choice, notes, list;
         private CancellationTokenSource ai;
-        private int revision;
+        internal int revision;
         // Accessories placed from their Bone menu: an AI answer still on its way never moves them again.
         private readonly HashSet<OrbitersAttachment> placedByHand = new HashSet<OrbitersAttachment>();
         internal Func<string, AccessoryAi.Request, CancellationToken, Task<AccessoryAi.Result>> RequestAi = AccessoryAi.RequestAsync;
@@ -225,7 +225,7 @@ namespace Orbiters.MyAvatar.Editor
                 attachment.transform.parent, attachment.transform.localPosition, attachment.transform.localRotation, attachment.transform.localScale);
 
         // After the local install: a guessed bone, unmatched clothing bones and manual steps, answered in the background.
-        private async Task AskAiAsync(List<AccessoryService.Outcome> outcomes, int started)
+        internal async Task AskAiAsync(List<AccessoryService.Outcome> outcomes, int started)
         {
             string token = Token();
             if (string.IsNullOrEmpty(token)) return;
@@ -373,7 +373,7 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Notes about an accessory on the avatar go in its entry of the list; the rest (refused files, errors) stay here.
-        private void RefreshNotes(List<OrbitersAttachment> installed = null)
+        internal void RefreshNotes(List<OrbitersAttachment> installed = null)
         {
             notes.Clear();
             installed ??= Installed();
