@@ -370,6 +370,38 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
+        // The clean-up edits VRCFury's merged controllers in one ControllerEdits batch (their layers show a stand-in
+        // meanwhile) and removes the layers after it: the result is the one of the same edits made one by one.
+        [Test]
+        public void TheBatchedCleanUpChangesTheControllerAsTheEditsDoOneByOne()
+        {
+            ParameterFreeze.Report Freeze(Avatar a, bool batched)
+            {
+                // Base's idle state turns the pat layer (index 3) on: once the hat and the material layers go it is layer 1.
+                var control = a.Fx.layers[0].stateMachine.states[0].state.AddStateMachineBehaviour<VRCAnimatorLayerControl>();
+                control.playable = VRC.SDKBase.VRC_AnimatorLayerControl.BlendableLayer.FX; control.layer = 3; control.goalWeight = 1;
+                a.Menu.controls.RemoveAll(c => c.name == "Hat" || c.name == "No pat");
+                a.Menu.controls.Single(c => c.name == "Materials").subMenu.controls.RemoveAll(c => c.name == "Blue");
+                return new ParameterFreeze(a.Root, _ => true, batched).Run(new[] { "Hat", "NoPat", "MaterialInt" });
+            }
+            var alone = Make();
+            var batched = Make();
+
+            var aloneReport = Freeze(alone, false);
+            var machines = batched.Fx.layers.Select(l => l.stateMachine).ToList();
+            var batchedReport = Freeze(batched, true);
+
+            Assert.AreEqual(aloneReport.ToString(), batchedReport.ToString());
+            CollectionAssert.AreEqual(new[] { "Base", "Pat" }, batched.Fx.layers.Select(l => l.name), "the hat and the material layers went after the batch: " + batchedReport);
+            CollectionAssert.AreEqual(new[] { machines[0], machines[3] }, batched.Fx.layers.Select(l => l.stateMachine), "each layer has its own state machine back");
+            Assert.AreEqual(1, batched.Fx.layers[0].stateMachine.states[0].state.behaviours.OfType<VRCAnimatorLayerControl>().Single().layer, "the layer control follows its layer");
+            Assert.False(Resources.FindObjectsOfTypeAll<AnimatorStateMachine>().Any(m => m.name == "Orbiters edits"), "the stand-in is gone");
+            Assert.AreEqual(ControllerText.Describe(alone.Fx), ControllerText.Describe(batched.Fx));
+            Assert.AreEqual(alone.Hat == null, batched.Hat == null);
+            Assert.AreSame(alone.Body.sharedMaterial, batched.Body.sharedMaterial);
+            CollectionAssert.AreEqual(alone.Parameters.parameters.Select(p => p.name), batched.Parameters.parameters.Select(p => p.name));
+        }
+
         // ---- Building blocks ----
 
         private T Own<T>(T o) where T : Object { owned.Add(o); return o; }

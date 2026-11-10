@@ -67,38 +67,38 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         // The quiet version is blended in, and a blend tree writes what one child moves and the other doesn't at its rest
         // value: a tracked shape is only left out where a face tracking layer after it writes it anyway. In a layer after
         // them, the jaw, tongue and their PhysBones still rest while tracked, and the gesture keeps its tracked shapes.
-        private static int Quiet(AnimatorController fx, Plan plan, HashSet<string> tracked, HashSet<AnimatorStateMachine> resting)
+        private static int Quiet(FxLayers fx, Plan plan, HashSet<string> tracked, HashSet<AnimatorStateMachine> resting)
         {
-            var parameter = fx.parameters.FirstOrDefault(p => p.name == LipTracking);
+            var parameter = fx.Find(LipTracking);
             // The template's parameter is a float (a blend tree needs one); an avatar declaring it otherwise keeps its gestures.
             if (parameter == null || parameter.type != AnimatorControllerParameterType.Float) return 0;
             var parts = MouthParts.Of(plan.Root);
-            var layers = fx.layers;
+            var layers = fx.Layers;
             // Each tracked shape and the last face tracking layer writing it.
             var lastWriter = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (int i = 0; i < layers.Length; i++)
-                if (layers[i].stateMachine != null && IsTracking(layers[i].stateMachine))
-                    foreach (string shape in States(layers[i].stateMachine).SelectMany(s => Shapes(s.motion, plan.FacePath))) lastWriter[shape] = i;
+            for (int i = 0; i < layers.Count; i++)
+                if (layers[i].Machine != null && layers[i].Tracking)
+                    foreach (string shape in layers[i].States.SelectMany(s => Shapes(s.motion, plan.FacePath))) lastWriter[shape] = i;
             int count = 0;
             var after = new List<string>();
-            for (int i = 0; i < layers.Length; i++)
+            for (int i = 0; i < layers.Count; i++)
             {
-                var machine = layers[i].stateMachine;
-                if (machine == null || resting.Contains(machine) || IsTracking(machine) || !Gestures(machine)) continue;
+                var machine = layers[i].Machine;
+                if (machine == null || resting.Contains(machine) || layers[i].Tracking || !Gestures(layers[i])) continue;
                 int index = i;
                 var covered = new HashSet<string>(tracked.Where(s => lastWriter.TryGetValue(s, out int writer) && writer > index), StringComparer.Ordinal);
-                if (covered.Count < tracked.Count && States(machine).SelectMany(s => Shapes(s.motion, plan.FacePath)).Any(s => tracked.Contains(s) && !covered.Contains(s)))
-                    after.Add(layers[i].name);
+                if (covered.Count < tracked.Count && layers[i].States.SelectMany(s => Shapes(s.motion, plan.FacePath)).Any(s => tracked.Contains(s) && !covered.Contains(s)))
+                    after.Add(layers[i].Name);
                 bool Mouth(EditorCurveBinding b) => parts.Moves(b, plan.FacePath, covered);
                 var quiet = new Dictionary<Motion, Motion>();
-                foreach (var state in States(machine))
+                foreach (var state in layers[i].States)
                 {
                     if (state.motion == null || state.motion.name.EndsWith(QuietMouth, StringComparison.Ordinal)) continue;
                     if (!quiet.TryGetValue(state.motion, out var wrapped))
                     {
-                        var without = Without(fx, state.motion, Mouth, new Dictionary<Motion, Motion>());
+                        var without = Without(fx.Controller, state.motion, Mouth, new Dictionary<Motion, Motion>());
                         wrapped = without == state.motion ? state.motion
-                            : Keep(fx, Tree(state.motion.name + QuietMouth, LipTracking, (0f, state.motion), (1f, without)));
+                            : Keep(fx.Controller, Tree(state.motion.name + QuietMouth, LipTracking, (0f, state.motion), (1f, without)));
                         quiet[state.motion] = wrapped;
                     }
                     if (wrapped == state.motion) continue;
@@ -114,9 +114,9 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         }
 
         // A layer the hands drive: its transitions or its blend trees read a gesture.
-        private static bool Gestures(AnimatorStateMachine machine) =>
-            Transitions(machine).Any(t => t.conditions.Any(c => GestureParameters.Contains(c.parameter))) ||
-            States(machine).SelectMany(s => TreeParameters(s.motion)).Any(GestureParameters.Contains);
+        private static bool Gestures(FxLayers.Layer layer) =>
+            layer.Transitions.Any(t => t.conditions.Any(c => GestureParameters.Contains(c.parameter))) ||
+            layer.States.SelectMany(s => TreeParameters(s.motion)).Any(GestureParameters.Contains);
 
         // A copy of a motion without the bindings <paramref name="drop"/> picks (itself when it has none).
         private static Motion Without(AnimatorController fx, Motion motion, Func<EditorCurveBinding, bool> drop, Dictionary<Motion, Motion> done)
@@ -132,7 +132,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 {
                     var copy = Object.Instantiate(clip);
                     copy.name = clip.name + QuietMouth;
-                    foreach (var binding in floats) AnimationUtility.SetEditorCurve(copy, binding, null);
+                    // The float curves at once: removed one by one, each rebuilds the clip.
+                    if (floats.Count > 0) AnimationUtility.SetEditorCurves(copy, floats.ToArray(), new AnimationCurve[floats.Count]);
                     foreach (var binding in references) AnimationUtility.SetObjectReferenceCurve(copy, binding, null);
                     result = Keep(fx, copy);
                 }

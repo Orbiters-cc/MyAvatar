@@ -219,26 +219,46 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             var standard = FaceTrackingStandard.Find(marker.standard);
             if (standard == null) throw new InvalidOperationException("unknown blendshape standard “" + marker.standard + "”");
             // The copy has the jaw and tongue the hands leave alone while the mouth is tracked, as at upload.
-            FaceTrackingBuild.Finish(Fx, standard, facePath, face.sharedMesh, Copy.transform);
-            FaceTrackingBuild.Tune(Fx, facePath, face.sharedMesh, Expressive, FaceTrackingBuild.MouthSlowdown(marker.smoothing));
-            FaceTrackingBuild.Pace(Fx, marker.smoothing);
+            FaceTrackingBuild.Build(Fx, standard, facePath, face.sharedMesh, Copy.transform, Expressive, marker.smoothing);
         }
 
         private static AnimationClip Rewrite(AnimationClip clip, List<(string from, string to, bool delete)> rewrites)
         {
             var copy = Object.Instantiate(clip);
             if (rewrites.Count == 0) return copy;
+            // Where a binding goes (null: deleted), or its own path when no rule changes it.
+            string Moved(string path)
+            {
+                var rule = rewrites.FirstOrDefault(r => r.from.Length == 0 || path == r.from || path.StartsWith(r.from + "/", StringComparison.Ordinal));
+                if (rule.from == null) return path;
+                if (rule.delete) return null;
+                return rule.from.Length == 0 ? (rule.to.Length == 0 ? path : rule.to + "/" + path) : rule.to + path.Substring(rule.from.Length);
+            }
+            // Every binding is rewritten from where it was, all at once (curves set one by one rebuild the clip each time).
+            var from = new List<EditorCurveBinding>();
+            var to = new List<EditorCurveBinding>();
+            var curves = new List<AnimationCurve>();
             foreach (var binding in AnimationUtility.GetCurveBindings(copy))
             {
-                string path = binding.path;
-                var rule = rewrites.FirstOrDefault(r => r.from.Length == 0 || path == r.from || path.StartsWith(r.from + "/", StringComparison.Ordinal));
-                if (rule.from == null) continue;
-                string moved = rule.from.Length == 0 ? (rule.to.Length == 0 ? path : rule.to + "/" + path) : rule.to + path.Substring(rule.from.Length);
-                if (!rule.delete && moved == path) continue;
-                var curve = AnimationUtility.GetEditorCurve(copy, binding);
-                AnimationUtility.SetEditorCurve(copy, binding, null);
-                if (!rule.delete) AnimationUtility.SetEditorCurve(copy, EditorCurveBinding.FloatCurve(moved, binding.type, binding.propertyName), curve);
+                string moved = Moved(binding.path);
+                if (moved == binding.path) continue;
+                from.Add(binding);
+                if (moved == null) continue;
+                to.Add(EditorCurveBinding.FloatCurve(moved, binding.type, binding.propertyName));
+                curves.Add(AnimationUtility.GetEditorCurve(copy, binding));
             }
+            if (from.Count > 0) AnimationUtility.SetEditorCurves(copy, from.ToArray(), new AnimationCurve[from.Count]);
+            if (to.Count > 0) AnimationUtility.SetEditorCurves(copy, to.ToArray(), curves.ToArray());
+            // Object reference curves (sprites, materials) move along, as VRCFury moves them.
+            var references = new List<(EditorCurveBinding Binding, string Moved, ObjectReferenceKeyframe[] Keys)>();
+            foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(copy))
+            {
+                string moved = Moved(binding.path);
+                if (moved != binding.path) references.Add((binding, moved, AnimationUtility.GetObjectReferenceCurve(copy, binding)));
+            }
+            foreach (var reference in references) AnimationUtility.SetObjectReferenceCurve(copy, reference.Binding, null);
+            foreach (var reference in references.Where(r => r.Moved != null))
+                AnimationUtility.SetObjectReferenceCurve(copy, EditorCurveBinding.PPtrCurve(reference.Moved, reference.Binding.type, reference.Binding.propertyName), reference.Keys);
             return copy;
         }
 
