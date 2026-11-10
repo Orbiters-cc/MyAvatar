@@ -6,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.Optimization;
+using Unity.Collections;
+using Unity.Profiling;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -33,6 +35,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// <summary>Makes each copy <see cref="Apply"/> swaps in (tests make one fail half-way).</summary>
         internal static Func<TextureOptimization.TexturePlan, Texture2D> MakeCopy = Copy;
 
+        // What a copy costs, for the profiler: reading it from the cache, rendering it on the GPU, compressing it.
+        private static readonly ProfilerMarker ReadMarker = new ProfilerMarker("MyAvatar.UploadTextures.Read"),
+            RenderMarker = new ProfilerMarker("MyAvatar.UploadTextures.Render"), CompressMarker = new ProfilerMarker("MyAvatar.UploadTextures.Compress");
+
         /// <summary>
         /// Swaps in the plan's copies on the build copy below <paramref name="root"/>; returns how many textures changed. Every
         /// copy is made before anything changes, and a failure puts back what had changed: nothing is half applied.
@@ -46,12 +52,14 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             var shown = renderers.SelectMany(r => r.sharedMaterials).Concat(swapped.OfType<Material>()).Where(m => m != null).Distinct()
                 .SelectMany(m => m.GetTexturePropertyNameIDs().Select(m.GetTexture)).Concat(swapped.OfType<Texture>()).Where(t => t != null).Distinct().ToList();
             var copies = new Dictionary<Texture, Texture2D>();
+            var changes = shown.Select(t => (Texture: t, Change: plan.For(t))).Where(c => c.Change != null).ToList();
+            // Most copies were made before (an estimate makes the upload's): read from the disk together, on worker threads,
+            // before the editor's thread turns them into textures one by one.
+            using (ReadAhead(changes.Select(c => c.Change)))
             try
             {
-                foreach (var texture in shown)
+                foreach (var (texture, change) in changes)
                 {
-                    var change = plan.For(texture);
-                    if (change == null) continue;
                     var copy = MakeCopy(change);
                     if (copy != null) copies[texture] = copy;
                 }
@@ -250,10 +258,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         // Copies the editor couldn't give, said once each: the estimate asks again at every change.
         private static readonly HashSet<string> Unavailable = new HashSet<string>();
 
-        // The image at the copy's size with its mips, compressed.
+        // The image at the copy's size with its mips, compressed. Unity's compressor runs on the editor's thread only
+        // (EditorUtility.CompressTexture), as do the GPU steps and every texture call: a copy not cached is made here, whole.
         private static byte[] Encode(TextureOptimization.TexturePlan change)
         {
-            var image = Render(change, out string why);
+            Texture2D image;
+            string why;
+            using (RenderMarker.Auto()) image = Render(change, out why);
             if (image == null)
             {
                 if (Unavailable.Add(Key(change))) Debug.LogWarning("[My Avatar] Optimization: " + change.texture.name + " uploads as it is (" + why + ").");
@@ -261,8 +272,11 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
             try
             {
-                EditorUtility.CompressTexture(image, change.format, change.quality);
-                return image.GetRawTextureData();
+                using (CompressMarker.Auto())
+                {
+                    EditorUtility.CompressTexture(image, change.format, change.quality);
+                    return image.GetRawTextureData();
+                }
             }
             finally { Object.DestroyImmediate(image); }
         }
@@ -380,44 +394,61 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
         }
 
-        private static void XToRed(Texture2D image)
+        // Rewritten where the texture keeps its pixels (an RGBA32 image): no copy of them in managed memory.
+        internal static void XToRed(Texture2D image)
         {
-            var pixels = image.GetPixels32(0);
+            var pixels = image.GetPixelData<Color32>(0);
             for (int i = 0; i < pixels.Length; i++)
             {
                 var p = pixels[i];
                 pixels[i] = new Color32((byte)((p.r * p.a + 127) / 255), p.g, 0, 255);
             }
-            image.SetPixels32(pixels, 0);
         }
 
         // As Unity's "Mip Maps Preserve Coverage": each mip's alpha scaled so as many texels pass the alpha test as in the
-        // full image (cut-out fur and lace stay as thick from afar).
-        private static void PreserveCoverage(Texture2D image, float cutoff)
+        // full image (cut-out fur and lace stay as thick from afar). Each mip's alphas are counted once (256 values): how
+        // many texels pass at any scale is then a sum over those counts, so the search for the scale reads no texel, and
+        // only the mips that change are written, where the texture keeps them.
+        internal static void PreserveCoverage(Texture2D image, float cutoff)
         {
             int limit = Mathf.Clamp(Mathf.RoundToInt(cutoff * 255f), 0, 254);
-            float Coverage(Color32[] pixels, float scale)
+            var counts = new long[256];
+            long Count(NativeArray<Color32> pixels)
             {
-                int passing = 0;
-                for (int i = 0; i < pixels.Length; i++) if (Mathf.Min(255f, pixels[i].a * scale) > limit) passing++;
-                return passing / (float)pixels.Length;
+                Array.Clear(counts, 0, counts.Length);
+                for (int i = 0; i < pixels.Length; i++) counts[pixels[i].a]++;
+                return pixels.Length;
             }
-            float wanted = Coverage(image.GetPixels32(0), 1f);
+            // The same test as on each texel, once per alpha value.
+            float Coverage(long texels, float scale)
+            {
+                long passing = 0;
+                for (int a = 0; a < 256; a++) if (counts[a] > 0 && Mathf.Min(255f, a * scale) > limit) passing += counts[a];
+                return passing / (float)texels;
+            }
+            float wanted = Coverage(Count(image.GetPixelData<Color32>(0)), 1f);
             bool changed = false;
+            var scaled = new byte[256];
             for (int mip = 1; mip < image.mipmapCount; mip++)
             {
-                var pixels = image.GetPixels32(mip);
-                float now = Coverage(pixels, 1f);
-                if (Mathf.Abs(now - wanted) * pixels.Length < 1f) continue;
+                var pixels = image.GetPixelData<Color32>(mip);
+                long texels = Count(pixels);
+                float now = Coverage(texels, 1f);
+                if (Mathf.Abs(now - wanted) * texels < 1f) continue;
                 float low = now < wanted ? 1f : 0f, high = now < wanted ? 16f : 1f;
                 for (int i = 0; i < 12; i++)
                 {
                     float middle = (low + high) / 2f;
-                    if (Coverage(pixels, middle) < wanted) low = middle; else high = middle;
+                    if (Coverage(texels, middle) < wanted) low = middle; else high = middle;
                 }
                 float scale = (low + high) / 2f;
-                for (int i = 0; i < pixels.Length; i++) pixels[i].a = (byte)Mathf.Min(255, Mathf.RoundToInt(pixels[i].a * scale));
-                image.SetPixels32(pixels, mip);
+                for (int a = 0; a < 256; a++) scaled[a] = (byte)Mathf.Min(255, Mathf.RoundToInt(a * scale));
+                for (int i = 0; i < pixels.Length; i++)
+                {
+                    var p = pixels[i];
+                    p.a = scaled[p.a];
+                    pixels[i] = p;
+                }
                 changed = true;
             }
             if (changed) image.Apply(false);
@@ -434,6 +465,17 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         private static byte[] Read(string file)
         {
+            if (readAhead != null && readAhead.TryGetValue(file, out var ahead))
+            {
+                readAhead.Remove(file);
+                return ahead;
+            }
+            using (ReadMarker.Auto()) return ReadFile(file);
+        }
+
+        // Safe on any thread: plain file calls.
+        private static byte[] ReadFile(string file)
+        {
             try
             {
                 if (!File.Exists(file)) return null;
@@ -445,6 +487,43 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { return null; }
         }
 
+        // The cached copies read ahead for the copies being made (Apply), by file; each is taken once.
+        private static Dictionary<string, byte[]> readAhead;
+        // At most this much is read ahead: the rest is read when its copy is made.
+        private const long ReadAheadBytes = 512L << 20;
+
+        /// <summary>
+        /// Reads the cached copies of <paramref name="changes"/> from the disk together on worker threads (the editor's
+        /// thread waits for plain file reads only), for <see cref="Read"/> to take while the scope lasts.
+        /// </summary>
+        private static IDisposable ReadAhead(IEnumerable<TextureOptimization.TexturePlan> changes)
+        {
+            var files = new List<string>();
+            long bytes = 0;
+            foreach (string file in changes.Where(Creatable).Select(CacheFile).Distinct())
+            {
+                long length;
+                try { var info = new FileInfo(file); if (!info.Exists) continue; length = info.Length; }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { continue; }
+                if (bytes + length > ReadAheadBytes) break;
+                bytes += length;
+                files.Add(file);
+            }
+            var read = new byte[files.Count][];
+            using (ReadMarker.Auto())
+                System.Threading.Tasks.Parallel.For(0, files.Count, i => read[i] = ReadFile(files[i]));
+            readAhead = new Dictionary<string, byte[]>();
+            for (int i = 0; i < files.Count; i++) if (read[i] != null) readAhead[files[i]] = read[i];
+            return new Scope(() => readAhead = null);
+        }
+
+        private sealed class Scope : IDisposable
+        {
+            private Action end;
+            public Scope(Action end) => this.end = end;
+            public void Dispose() { end?.Invoke(); end = null; }
+        }
+
         // Written whole or not at all: a temporary file moved in place.
         private static void Store(string file, byte[] data)
         {
@@ -452,9 +531,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             try
             {
                 Directory.CreateDirectory(CacheFolder);
+                long replaced = File.Exists(file) ? new FileInfo(file).Length : 0;
                 File.WriteAllBytes(temp, data);
                 if (File.Exists(file)) File.Replace(temp, file, null); else File.Move(temp, file);
-                Trim();
+                Stored(data.Length - replaced);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
             finally
@@ -464,17 +544,27 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
         }
 
-        // The copies used longest ago go once they take more than the cache's size.
-        private static void Trim()
+        // What the cache folder holds on the disk: counted once (the first copy stored there), then kept as copies are
+        // stored and trimmed.
+        private static (string Folder, long Bytes)? cached;
+
+        // The copies used longest ago go once they take more than the cache's size, down to nine tenths of it: the folder
+        // is listed again only then, not after every copy.
+        private static void Stored(long added)
         {
-            var files = new DirectoryInfo(CacheFolder).GetFiles("*.bin");
+            string folder = CacheFolder;
+            long held = cached != null && cached.Value.Folder == folder ? cached.Value.Bytes + added : new DirectoryInfo(folder).GetFiles("*.bin").Sum(f => f.Length);
+            cached = (folder, held);
+            if (held <= CacheBytes) return;
+            var files = new DirectoryInfo(folder).GetFiles("*.bin");
             long total = files.Sum(f => f.Length);
             foreach (var old in files.OrderBy(f => f.LastWriteTimeUtc))
             {
-                if (total <= CacheBytes) break;
+                if (total <= CacheBytes / 10 * 9) break;
                 try { old.Delete(); total -= old.Length; }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
             }
+            cached = (folder, total);
         }
     }
 }

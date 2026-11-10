@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
+using Orbiters.Toolkit.Editor.Animations;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
@@ -51,18 +52,39 @@ namespace Orbiters.MyAvatar.Editor.Expressions
         private readonly GameObject root;
         private readonly VRCAvatarDescriptor descriptor;
         private readonly Func<Object, bool> editable;
+        private readonly bool batched;
         private readonly List<(VRCAvatarDescriptor.AnimLayerType Type, AnimatorController Controller)> controllers = new List<(VRCAvatarDescriptor.AnimLayerType, AnimatorController)>();
         private readonly Dictionary<string, HashSet<float>> domains = new Dictionary<string, HashSet<float>>(StringComparer.Ordinal);
         private readonly HashSet<Object> removed = new HashSet<Object>();
         // Transitions whose conditions all hold for good: taken as soon as their state is.
         private readonly HashSet<AnimatorTransitionBase> taken = new HashSet<AnimatorTransitionBase>();
         private readonly Report report = new Report();
+        // The parameters each controller this build doesn't change reads (conditions and blend trees).
+        private readonly Dictionary<AnimatorController, HashSet<string>> reads = new Dictionary<AnimatorController, HashSet<string>>();
+
+        /// <summary>
+        /// A playable layer's controller with its layers as they were read before the edits: inside
+        /// <see cref="ControllerEdits.Batch"/> a controller's layers show an empty stand-in (and no mask), so the edits reach
+        /// state machines, masks and layer settings through these.
+        /// </summary>
+        private sealed class Graph
+        {
+            public VRCAvatarDescriptor.AnimLayerType Type;
+            public AnimatorController Controller;
+            public bool Editable;
+            public AnimatorControllerLayer[] Layers;
+
+            /// <summary>Every state machine of every layer, nested ones included.</summary>
+            public IEnumerable<AnimatorStateMachine> Machines => Layers.Where(l => l.stateMachine != null).SelectMany(l => ParameterFreeze.Machines(l.stateMachine));
+        }
 
         /// <param name="editable">Whether a controller, menu, parameters asset or motion may be changed (the build's copies).</param>
-        public ParameterFreeze(GameObject root, Func<Object, bool> editable)
+        /// <param name="batched">False makes the edits outside a <see cref="ControllerEdits.Batch"/> (tests compare the two).</param>
+        public ParameterFreeze(GameObject root, Func<Object, bool> editable, bool batched = true)
         {
             this.root = root;
             this.editable = editable;
+            this.batched = batched;
             descriptor = root.GetComponent<VRCAvatarDescriptor>();
             if (descriptor == null) return;
             foreach (var layer in (descriptor.baseAnimationLayers ?? Array.Empty<VRCAvatarDescriptor.CustomAnimLayer>()).Concat(descriptor.specialAnimationLayers ?? Array.Empty<VRCAvatarDescriptor.CustomAnimLayer>()))
@@ -92,7 +114,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 if (writers.Unknown.Contains(name)) { report.Kept.Add(name + " (also set by an animation, a driver or a contact)"); continue; }
                 if (menu.Any(c => c.subParameters != null && c.subParameters.Any(s => s?.name == name))) { report.Kept.Add(name + " (a puppet still sets it)"); continue; }
                 // Only controllers this build may change use it.
-                if (controllers.Any(c => !editable(c.Controller) && Uses(c.Controller, name))) { report.Kept.Add(name + " (used by an asset this build doesn't change)"); continue; }
+                if (controllers.Any(c => !editable(c.Controller) && Reads(c.Controller).Contains(name))) { report.Kept.Add(name + " (used by an asset this build doesn't change)"); continue; }
                 var domain = new HashSet<float> { parameter.defaultValue };
                 if (writers.Values.TryGetValue(name, out var driven)) domain.UnionWith(driven);
                 foreach (var control in menu.Where(c => c.parameter != null && c.parameter.name == name)) { domain.Add(control.value); domain.Add(0f); }
@@ -113,21 +135,32 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                 parameters.parameters = parameters.parameters.Where(p => p == null || !unused.Contains(p.name)).ToArray();
                 EditorUtility.SetDirty(parameters);
             }
-            foreach (var (_, controller) in controllers.Where(c => editable(c.Controller)))
+            // Collect: every controller's layers, read once before the edits.
+            var graphs = controllers.Select(c => new Graph { Type = c.Type, Controller = c.Controller, Editable = editable(c.Controller), Layers = c.Controller.layers }).ToList();
+            var changing = graphs.Where(g => g.Editable).ToList();
+            var removals = new List<(AnimatorController Controller, HashSet<int> Gone)>();
+            // Each condition, transition, state, tree and default changed would rebuild its whole controller (VRCFury's merged
+            // FX is the avatar's biggest): in the batch each is rebuilt once, when it ends.
+            using (batched ? ControllerEdits.Batch(changing.Select(g => g.Controller)) : null)
             {
-                var list = controller.parameters;
-                bool changed = false;
-                foreach (var p in list)
+                foreach (var graph in changing)
                 {
-                    if (!fixedOnes.TryGetValue(p.name, out float value)) continue;
-                    p.defaultFloat = value; p.defaultInt = Mathf.RoundToInt(value); p.defaultBool = value != 0f;
-                    changed = true;
+                    var list = graph.Controller.parameters;
+                    bool changed = false;
+                    foreach (var p in list)
+                    {
+                        if (!fixedOnes.TryGetValue(p.name, out float value)) continue;
+                        p.defaultFloat = value; p.defaultInt = Mathf.RoundToInt(value); p.defaultBool = value != 0f;
+                        changed = true;
+                    }
+                    if (changed) graph.Controller.parameters = list;
                 }
-                if (changed) controller.parameters = list;
-            }
 
-            foreach (var (_, controller) in controllers.Where(c => editable(c.Controller))) Simplify(controller);
-            Bake();
+                foreach (var graph in changing) Simplify(graph);
+                Bake(graphs, removals);
+            }
+            // A batch adds or removes no layer: the layers left in one state go once each has its state machine back.
+            foreach (var (controller, gone) in removals) RemoveLayers(controller, gone);
             DeleteHidden();
             DeleteUnused();
             return report;
@@ -182,17 +215,24 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return set;
         }
 
-        private static bool Uses(AnimatorController controller, string name) =>
-            controller.parameters.Any(p => p.name == name) &&
-            (Machines(controller).Any(m => Transitions(m).Any(t => t.conditions.Any(c => c.parameter == name))) ||
-             Machines(controller).SelectMany(m => m.states).Any(s => TreeParameters(s.state.motion).Contains(name)));
+        // The parameters a controller declares and reads (in a condition or a blend tree), walked once per controller.
+        private HashSet<string> Reads(AnimatorController controller)
+        {
+            if (reads.TryGetValue(controller, out var found)) return found;
+            var machines = Machines(controller).ToList();
+            var used = new HashSet<string>(machines.SelectMany(Transitions).SelectMany(t => t.conditions).Select(c => c.parameter)
+                .Concat(machines.SelectMany(m => m.states).SelectMany(s => TreeParameters(s.state.motion))).Where(p => p != null), StringComparer.Ordinal);
+            used.IntersectWith(controller.parameters.Select(p => p.name));
+            reads[controller] = used;
+            return used;
+        }
 
         // ---- Controllers ----
 
-        private void Simplify(AnimatorController controller)
+        private void Simplify(Graph graph)
         {
-            var types = controller.parameters.GroupBy(p => p.name).ToDictionary(g => g.Key, g => g.First().type, StringComparer.Ordinal);
-            foreach (var layer in controller.layers)
+            var types = graph.Controller.parameters.GroupBy(p => p.name).ToDictionary(g => g.Key, g => g.First().type, StringComparer.Ordinal);
+            foreach (var layer in graph.Layers)
             {
                 if (layer.stateMachine == null) continue;
                 foreach (var machine in Machines(layer.stateMachine)) Decide(machine, types);
@@ -384,21 +424,22 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             public float Value; public Object Reference; public bool IsReference;
         }
 
-        private void Bake()
+        // Decides which layers go and writes their values into the avatar. The layers themselves are removed after the batch
+        // (<paramref name="removals"/>); the layer controls pointing at them are changed here.
+        private void Bake(List<Graph> graphs, List<(AnimatorController Controller, HashSet<int> Gone)> removals)
         {
             // What every layer of every playable layer animates, to bake only what no other layer touches.
             var animated = new Dictionary<(string, Type, string), int>();
-            // By controller and layer index: each read of a controller's layers makes new layer objects.
             var perLayer = new Dictionary<(AnimatorController, int), List<(string, Type, string)>>();
-            foreach (var (_, controller) in controllers)
+            foreach (var graph in graphs)
             {
-                var all = controller.layers;
+                var all = graph.Layers;
                 for (int i = 0; i < all.Length; i++)
                 {
                     var keys = Motions(all[i].stateMachine).OfType<AnimationClip>()
                         .SelectMany(c => AnimationUtility.GetCurveBindings(c).Concat(AnimationUtility.GetObjectReferenceCurveBindings(c)))
                         .Select(b => (b.path, b.type, b.propertyName)).Distinct().ToList();
-                    perLayer[(controller, i)] = keys;
+                    perLayer[(graph.Controller, i)] = keys;
                     foreach (var key in keys) animated[key] = animated.TryGetValue(key, out int n) ? n + 1 : 1;
                 }
             }
@@ -407,10 +448,13 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             if (animator != null && animator.isHuman)
                 foreach (HumanBodyBones bone in Enum.GetValues(typeof(HumanBodyBones)))
                     if (bone != HumanBodyBones.LastBone && animator.GetBoneTransform(bone) is Transform t) humanoid.Add(t);
+            var controlled = Controlled(graphs);
 
-            foreach (var (type, controller) in controllers.Where(c => editable(c.Controller)))
+            foreach (var graph in graphs.Where(g => g.Editable))
             {
-                var layers = controller.layers;
+                var type = graph.Type;
+                var controller = graph.Controller;
+                var layers = graph.Layers;
                 var gone = new HashSet<int>();
                 // The first layer stays: the next one would become the base layer, always at full weight.
                 for (int i = 1; i < layers.Length; i++)
@@ -419,7 +463,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     var machine = layer.stateMachine;
                     if (machine == null || machine.stateMachines.Length > 0 || machine.states.Length != 1 || machine.behaviours.Length > 0) continue;
                     // A layer at part weight, added on top, or whose weight a layer control changes isn't simply its state.
-                    if (layer.defaultWeight < 1f || layer.blendingMode == AnimatorLayerBlendingMode.Additive || Controlled(type, i)) continue;
+                    if (layer.defaultWeight < 1f || layer.blendingMode == AnimatorLayerBlendingMode.Additive || controlled.Contains((type.ToString(), i))) continue;
                     if (layers.Any(l => l.syncedLayerIndex == i)) continue;
                     var state = machine.states[0].state;
                     if (state.behaviours.Length > 0 || (state.motion != null && !(state.motion is AnimationClip))) continue;
@@ -429,8 +473,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     if (values.Any(v => v.Type == typeof(Transform)) && (layer.avatarMask != null || values.Any(v => v.Type == typeof(Transform) && root.transform.Find(v.Path) is Transform t && (humanoid.Contains(t) || v.Path.Length == 0))))
                         continue;
                     if (values.Any(v => animated.TryGetValue((v.Path, v.Type, v.Property), out int n) && n > 1)) continue;
-                    if (!values.All(CanApply)) continue;
-                    foreach (var value in values) Apply(value);
+                    // Each found once: none, or all of them, are written.
+                    var appliers = values.Select(Applier).ToList();
+                    if (appliers.Any(a => a == null)) continue;
+                    foreach (var apply in appliers) apply();
                     report.Baked += values.Count;
                     foreach (var key in perLayer[(controller, i)]) animated[key]--;
                     gone.Add(i);
@@ -438,8 +484,11 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     if (state.motion != null) removed.Add(state.motion);
                 }
                 if (gone.Count == 0) continue;
-                RemoveLayers(type, controller, gone);
+                PointLayerControls(graphs, type, Map(layers.Length, gone));
+                removals.Add((controller, gone));
                 report.Layers += gone.Count;
+                // The layer controls of this playable layer point elsewhere now.
+                controlled = Controlled(graphs);
             }
         }
 
@@ -463,10 +512,6 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             }
             return list;
         }
-
-        private bool CanApply(Binding binding) => Applier(binding) != null;
-
-        private void Apply(Binding binding) => Applier(binding)?.Invoke();
 
         // How a value is written into the avatar; null when it can't be (a material property). What it animates may be gone
         // (an object, a component, a blendshape a custom base's mesh no longer has): the animation did nothing, nor does this.
@@ -514,17 +559,30 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return null;
         }
 
-        // Removes layers, keeping layer controls (VRCAnimatorLayerControl) and synced layers pointing at the same layers.
-        private void RemoveLayers(VRCAvatarDescriptor.AnimLayerType type, AnimatorController controller, HashSet<int> gone)
+        // Where each layer kept goes once <paramref name="gone"/> are removed.
+        private static Dictionary<int, int> Map(int count, HashSet<int> gone)
+        {
+            var map = new Dictionary<int, int>();
+            for (int i = 0, n = 0; i < count; i++) if (!gone.Contains(i)) map[i] = n++;
+            return map;
+        }
+
+        // Removes layers, keeping synced layers pointing at the same layers (after the batch: it removes no layer).
+        private static void RemoveLayers(AnimatorController controller, HashSet<int> gone)
         {
             var layers = controller.layers;
-            var map = new Dictionary<int, int>();
-            for (int i = 0, n = 0; i < layers.Length; i++) if (!gone.Contains(i)) map[i] = n++;
+            var map = Map(layers.Length, gone);
             var kept = layers.Where((_, i) => !gone.Contains(i)).ToArray();
             foreach (var layer in kept) if (layer.syncedLayerIndex >= 0 && map.TryGetValue(layer.syncedLayerIndex, out int synced)) layer.syncedLayerIndex = synced;
             controller.layers = kept;
-            foreach (var (_, other) in controllers.Where(c => editable(c.Controller)))
-                foreach (var machine in Machines(other))
+        }
+
+        // Layer controls (VRCAnimatorLayerControl) of a playable layer whose layers go: pointed at where theirs go, removed
+        // when theirs is gone.
+        private void PointLayerControls(List<Graph> graphs, VRCAvatarDescriptor.AnimLayerType type, Dictionary<int, int> map)
+        {
+            foreach (var graph in graphs.Where(g => g.Editable))
+                foreach (var machine in graph.Machines)
                     foreach (var child in machine.states)
                     {
                         var behaviours = child.state.behaviours;
@@ -542,9 +600,10 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     }
         }
 
-        private bool Controlled(VRCAvatarDescriptor.AnimLayerType type, int index) =>
-            controllers.SelectMany(c => Machines(c.Controller)).SelectMany(m => m.states).SelectMany(s => s.state.behaviours)
-                .OfType<VRCAnimatorLayerControl>().Any(c => Same(type, c.playable) && c.layer == index);
+        // The layers (by playable layer name and index) whose weight a layer control changes.
+        private static HashSet<(string, int)> Controlled(List<Graph> graphs) =>
+            new HashSet<(string, int)>(graphs.SelectMany(g => g.Machines).SelectMany(m => m.states).SelectMany(s => s.state.behaviours)
+                .OfType<VRCAnimatorLayerControl>().Select(c => (c.playable.ToString(), c.layer)));
 
         private static bool Same(VRCAvatarDescriptor.AnimLayerType type, VRC_AnimatorLayerControl.BlendableLayer layer) =>
             type.ToString() == layer.ToString() || (type == VRCAvatarDescriptor.AnimLayerType.Gesture && layer == VRC_AnimatorLayerControl.BlendableLayer.Gesture);
@@ -587,8 +646,14 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                         if (target != null && target.IsChildOf(root.transform)) references.Add((target, component.transform));
                     }
             }
-            // Decided before anything goes.
-            var gone = hidden.Where(t => !references.Any(r => r.Target.IsChildOf(t) && !r.From.IsChildOf(t))).ToList();
+            // Decided before anything goes: a hidden object stays when something outside it refers to it or to what it holds
+            // (each reference marks the hidden objects above its target, instead of each hidden object testing every reference).
+            var hiddenSet = new HashSet<Transform>(hidden);
+            var referred = new HashSet<Transform>();
+            foreach (var (target, from) in references)
+                for (var above = target; above != null && above != root.transform; above = above.parent)
+                    if (hiddenSet.Contains(above) && !from.IsChildOf(above)) referred.Add(above);
+            var gone = hidden.Where(t => !referred.Contains(t)).ToList();
             foreach (var t in gone)
             {
                 report.Objects++;

@@ -893,6 +893,123 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
+        // The upload makes all its changes to VRCFury's FX copy in one ControllerEdits batch (the controller's layers show a
+        // stand-in meanwhile): the result is the one the steps give one by one, and every layer gets its state machine back.
+        [Test]
+        public void TheBatchedBuildChangesTheControllerAsTheStepsDoOneByOne()
+        {
+            var (alone, aloneRoot) = SmallFx();
+            var (batched, batchedRoot) = SmallFx();
+            var machines = batched.layers.Select(l => l.stateMachine).ToList();
+            var face = Mesh(Rexouium.Concat(new[] { "Grin_L", "Grin_R", "MouthNarrow", "EarsUp" }));
+
+            var steps = FaceTrackingBuild.Finish(alone, FaceTrackingStandard.SRanipal, "Body", face, aloneRoot.transform);
+            var tuned = FaceTrackingBuild.Tune(alone, "Body", face, true, FaceTrackingBuild.MouthSlowdown(FaceTrackingSmoothing.Balanced));
+            string paced = FaceTrackingBuild.Pace(alone, FaceTrackingSmoothing.Balanced);
+            var built = FaceTrackingBuild.Build(batched, FaceTrackingStandard.SRanipal, "Body", face, batchedRoot.transform, true, FaceTrackingSmoothing.Balanced);
+
+            Assert.AreEqual(steps, (built.renamed, built.gated, built.quieted));
+            Assert.AreEqual(tuned.ToString(), built.tuning.ToString());
+            Assert.AreEqual(paced, built.paced);
+            Assert.Greater(steps.renamed * steps.gated * steps.quieted * tuned.Grins * tuned.Slowed, 0, "every step changed something");
+            CollectionAssert.AreEqual(machines, batched.layers.Select(l => l.stateMachine), "each layer has its state machine back");
+            Assert.False(Resources.FindObjectsOfTypeAll<AnimatorStateMachine>().Any(m => m.name == "Orbiters edits"), "the stand-in is gone");
+            Assert.AreEqual(ControllerText.Describe(alone), ControllerText.Describe(batched));
+            foreach (var fx in new[] { alone, batched }) owned.AddRange(Reached(fx));
+        }
+
+        // A merged FX controller with something for every step: the template's layer (renamed shapes, the mouth's tuning, the
+        // smoothing others see), the avatar's expressions, blinks, an eye prop on the Bool, and an ear gesture moving the jaw.
+        private (AnimatorController, GameObject) SmallFx()
+        {
+            var avatar = new GameObject("Avatar"); owned.Add(avatar);
+            var jaw = new GameObject("Jaw").transform; jaw.SetParent(new GameObject("Head").transform); jaw.parent.SetParent(avatar.transform);
+            var fx = new AnimatorController { name = "FX" }; owned.Add(fx);
+            fx.AddParameter("GestureLeft", AnimatorControllerParameterType.Int);
+            fx.AddParameter("GestureRightWeight", AnimatorControllerParameterType.Float);
+            fx.AddParameter(FaceTrackingBuild.LipTracking, AnimatorControllerParameterType.Float);
+            fx.AddParameter(FaceTrackingBuild.EyeTracking, AnimatorControllerParameterType.Float);
+            foreach (var (name, value) in new[] { ("OSCm/Remote/FloatScaler", 15f), ("OSCm/Remote/FloatMod", .05f) })
+                fx.AddParameter(new AnimatorControllerParameter { name = name, type = AnimatorControllerParameterType.Float, defaultFloat = value });
+
+            var up = Tree("Copied from FX/Mouth Upper Up Left Blend", "OSCm/Proxy/FT/v2/MouthUpperUpLeft", (0f, Clip(("LipTrack_LipCornerTopUp_L", 0f))), (1f, Clip(("LipTrack_LipCornerTopUp_L", 100f))));
+            var smile = Tree("Copied from FX/Mouth Smile Left Blend", "OSCm/Proxy/FT/v2/SmileSadLeft", (0f, Clip(("Mouth_Smile_Left", 0f))), (1f, Clip(("Mouth_Smile_Left", 100f))));
+            var sad = Tree("Mouth Sad Left Blend", "OSCm/Proxy/FT/v2/SmileSadLeft", (-1f, Clip(("LipTrack_LipFrownLeft", 100f))), (0f, Clip(("LipTrack_LipFrownLeft", 0f))));
+            var expressions = Direct("Expressions", (smile, "LipTrackingActive"), (up, "LipTrackingActive"), (sad, "LipTrackingActive"),
+                (Clip(("Jaw_Open", 100f), ("LipTrack_JawOpen", 30f)), "FT/v2/JawOpen"), (Clip(("LipTrack_Pout_Pucker", 100f), ("LipTrack_TongueExtend", 100f)), "OSCm/Proxy/FT/v2/LipPucker"),
+                (Clip(("Blink_L", 100f)), "FT/v2/EyeLidLeft"), (Shaped("Mouth_Smile_Right"), "OSCm/Proxy/FT/v2/SmileSadRight"));
+            var drivers = Direct("Drivers", (Tree("Smile Sad Left Driver", "OSCm/Smooth/FT/v2/SmileSadLeft", (-1f, Clip()), (1f, Clip())), "FT/DirectBlend"), (Clip(), "OSCm/Smooth/FT/v2/JawOpen"));
+            var inputs = Direct("Inputs", (Tree("Smile Sad Left Input", "FT/v2/SmileSadLeft", (-1f, Clip()), (1f, Clip())), "FT/DirectBlend"), (Clip(), "FT/v2/JawOpen"));
+            var cutoff = Tree("Smoothing Cutoff", "OSCm/FrameTime", (.04f, Clip()), (.041f, Clip()));
+            Layer(fx, "Face Tracking").AddState("Tracking").motion = Direct("Face Tracking", (expressions, "FT/DirectBlend"),
+                (Tree("Lip Tracking Smoothing", FaceTrackingBuild.LocalSmoothing, (0f, drivers), (1f, inputs)), "LipTrackingActive"), (cutoff, "FT/DirectBlend"));
+
+            var hands = Layer(fx, "Expressions");
+            var rest = hands.AddState("Rest"); rest.motion = Clip(("LipTrack_LipSmileLeft", 0f)); hands.defaultState = rest;
+            var smiling = hands.AddState("Smile"); smiling.motion = Clip(("LipTrack_LipSmileLeft", 100f));
+            // A state with a speed and its parameter, reached through a transition other transitions interrupt.
+            smiling.speed = 1.5f; smiling.speedParameterActive = true; smiling.speedParameter = "GestureRightWeight"; smiling.writeDefaultValues = false;
+            var toSmiling = rest.AddTransition(smiling); toSmiling.AddCondition(AnimatorConditionMode.Equals, 3, "GestureLeft");
+            toSmiling.hasExitTime = true; toSmiling.exitTime = .7f; toSmiling.duration = .2f; toSmiling.offset = .1f;
+            toSmiling.interruptionSource = TransitionInterruptionSource.Destination; toSmiling.orderedInterruption = false;
+            hands.AddStateMachine("Hands").AddState("Fist").motion = Clip(("LipTrack_LipSmileLeft", 80f));
+
+            var blink = Layer(fx, "Blink");
+            // A masked layer.
+            var mask = new AvatarMask { name = "Face only", transformCount = 1 }; owned.Add(mask);
+            mask.SetTransformPath(0, "Body"); mask.SetTransformActive(0, true);
+            var withMask = fx.layers; withMask[withMask.Length - 1].avatarMask = mask; fx.layers = withMask;
+            var open = blink.AddState("Open"); open.motion = Clip(("Blink_L", 0f)); blink.defaultState = open;
+            var closed = blink.AddState("Closed"); closed.motion = Clip(("Blink_L", 100f));
+            open.AddTransition(closed).hasExitTime = true;
+            closed.AddTransition(open).hasExitTime = true;
+
+            var props = Layer(fx, "Eye props");
+            var hidden = props.AddState("Hidden"); props.defaultState = hidden;
+            var shown = props.AddState("Shown"); shown.motion = Clip();
+            hidden.AddTransition(shown).AddCondition(AnimatorConditionMode.IfNot, 0, FaceTrackingBuild.EyeTracking);
+            shown.AddTransition(hidden).AddCondition(AnimatorConditionMode.If, 0, FaceTrackingBuild.EyeTracking);
+
+            var pull = Clip(("EarsUp", 100f), ("LipTrack_TongueExtend", 100f));
+            AnimationUtility.SetEditorCurve(pull, EditorCurveBinding.FloatCurve("Head/Jaw", typeof(Transform), "m_LocalPosition.y"), AnimationCurve.Constant(0, 1, .1f));
+            // A 2D tree: the quiet copy keeps its second parameter and its children's positions.
+            var ears = Tree("Ears Tree", "GestureRightWeight", (0f, Clip(("EarsUp", 0f))), (1f, pull));
+            ears.blendType = BlendTreeType.FreeformCartesian2D; ears.blendParameterY = "GestureRightWeight";
+            var placed = ears.children; placed[0].position = new Vector2(-1, 0); placed[1].position = new Vector2(1, .5f); placed[1].timeScale = .5f; ears.children = placed;
+            Layer(fx, "Ears").AddState("Pull").motion = ears;
+            return (fx, avatar);
+        }
+
+        // A clip whose curve has tangents and wrap modes of its own: renamed, it keeps them.
+        private AnimationClip Shaped(string shape)
+        {
+            var clip = new AnimationClip { name = "Shaped " + shape }; owned.Add(clip);
+            var curve = new AnimationCurve(new Keyframe(0, 0, 2f, 3f), new Keyframe(1, 100, -1f, .5f) { weightedMode = WeightedMode.Both, inWeight = .2f, outWeight = .6f })
+                { preWrapMode = WrapMode.Loop, postWrapMode = WrapMode.PingPong };
+            AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Body", typeof(SkinnedMeshRenderer), "blendShape." + shape), curve);
+            return clip;
+        }
+
+        // The objects the build made in a controller (trees, clips, transitions), to destroy them after the test.
+        private static IEnumerable<Object> Reached(AnimatorController fx)
+        {
+            var reached = new HashSet<Object>();
+            void Add(Motion motion)
+            {
+                if (motion == null || !reached.Add(motion)) return;
+                if (motion is BlendTree tree) foreach (var child in tree.children) Add(child.motion);
+            }
+            void Machine(AnimatorStateMachine machine)
+            {
+                if (machine == null || !reached.Add(machine)) return;
+                reached.UnionWith(machine.anyStateTransitions);
+                foreach (var child in machine.states) { reached.UnionWith(child.state.transitions); Add(child.state.motion); }
+                foreach (var sub in machine.stateMachines) Machine(sub.stateMachine);
+            }
+            foreach (var layer in fx.layers) Machine(layer.stateMachine);
+            return reached;
+        }
+
         private BlendTree Tree(string name, string parameter, params (float threshold, Motion motion)[] children)
         {
             var tree = new BlendTree { name = name, blendType = BlendTreeType.Simple1D, blendParameter = parameter, useAutomaticThresholds = false }; owned.Add(tree);

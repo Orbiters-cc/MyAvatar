@@ -720,6 +720,138 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(OptimizationEstimate.Latest(settings), Is.SameAs(result));
         }
 
+        // The estimate is kept in parts, each redone only when what it depends on changes: the texture slider plans the
+        // textures again and measures the same hidden copy with them, without copying the avatar; any other setting copies it
+        // again. Either way the figures are those of an estimate measured from nothing.
+        [Test] public void ATextureSettingRedoesOnlyTheTexturesOfTheEstimate()
+        {
+            string folder = Folder();
+            var material = Own(new Material(Shader.Find("Standard")));
+            material.SetTexture("_MainTex", Image(folder, "Board_BaseColor", 1024));
+            Board(material);
+            Skinned("Body");
+            var hidden = Skinned("Old shirt"); hidden.gameObject.SetActive(false);
+            settings.uploadOptimization.level = OptimizationLevel.Custom;
+            settings.uploadOptimization.custom = OptimizationPasses.ResizeTextures | OptimizationPasses.HiddenObjects;
+            settings.uploadOptimization.sharpFrom = .5f;
+            OptimizationEstimate.Result Measure()
+            {
+                OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                OptimizationEstimate.Finish();
+                var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                Assert.That(result?.Error, Is.Null);
+                return result;
+            }
+            string Text(OptimizationEstimate.Result result) =>
+                Newtonsoft.Json.JsonConvert.SerializeObject(new object[] { result.Now, result.Upload, result.Report.ToString() });
+
+            var near = Measure();
+            int copies = OptimizationEstimate.CopiesMade;
+            Assert.That(copies, Is.EqualTo(1));
+            settings.uploadOptimization.sharpFrom = 8f;
+            var far = Measure();
+            Assert.That(OptimizationEstimate.CopiesMade, Is.EqualTo(copies), "The texture slider measures the same copy with the textures' new plans.");
+            Assert.That(far.Upload.TextureMegabytes, Is.LessThan(near.Upload.TextureMegabytes), "Sharp from farther: smaller copies.");
+            Assert.That(far.Report.HiddenObjects, Is.EqualTo(1));
+
+            OptimizationEstimate.Clear();
+            var fresh = Measure();
+            Assert.That(OptimizationEstimate.CopiesMade, Is.EqualTo(copies + 1), "Nothing kept: copied again.");
+            Assert.That(Text(fresh), Is.EqualTo(Text(far)), "The parts kept give what a whole new estimate measures.");
+
+            settings.uploadOptimization.custom &= ~OptimizationPasses.HiddenObjects;
+            var kept = Measure();
+            Assert.That(OptimizationEstimate.CopiesMade, Is.EqualTo(copies + 2), "Another change to the objects: copied again.");
+            Assert.That(kept.Upload.Skinned, Is.EqualTo(2), "The hidden mesh uploads now.");
+        }
+
+        // Textures' measures compress within one set of limits whichever estimate starts them: one more than the limit
+        // waits, the same measure is never compressed twice, and a finished one is reused (also by an estimate replacing
+        // the one that started it).
+        [Test] public void TextureMeasuresShareOneBoundedSchedule()
+        {
+            DownloadSize.FinishCompressing();
+            string folder = Folder();
+            var textures = Enumerable.Range(0, DownloadSize.MaxCompressing + 1)
+                .Select(n => Image(folder, "Measure_" + n, 64, pixel: i => new Color32((byte)(i * 7 + n * 31), (byte)(n * 13), (byte)i, 255))).ToList();
+            var keys = new List<string>();
+            foreach (var texture in textures.Take(DownloadSize.MaxCompressing))
+            {
+                Assert.That(DownloadSize.Measure(texture, false, null, out var key), Is.EqualTo(DownloadSize.Measuring.Compressing));
+                keys.Add(key);
+            }
+            Assert.That(keys.Distinct().Count(), Is.EqualTo(keys.Count), "One key per image.");
+            Assert.That(DownloadSize.Measure(textures.Last(), false, null, out _), Is.EqualTo(DownloadSize.Measuring.Full), "The limit holds.");
+            Assert.That(DownloadSize.Measure(textures[0], false, null, out var again), Is.EqualTo(DownloadSize.Measuring.Compressing), "Already under way: not started twice.");
+            Assert.That(again, Is.EqualTo(keys[0]));
+            DownloadSize.FinishCompressing();
+            Assert.That(DownloadSize.AnyCompressing, Is.False);
+            Assert.That(DownloadSize.Measure(textures[0], false, null, out _), Is.EqualTo(DownloadSize.Measuring.Done), "Measured once, reused.");
+            Assert.That(DownloadSize.Measure(textures.Last(), false, null, out _), Is.EqualTo(DownloadSize.Measuring.Compressing), "Room again.");
+            DownloadSize.FinishCompressing();
+        }
+
+        // A mesh asset edited in place (not imported again) is measured again: the textures' density on it and the
+        // estimate's plans, and its blendshapes' download when their offsets change but not their count.
+        [Test] public void AMeshEditedInPlaceIsMeasuredAgain()
+        {
+            string folder = Folder();
+            var material = Own(new Material(Shader.Find("Standard")));
+            material.SetTexture("_MainTex", Image(folder, "Board_BaseColor", 1024));
+            var filter = Board(material).GetComponent<MeshFilter>();
+            var mesh = Object.Instantiate(filter.sharedMesh);
+            AssetDatabase.CreateAsset(mesh, folder + "/Board.asset");
+            filter.sharedMesh = mesh;
+            settings.uploadOptimization.level = OptimizationLevel.Custom;
+            settings.uploadOptimization.custom = OptimizationPasses.ResizeTextures;
+            settings.uploadOptimization.sharpFrom = 8f;
+            float Megabytes()
+            {
+                OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                OptimizationEstimate.Finish();
+                var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                Assert.That(result?.Error, Is.Null);
+                return result.Upload.TextureMegabytes;
+            }
+
+            float small = Megabytes();
+            // Eight times as wide and tall: the texture covers more surface, so it keeps more texels from 8 m.
+            mesh.vertices = mesh.vertices.Select(v => v * 8f).ToArray();
+            EditorUtility.SetDirty(mesh);
+            Assert.That(Megabytes(), Is.GreaterThan(small), "The density is measured on the mesh as it is now.");
+
+            var shapes = Object.Instantiate(Skinned("Body").sharedMesh);
+            AssetDatabase.CreateAsset(shapes, folder + "/Shapes.asset");
+            var deltas = new Vector3[shapes.vertexCount];
+            deltas[0] = Vector3.up;
+            shapes.ClearBlendShapes();
+            shapes.AddBlendShapeFrame("Moving", 100, deltas, null, null);
+            long one = DownloadSize.ShapeBytes(shapes)["Moving"];
+            for (int i = 0; i < deltas.Length; i++) deltas[i] = Vector3.up;
+            shapes.ClearBlendShapes();
+            shapes.AddBlendShapeFrame("Moving", 100, deltas, null, null);
+            EditorUtility.SetDirty(shapes);
+            Assert.That(DownloadSize.ShapeBytes(shapes)["Moving"], Is.GreaterThan(one), "The same shape, moving more vertices.");
+        }
+
+        // A mesh two skinned renderers show uploads with the blendshapes either of them keeps.
+        [Test] public void AMeshTwoRenderersShowKeepsTheShapesEitherKeeps()
+        {
+            var first = Skinned("Body");
+            var second = Skinned("Body copy");
+            second.sharedMesh = first.sharedMesh;
+            var mesh = first.sharedMesh;
+            Assert.That(mesh.blendShapeCount, Is.GreaterThan(0), "The fixture's mesh has a blendshape.");
+            string shape = mesh.GetBlendShapeName(0);
+            long Shapes(Func<SkinnedMeshRenderer, ICollection<string>> kept) => DownloadSize.Of(root, kept: kept).BlendShapes;
+
+            long all = Shapes(null);
+            Assert.That(all, Is.GreaterThan(0));
+            Assert.That(Shapes(r => r == first ? new HashSet<string> { shape } : new HashSet<string>()), Is.EqualTo(all), "The first renderer keeps it.");
+            Assert.That(Shapes(r => r == second ? new HashSet<string> { shape } : new HashSet<string>()), Is.EqualTo(all), "The second renderer keeps it.");
+            Assert.That(Shapes(r => new HashSet<string>()), Is.EqualTo(0), "Neither does.");
+        }
+
         // A tool editing one avatar's meshes live (Mixer sculpting) holds back that avatar's estimate only, even when it was
         // asked for first.
         [Test] public void AnAvatarEditedLiveHoldsBackOnlyItsOwnEstimate()

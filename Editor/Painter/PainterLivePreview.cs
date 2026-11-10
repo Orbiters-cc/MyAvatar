@@ -50,7 +50,14 @@ namespace Orbiters.MyAvatar.Editor.Painter
         /// Shows a decoded image of a texture set's channel on every renderer slot showing <paramref name="material"/> under
         /// <paramref name="root"/>.
         /// </summary>
-        public void Show(Transform root, string textureSet, string channel, long revision, TgaImage image, Material material, PainterTargets targets)
+        public void Show(Transform root, string textureSet, string channel, long revision, TgaImage image, Material material, PainterTargets targets) =>
+            Show(textureSet, channel, revision, image, material, targets, Parts(root, material).ToList());
+
+        /// <summary>
+        /// The same on <paramref name="parts"/>, the renderer slots showing <paramref name="material"/> (<see cref="Parts"/>,
+        /// read once by a caller showing many images on them).
+        /// </summary>
+        public void Show(string textureSet, string channel, long revision, TgaImage image, Material material, PainterTargets targets, IReadOnlyList<(Renderer, int)> parts)
         {
             // Painting another material now: the one it showed on gets its own textures back first.
             if (sets.TryGetValue(textureSet, out var set) && set.Material != material) { Clear(textureSet); set = null; }
@@ -58,7 +65,6 @@ namespace Orbiters.MyAvatar.Editor.Painter
             set.Revisions[channel] = revision;
             bool color = channel == "basecolor" || channel == "emissive";
             var texture = Upload(set, channel, image, linear: !color);
-            var parts = Parts(root, material).ToList();
             switch (channel)
             {
                 case "basecolor": Assign(set, parts, targets.Color, texture); break;

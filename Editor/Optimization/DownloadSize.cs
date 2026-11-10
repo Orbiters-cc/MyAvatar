@@ -69,14 +69,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const long RawShader = 150 * 1024, RawMaterial = 20 * 1024, RawComponent = 1024;
 
         /// <summary>
-        /// Seconds from the end of the download until the avatar shows: unpacking (LZMA), loading its assets, setting it up.
-        /// On a desktop PC like the one it was measured on; <paramref name="mobile"/> for a Quest.
+        /// Seconds from the end of the download until the avatar shows: unpacking (LZMA), loading its assets, setting it up
+        /// (the animator layers and PhysBones of <paramref name="contents"/>). On a desktop PC like the one it was measured on;
+        /// <paramref name="mobile"/> for a Quest.
         /// </summary>
-        internal static float LoadSeconds(Parts parts, GameObject root, bool mobile)
+        internal static float LoadSeconds(Parts parts, Contents contents, bool mobile)
         {
-            int layers = AvatarUsage.Controllers(root).OfType<UnityEditor.Animations.AnimatorController>().Sum(c => c.layers.Length);
-            int physBones = root.GetComponentsInChildren<VRC.Dynamics.VRCPhysBoneBase>(true).Length;
-            float seconds = parts.Raw / UnpackPerSecond + parts.Raw / LoadPerSecond + Setup + layers * PerLayer + physBones * PerPhysBone;
+            float seconds = parts.Raw / UnpackPerSecond + parts.Raw / LoadPerSecond + Setup + contents.Layers * PerLayer + contents.PhysBones * PerPhysBone;
             return mobile ? seconds * Quest : seconds;
         }
 
@@ -101,9 +100,33 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// </summary>
         internal static Parts Of(GameObject root, bool mobile = false, Func<Texture, TextureOptimization.TexturePlan> planned = null,
             Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null,
-            List<EditorCurveBinding> bindings = null)
+            List<EditorCurveBinding> bindings = null) =>
+            Fold(Read(root, kept, sizes, sceneRoot, bindings), mobile, planned);
+
+        /// <summary>
+        /// What the bundle of an avatar holds whatever its textures become and whichever platform it is for: its meshes,
+        /// blendshapes, animations, shaders, sounds, components and materials, and which textures it holds (their size is
+        /// <see cref="Fold"/>ed in for a platform and the textures' plan). Read once per avatar (or estimate's copy) as it
+        /// stands; it keeps no object of it, only the textures.
+        /// </summary>
+        internal sealed class Contents
         {
-            var parts = new Parts();
+            /// <summary>Everything but the textures.</summary>
+            public readonly Parts Rest = new Parts();
+            /// <summary>The pieces of everything but the textures, in the order they were read.</summary>
+            public readonly List<Piece> Pieces = new List<Piece>();
+            /// <summary>The textures it holds, each with where it is first shown (as a piece says it).</summary>
+            public readonly List<(Texture Texture, string Owner, string Item)> Textures = new List<(Texture, string, string)>();
+            /// <summary>What a client sets up once it is loaded: its animator layers and PhysBones.</summary>
+            public int Layers, PhysBones;
+        }
+
+        /// <summary>What <see cref="Of"/> reads of <paramref name="root"/> besides the textures' sizes (see <see cref="Of"/> for the arguments).</summary>
+        internal static Contents Read(GameObject root, Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null,
+            GameObject sceneRoot = null, List<EditorCurveBinding> bindings = null)
+        {
+            var contents = new Contents();
+            var parts = contents.Rest;
             var meshes = new Dictionary<Mesh, ICollection<string>>();
             // The first renderer showing each mesh: where its piece points.
             var shownBy = new Dictionary<Mesh, Renderer>();
@@ -114,21 +137,23 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 var mesh = MeshOptimization.MeshOf(renderer);
                 if (mesh == null || meshes.ContainsKey(mesh) && meshes[mesh] == null) continue;
                 if (!shownBy.ContainsKey(mesh)) shownBy[mesh] = renderer;
-                // Null: every shape stays; else the shapes kept.
-                meshes[mesh] = renderer is SkinnedMeshRenderer skinned && kept != null && mesh.blendShapeCount > 0 ? kept(skinned) : null;
+                // Null: every shape stays; else the shapes kept. A mesh two renderers show keeps what either keeps.
+                var shapes = renderer is SkinnedMeshRenderer skinned && kept != null && mesh.blendShapeCount > 0 ? kept(skinned) : null;
+                meshes[mesh] = shapes == null || !meshes.TryGetValue(mesh, out var earlier) ? shapes : new HashSet<string>(earlier.Concat(shapes), StringComparer.Ordinal);
             }
             var materials = Materials(root, clips);
             foreach (var source in root.GetComponentsInChildren<AudioSource>(true))
                 if (source.clip != null && !sounds.ContainsKey(source.clip)) sounds[source.clip] = source;
 
             var items = new Toolkit.Editor.VRChat.Budget.ItemLookup(root, sceneRoot);
-            var pieces = new List<Piece>();
+            var pieces = contents.Pieces;
+            string OwnerOf(Transform owner) => owner != null ? AnimationUtility.CalculateTransformPath(owner, root.transform) : "";
             void Add(PieceKind kind, string name, Transform owner, Object asset, long bytes)
             {
                 if (bytes <= 0) return;
                 pieces.Add(new Piece
                 {
-                    Kind = kind, Name = name, Owner = owner != null ? AnimationUtility.CalculateTransformPath(owner, root.transform) : "",
+                    Kind = kind, Name = name, Owner = OwnerOf(owner),
                     Item = owner != null ? items.Of(owner)?.Name : null, Asset = asset != null && EditorUtility.IsPersistent(asset) ? asset.GetInstanceID() : 0,
                     Bytes = bytes,
                 });
@@ -137,10 +162,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             var owners = Owners(root, materials);
             foreach (var texture in Textures(root, materials))
             {
-                long bytes = Texture(texture, mobile, planned?.Invoke(texture), out long raw);
-                parts.Textures += bytes;
-                parts.Raw += raw;
-                Add(PieceKind.Texture, texture.name, owners.TryGetValue(texture, out var shown) ? shown : null, texture, bytes);
+                var owner = owners.TryGetValue(texture, out var shown) ? shown : null;
+                contents.Textures.Add((texture, OwnerOf(owner), owner != null ? items.Of(owner)?.Name : null));
             }
             foreach (var pair in meshes)
             {
@@ -176,6 +199,40 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             parts.Raw += shaders.Count * RawShader + materials.Count * RawMaterial + components * RawComponent + parts.Audio;
             Add(PieceKind.Other, components.ToString("N0", CultureInfo.InvariantCulture) + " components, " + materials.Count.ToString("N0", CultureInfo.InvariantCulture) +
                 (materials.Count == 1 ? " material" : " materials"), null, null, parts.Other);
+            contents.Layers = AvatarUsage.Controllers(root).OfType<UnityEditor.Animations.AnimatorController>().Sum(c => c.layers.Length);
+            contents.PhysBones = root.GetComponentsInChildren<VRC.Dynamics.VRCPhysBoneBase>(true).Length;
+            return contents;
+        }
+
+        /// <summary>
+        /// The download of what <paramref name="contents"/> holds for PC or for Quest (Android), its textures as they stand
+        /// or as <paramref name="planned"/> makes them: the same as <see cref="Of"/> on the avatar it was read from.
+        /// </summary>
+        internal static Parts Fold(Contents contents, bool mobile, Func<Texture, TextureOptimization.TexturePlan> planned = null)
+        {
+            var rest = contents.Rest;
+            var parts = new Parts
+            {
+                Meshes = rest.Meshes, BlendShapes = rest.BlendShapes, Animations = rest.Animations, Shaders = rest.Shaders, Audio = rest.Audio,
+                Other = rest.Other, Raw = rest.Raw,
+            };
+            // The textures' pieces first, as they were read.
+            var pieces = new List<Piece>(contents.Textures.Count + contents.Pieces.Count);
+            foreach (var (texture, owner, item) in contents.Textures)
+            {
+                // A texture made in memory and destroyed since uploads nothing.
+                if (!texture) continue;
+                long bytes = Texture(texture, mobile, planned?.Invoke(texture), out long raw);
+                parts.Textures += bytes;
+                parts.Raw += raw;
+                if (bytes > 0)
+                    pieces.Add(new Piece
+                    {
+                        Kind = PieceKind.Texture, Name = texture.name, Owner = owner, Item = item,
+                        Asset = EditorUtility.IsPersistent(texture) ? texture.GetInstanceID() : 0, Bytes = bytes,
+                    });
+            }
+            pieces.AddRange(contents.Pieces);
             parts.Pieces = Keep(pieces, parts.Bundle);
             return parts;
         }
@@ -408,29 +465,81 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             return result;
         }
 
-        /// <summary>
-        /// Starts measuring a texture's download as the bundle stores it: its imported data when the editor holds it in the
-        /// build's format and size, else a copy made as the upload makes them (read here, on the editor's thread). The
-        /// upload's own copies are kept in Library (the upload reuses them); a copy of a texture the upload keeps as it is
-        /// is only measured. Its compression runs on another thread: <see cref="Record"/> keeps the result. Null when there
-        /// is nothing to measure.
-        /// </summary>
-        internal static (string Key, System.Threading.Tasks.Task<long> Deflate)? StartMeasure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
+        /// <summary>What <see cref="Measure"/> did with a texture.</summary>
+        internal enum Measuring
         {
+            /// <summary>Nothing to wait for: measured already, or nothing to measure (it is estimated).</summary>
+            Done,
+            /// <summary>Compressing on another thread under its key (started now, or by another estimate before).</summary>
+            Compressing,
+            /// <summary>As many compressions as the limits allow are under way: ask again on a later frame.</summary>
+            Full,
+        }
+
+        // The texture measures compressing on worker threads, by measure key, whichever estimate started them: the limits
+        // hold for all of them together, a measure an estimate replaced since still lands for the next one (the same key
+        // is never compressed twice), and nothing of it is lost. At most this many at once, holding at most this much data.
+        private static readonly Dictionary<string, (System.Threading.Tasks.Task<long> Deflate, long Bytes, string Name)> compressing =
+            new Dictionary<string, (System.Threading.Tasks.Task<long>, long, string)>();
+        internal static readonly int MaxCompressing = Math.Max(1, Environment.ProcessorCount - 1);
+        internal const long MaxCompressingBytes = 256L << 20;
+
+        /// <summary>Whether texture measures are compressing (<see cref="Collect"/> keeps them once done).</summary>
+        internal static bool AnyCompressing => compressing.Count > 0;
+
+        /// <summary>Whether the measure under this key is still compressing.</summary>
+        internal static bool IsCompressing(string key) => key != null && compressing.ContainsKey(key);
+
+        /// <summary>
+        /// Measures a texture's download as the bundle stores it: its imported data when the editor holds it in the build's
+        /// format and size, else a copy made as the upload makes them (read here, on the editor's thread). The upload's own
+        /// copies are kept in Library (the upload reuses them); a copy of a texture the upload keeps as it is is only
+        /// measured. The data is compressed on another thread under <paramref name="key"/>: <see cref="Collect"/> keeps the
+        /// result.
+        /// </summary>
+        internal static Measuring Measure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned, out string key)
+        {
+            key = null;
             var stored = Stored(texture, mobile, planned);
-            if (stored == null) return null;
+            if (stored == null) return Measuring.Done;
             measured ??= LibraryStore.Read<Dictionary<string, long>>(MeasuredFile);
-            string key = MeasuredKey(stored);
-            if (measured.ContainsKey(key)) return null;
+            key = MeasuredKey(stored);
+            if (measured.ContainsKey(key)) return Measuring.Done;
+            if (compressing.ContainsKey(key)) return Measuring.Compressing;
+            if (compressing.Count >= MaxCompressing || compressing.Values.Sum(c => c.Bytes) >= MaxCompressingBytes) return Measuring.Full;
             var image = stored.texture;
             var data = image.format == stored.format && image.width == stored.width && image.height == stored.height ? image.GetRawTextureData()
                 : UploadTextures.Data(stored, cache: planned != null);
             // The editor can't give the copy (it holds the texture smaller): estimated, not measured.
-            if (data == null) return null;
-            return (key, System.Threading.Tasks.Task.Run(() => Deflated(data)));
+            if (data == null) return Measuring.Done;
+            compressing[key] = (System.Threading.Tasks.Task.Run(() => Deflated(data)), data.LongLength, texture.name);
+            return Measuring.Compressing;
         }
 
-        /// <summary>Keeps a measure <see cref="StartMeasure"/> took (on the editor's thread); written with <see cref="SaveMeasures"/>.</summary>
+        /// <summary>Keeps the measures done compressing (on the editor's thread); written with <see cref="SaveMeasures"/> once none is left.</summary>
+        internal static void Collect()
+        {
+            if (compressing.Count == 0) return;
+            foreach (var pair in compressing.Where(p => p.Value.Deflate.IsCompleted).ToList())
+            {
+                compressing.Remove(pair.Key);
+                var (deflate, _, name) = pair.Value;
+                if (deflate.Status == System.Threading.Tasks.TaskStatus.RanToCompletion) Record(pair.Key, deflate.Result);
+                else Debug.LogWarning("[My Avatar] Optimization: " + name + "'s download is estimated, not measured (" + deflate.Exception?.GetBaseException().Message + ").");
+            }
+            if (compressing.Count == 0) SaveMeasures();
+        }
+
+        /// <summary>Waits for every compression and keeps its measure (tests, diagnostics: plain work on worker threads, nothing waits for this one).</summary>
+        internal static void FinishCompressing()
+        {
+            foreach (var pending in compressing.Values.ToList())
+                try { pending.Deflate.Wait(); }
+                catch (AggregateException) { }
+            Collect();
+        }
+
+        /// <summary>Keeps a measure (on the editor's thread); written with <see cref="SaveMeasures"/>.</summary>
         internal static void Record(string key, long deflated)
         {
             measured ??= LibraryStore.Read<Dictionary<string, long>>(MeasuredFile);
@@ -476,8 +585,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         // ---- Meshes ----
 
-        // Offsets per blendshape, counted once per mesh asset: a sculpted body holds hundreds of shapes.
-        private static readonly Dictionary<int, (int Vertices, Dictionary<string, long> Shapes)> ShapeCache = new Dictionary<int, (int, Dictionary<string, long>)>();
+        // Offsets per blendshape, counted once per mesh asset and edit of it (an edit marks the mesh dirty: offsets changed in
+        // place keep its vertex and shape counts): a sculpted body holds hundreds of shapes.
+        private static readonly Dictionary<int, (int Vertices, int Dirty, Dictionary<string, long> Shapes)> ShapeCache = new Dictionary<int, (int, int, Dictionary<string, long>)>();
 
         /// <summary>A mesh's stored vertices, triangles and bind poses.</summary>
         internal static long VertexBytes(Mesh mesh)
@@ -504,7 +614,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             if (mesh.blendShapeCount == 0) return result;
             if (sizes != null && sizes.TryGetValue(mesh, out var sized)) return sized;
             int id = mesh.GetInstanceID();
-            if (ShapeCache.TryGetValue(id, out var known) && known.Vertices == mesh.vertexCount && known.Shapes.Count == mesh.blendShapeCount) return known.Shapes;
+            int dirty = EditorUtility.GetDirtyCount(mesh);
+            if (ShapeCache.TryGetValue(id, out var known) && known.Vertices == mesh.vertexCount && known.Dirty == dirty && known.Shapes.Count == mesh.blendShapeCount) return known.Shapes;
             // Meshes unloaded since leave it.
             if (ShapeCache.Count >= 256)
                 foreach (int gone in ShapeCache.Keys.Where(k => EditorUtility.InstanceIDToObject(k) == null).ToList()) ShapeCache.Remove(gone);
@@ -523,7 +634,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 }
                 result[mesh.GetBlendShapeName(shape)] = bytes;
             }
-            if (EditorUtility.IsPersistent(mesh)) ShapeCache[id] = (mesh.vertexCount, result);
+            if (EditorUtility.IsPersistent(mesh)) ShapeCache[id] = (mesh.vertexCount, dirty, result);
             else if (sizes != null) sizes[mesh] = result;
             return result;
         }

@@ -23,7 +23,7 @@ import tempfile
 import time
 import traceback
 import zlib
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 from PySide6 import QtCore, QtNetwork, QtWidgets
 
@@ -273,6 +273,32 @@ def mapping_changes(old, new, old_size, new_size):
     return wanted
 
 
+def keep_newest(kept, folder, stem, path, newest=3):
+    """
+    Only the newest few live images of a channel stay (Unity reads each one as it arrives). The images written are kept
+    in order in kept (stem -> paths): the folder is listed once per channel (for images an earlier load of the plugin
+    wrote), not after every image. An image that can't be deleted yet (Unity still reading it) is tried again with the
+    next one (kept under (stem, "retry")); one already gone counts as deleted.
+    """
+    names = kept.get(stem)
+    if names is None:
+        written = [p for p in glob.glob(os.path.join(folder, stem + "_*.tga")) if not same_path(p, path)]
+        names = kept[stem] = deque(sorted(written, key=os.path.getmtime))
+    names.append(path)
+    retry = kept.setdefault((stem, "retry"), [])
+    stale = list(retry)
+    while len(names) > newest:
+        stale.append(names.popleft())
+    retry[:] = []
+    for old in stale:
+        try:
+            os.remove(old)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            retry.append(old)
+
+
 def exportable(maps, has_channel):
     """The saved maps a texture set can export: those whose channel it has, and the normal."""
     return [m for m in maps if m == "normal" or (m in CHANNEL_OF_MAP and has_channel(CHANNEL_OF_MAP[m]))]
@@ -310,6 +336,7 @@ class Link(QtCore.QObject):
         self.preview_size = 1024
         self.live_enabled = True
         self.dirty = OrderedDict()  # (texture set, channel) -> True, renders waiting
+        self.kept_images = {}  # live image stem -> the newest images written, oldest first (keep_newest)
         self.touched = set()  # (texture set, map) changed since the last commit
         # Whether the user clicked or pressed a pen since the project opened: before that, texture changes are Painter
         # computing the project it loads, not edits to apply.
@@ -719,13 +746,7 @@ class Link(QtCore.QObject):
             self.last_render = (channel, width, (time.perf_counter() - started) * 1000.0)
             self.send(TEXTURE, {"textureSet": name, "channel": channel, "path": path, "width": width, "height": height,
                                 "revision": self.revision})
-            # Only the newest few images of a channel stay: Unity reads each one as it arrives.
-            older = sorted(glob.glob(os.path.join(folder, stem + "_*.tga")), key=os.path.getmtime)[:-3]
-            for stale in older:
-                try:
-                    os.remove(stale)
-                except OSError:
-                    pass
+            keep_newest(self.kept_images, folder, stem, path)
             self.changed.emit()
         except Exception as exception:
             log("Render of %s %s failed: %s" % (name, channel, exception))

@@ -887,7 +887,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
 
         // ---- VRCFury features for the rest ----------------------------------------------------------------------------------
 
-        private static string LivePath(MenuPage root, MenuNode target, bool leaf)
+        internal static string LivePath(MenuPage root, MenuNode target, bool leaf)
         {
             var chain = new List<(MenuPage Page, MenuNode Node)>();
             bool Find(MenuPage page, HashSet<MenuPage> seen)
@@ -923,6 +923,34 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             return string.Join("/", parts);
         }
 
+        // Every item's path as LivePath gives it (leaf), in one walk instead of a search from the root per item: the walk
+        // goes through the pages in the order each search does, so an item gets the path its own search would find; an item
+        // another of its menu shares the name with, or under a folder that can't be named, has none.
+        internal static Dictionary<string, string> LivePaths(MenuPage root)
+        {
+            var paths = new Dictionary<string, string>();
+            var seen = new HashSet<MenuPage>();
+            var named = new HashSet<MenuNode>();
+            string Join(string prefix, string part) => prefix.Length == 0 ? part : prefix + "/" + part;
+            void Walk(MenuPage page, string prefix)
+            {
+                if (page == null || !seen.Add(page)) return;
+                foreach (var node in page.Items)
+                {
+                    if (named.Add(node) && prefix != null)
+                    {
+                        var same = MenuRules.Find(page, node.Name);
+                        if (same.Count == 1 && same[0] == node) paths[node.Id] = Join(prefix, MenuRules.Escape(node.Name));
+                    }
+                    if (!node.IsFolder) continue;
+                    int at = prefix == null ? -1 : MenuRules.Find(page, node.Name, MenuRules.IsFolder).IndexOf(node);
+                    Walk(node.Page, at < 0 ? null : Join(prefix, MenuRules.Escape(node.Name) + (at > 0 ? ".dup." + at : "")));
+                }
+            }
+            Walk(root, "");
+            return paths;
+        }
+
         // The features that turn what the avatar builds (after its own direct edits) into the draft.
         private static List<MenuSpec> Features(GameObject root, MenuDraft draft, IReadOnlyDictionary<VRCExpressionsMenu.Control, string> pins)
         {
@@ -930,7 +958,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
             var inputs = MenuInputs.Read(root, skip);
             var specs = new List<MenuSpec>();
             int number = inputs.NextNumber;
-            var startPaths = new Dictionary<string, string>();
+            IReadOnlyDictionary<string, string> startPaths = new Dictionary<string, string>();
             Failure failure = null;
             var target = MenuTree.Walk(draft.Root);
             var options = new MenuBuildOptions
@@ -941,12 +969,7 @@ namespace Orbiters.MyAvatar.Editor.Expressions
                     if (failure != null) return;
                     try
                     {
-                        if (stage == MenuBuildStage.BeforeMoves)
-                            foreach (var entry in MenuTree.Walk(builder.Root))
-                            {
-                                try { startPaths[entry.Node.Id] = LivePath(builder.Root, entry.Node, leaf: true); }
-                                catch (Failure) { }
-                            }
+                        if (stage == MenuBuildStage.BeforeMoves) startPaths = LivePaths(builder.Root);
                         else if (stage == MenuBuildStage.BeforeExtraMoves) Moves(builder, target, draft, specs, ref number);
                         else if (stage == MenuBuildStage.BeforeExtraReorders) Reorders(builder, draft, specs, ref number);
                     }

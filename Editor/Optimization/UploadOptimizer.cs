@@ -30,6 +30,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             /// <summary>How long each change of the structure step took, in the order they ran.</summary>
             public readonly List<(OptimizationPasses Pass, long Milliseconds)> Times = new List<(OptimizationPasses, long)>();
 
+            /// <summary>The same counts (an estimate's, shown again with other texture settings); the times are shared.</summary>
+            internal Report Copy() => (Report)MemberwiseClone();
+
             /// <summary>The structure step's time and its slowest changes, for the build log ("" when nothing was timed).</summary>
             public string Took()
             {

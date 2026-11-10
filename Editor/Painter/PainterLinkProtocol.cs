@@ -71,13 +71,6 @@ namespace Orbiters.MyAvatar.Editor.Painter
 
         public static readonly LiveLinkFormat Format = new LiveLinkFormat(Magic, Version, MaxPayloadBytes, type => Enum.IsDefined(typeof(FrameType), type));
 
-        /// <summary>
-        /// Whether the Toolkit's live link server answers proof requests (Toolkit releases before it close the connection
-        /// on one, so the endpoint only offers it when it does). The same check as Mixer's link.
-        /// </summary>
-        public static readonly bool ServerProvesToken =
-            typeof(LiveLinkFormat).GetMethod("Proof", new[] { typeof(string), typeof(int), typeof(byte[]) }) != null;
-
         public static byte[] Json(object value) => Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(value));
 
         public static T Read<T>(byte[] payload) => JsonConvert.DeserializeObject<T>(Encoding.UTF8.GetString(payload ?? Array.Empty<byte>()));
@@ -114,8 +107,8 @@ namespace Orbiters.MyAvatar.Editor.Painter
             public string host = "127.0.0.1";
             public int port;
             public string token;
-            /// <summary>Unity answers proof requests: Painter checks Unity holds the token before it sends it.</summary>
-            public bool proof = ServerProvesToken;
+            /// <summary>Unity answers proof requests (every Toolkit My Avatar takes does): Painter checks Unity holds the token before it sends it.</summary>
+            public bool proof = true;
             public string projectName, projectPath;
             public List<EndpointAvatar> avatars = new List<EndpointAvatar>();
         }

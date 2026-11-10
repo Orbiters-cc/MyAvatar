@@ -8,6 +8,7 @@ using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRC.SDKBase.Editor.BuildPipeline;
+using Orbiters.Toolkit.Editor.Animations;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.FaceTracking
@@ -42,6 +43,81 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             public FaceTrackingSmoothing Smoothing; public bool Expressive;
             /// <summary>The template's parameters of the features others don't see.</summary>
             public HashSet<string> Removed;
+
+            private HashSet<string> shapes;
+            private Dictionary<string, string> index;
+            /// <summary>The face's blendshapes, read once for every step.</summary>
+            public HashSet<string> Shapes => shapes ??= new HashSet<string>(FaceTrackingDetection.Shapes(Face), StringComparer.Ordinal);
+            /// <summary>The face's blendshapes by normalized name (<see cref="FaceTrackingNames.Resolve"/>).</summary>
+            public Dictionary<string, string> Index => index ??= FaceTrackingNames.Index(Shapes);
+        }
+
+        /// <summary>
+        /// The FX controller's layers, their states and transitions, read once before the edits: inside
+        /// <see cref="ControllerEdits.Batch"/> the controller's layers show an empty stand-in, so every step reaches them
+        /// through this. The steps add no state, sub-state machine or layer, so it stays true while they run; what states
+        /// play is read from the states themselves. The parameters are changed here and written once.
+        /// </summary>
+        private sealed class FxLayers
+        {
+            internal sealed class Layer
+            {
+                public string Name;
+                public AnimatorStateMachine Machine;
+                public List<AnimatorState> States;
+                // Any State's, Entry's, the states', and those leaving its sub-state machines, nested ones included.
+                public List<AnimatorTransitionBase> Transitions;
+                /// <summary>One of the template's own layers (it reads VRCFaceTracking's parameters).</summary>
+                public bool Tracking;
+            }
+
+            public readonly AnimatorController Controller;
+            /// <summary>Every layer, by index in the controller.</summary>
+            public readonly List<Layer> Layers = new List<Layer>();
+            private readonly List<AnimatorControllerParameter> parameters;
+            private bool parametersChanged;
+
+            public FxLayers(AnimatorController controller)
+            {
+                Controller = controller;
+                foreach (var layer in controller.layers)
+                {
+                    var machine = layer.stateMachine;
+                    var entry = new Layer { Name = layer.name, Machine = machine, States = States(machine).ToList(), Transitions = Transitions(machine).ToList() };
+                    entry.Tracking = machine != null && IsTracking(entry);
+                    Layers.Add(entry);
+                }
+                parameters = controller.parameters.ToList();
+            }
+
+            /// <summary>The layers with a state machine.</summary>
+            public IEnumerable<Layer> Machines => Layers.Where(l => l.Machine != null);
+
+            public IReadOnlyList<AnimatorControllerParameter> Parameters => parameters;
+
+            public AnimatorControllerParameter Find(string name) => parameters.FirstOrDefault(p => p.name == name);
+
+            /// <summary>The parameter of that name, added with that type when the controller has none.</summary>
+            public AnimatorControllerParameter Parameter(string name, AnimatorControllerParameterType type)
+            {
+                var existing = Find(name);
+                if (existing != null) return existing;
+                var parameter = new AnimatorControllerParameter { name = name, type = type };
+                parameters.Add(parameter);
+                parametersChanged = true;
+                return parameter;
+            }
+
+            /// <summary>A parameter of <see cref="Parameters"/> was changed.</summary>
+            public void ParametersChanged() => parametersChanged = true;
+
+            /// <summary>Writes the parameters into the controller, once, when something changed them.</summary>
+            public void WriteParameters()
+            {
+                if (!parametersChanged) return;
+                Controller.parameters = parameters.ToArray();
+                parametersChanged = false;
+            }
         }
 
         /// <summary>
@@ -114,12 +190,32 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     Debug.LogWarning("[My Avatar] Face tracking: the FX controller “" + fx.name + "” is the avatar's own asset (VRCFury did not build this avatar), so its blendshape names and gestures were left as they are.");
                     return true;
                 }
-                var (renamed, gated, quieted) = Finish(fx, plan.Standard, plan.FacePath, plan.Face, plan.Root);
-                var tuned = Tune(fx, plan.FacePath, plan.Face, plan.Expressive, MouthSlowdown(plan.Smoothing));
-                string paced = Pace(fx, plan.Smoothing);
+                var (renamed, gated, quieted, tuned, paced) = Build(fx, plan.Standard, plan.FacePath, plan.Face, plan.Root, plan.Expressive, plan.Smoothing);
                 string settings = Configure(descriptor, StartingSmoothing(plan.Smoothing), plan.Removed);
                 Debug.Log($"[My Avatar] Face tracking ({plan.Standard.Label}): {renamed} template blendshape curves animate this face's own shapes, {gated} expression layers wait while tracking, {quieted} other gesture states leave the tracked mouth alone. {tuned} {paced} {settings}");
                 return true;
+            }
+        }
+
+        /// <summary>
+        /// Everything a build changes in <paramref name="fx"/> (VRCFury's copy, or the face tracking test's): <see cref="Finish"/>,
+        /// <see cref="Tune"/> and <see cref="Pace"/>, in one <see cref="ControllerEdits.Batch"/>. Each state, transition, blend
+        /// tree or played clip changed would otherwise rebuild the whole merged controller, the avatar's biggest; in the batch
+        /// it is rebuilt once. The layers are read before it, no layer is added or removed, and the parameters are written
+        /// once (inside the batch: a parameter list written there costs no rebuild of its own).
+        /// </summary>
+        internal static (int renamed, int gated, int quieted, Tuning tuning, string paced) Build(AnimatorController fx, FaceTrackingStandard standard, string facePath, Mesh face,
+            Transform root, bool expressive, FaceTrackingSmoothing smoothing)
+        {
+            var plan = new Plan { Standard = standard, FacePath = facePath, Face = face, Root = root };
+            var layers = new FxLayers(fx);
+            using (ControllerEdits.Batch(new[] { fx }))
+            {
+                var (renamed, gated, quieted) = Finish(layers, plan);
+                var tuning = Tune(layers, plan, expressive, MouthSlowdown(smoothing));
+                string paced = Pace(layers, smoothing);
+                layers.WriteParameters();
+                return (renamed, gated, quieted, tuning, paced);
             }
         }
 
@@ -129,7 +225,14 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         /// </summary>
         internal static (int renamed, int gated, int quieted) Finish(AnimatorController fx, FaceTrackingStandard standard, string facePath, Mesh face, Transform root = null)
         {
-            var plan = new Plan { Standard = standard, FacePath = facePath, Face = face, Root = root };
+            var layers = new FxLayers(fx);
+            var result = Finish(layers, new Plan { Standard = standard, FacePath = facePath, Face = face, Root = root });
+            layers.WriteParameters();
+            return result;
+        }
+
+        private static (int renamed, int gated, int quieted) Finish(FxLayers fx, Plan plan)
+        {
             int renamed = Rename(fx, plan);
             return (renamed, Gate(fx, plan, out int quieted), quieted);
         }
@@ -199,10 +302,10 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         // ---- Blendshape names ----
 
-        private static int Rename(AnimatorController fx, Plan plan)
+        private static int Rename(FxLayers fx, Plan plan)
         {
-            var mesh = new HashSet<string>(FaceTrackingDetection.Shapes(plan.Face), StringComparer.Ordinal);
-            var index = FaceTrackingNames.Index(mesh);
+            var mesh = plan.Shapes;
+            var index = plan.Index;
             var done = new Dictionary<Motion, Motion>();
             int renamed = 0;
             Motion Visit(Motion motion)
@@ -218,17 +321,21 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                         .Where(m => !mesh.Contains(m.binding.propertyName.Substring(11)) && m.shape != null).ToList();
                     if (moves.Count > 0)
                     {
-                        var owned = Own(clip, fx);
+                        var owned = Own(clip, fx.Controller);
                         var existing = new HashSet<string>(AnimationUtility.GetCurveBindings(owned).Select(b => b.path + "|" + b.propertyName));
+                        var targets = new List<EditorCurveBinding>();
+                        var curves = new List<AnimationCurve>();
                         foreach (var (binding, shape) in moves)
                         {
-                            var curve = AnimationUtility.GetEditorCurve(owned, binding);
-                            AnimationUtility.SetEditorCurve(owned, binding, null);
                             var target = EditorCurveBinding.FloatCurve(binding.path, typeof(SkinnedMeshRenderer), "blendShape." + shape);
-                            // The face's own animation of that shape wins.
-                            if (existing.Add(target.path + "|" + target.propertyName)) AnimationUtility.SetEditorCurve(owned, target, curve);
+                            // The face's own animation of that shape wins. A target is a shape of the face, a moved curve
+                            // never is: no curve is both.
+                            if (existing.Add(target.path + "|" + target.propertyName)) { targets.Add(target); curves.Add(AnimationUtility.GetEditorCurve(owned, binding)); }
                             renamed++;
                         }
+                        // All of a clip's curves at once: set one by one, each rebuilds the clip.
+                        AnimationUtility.SetEditorCurves(owned, moves.Select(m => m.binding).ToArray(), new AnimationCurve[moves.Count]);
+                        if (targets.Count > 0) AnimationUtility.SetEditorCurves(owned, targets.ToArray(), curves.ToArray());
                         result = owned;
                     }
                 }
@@ -241,13 +348,13 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                         var child = Visit(children[i].motion);
                         if (child != children[i].motion) { children[i].motion = child; changed = true; }
                     }
-                    if (changed) { var owned = Own(tree, fx); owned.children = children; result = owned; }
+                    if (changed) { var owned = Own(tree, fx.Controller); owned.children = children; result = owned; }
                 }
                 done[motion] = result;
                 return result;
             }
-            foreach (var layer in fx.layers)
-                foreach (var state in States(layer.stateMachine))
+            foreach (var layer in fx.Layers)
+                foreach (var state in layer.States)
                 {
                     var motion = Visit(state.motion);
                     if (motion != state.motion) state.motion = motion;
@@ -257,31 +364,30 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
         // ---- Hand gestures and blinks ----
 
-        private static int Gate(AnimatorController fx, Plan plan, out int quieted)
+        private static int Gate(FxLayers fx, Plan plan, out int quieted)
         {
-            Parameter(fx, ExpressionsDisabled, AnimatorControllerParameterType.Bool);
-            var eye = Parameter(fx, EyeTracking, AnimatorControllerParameterType.Float);
-            var blinks = new HashSet<string>(FaceTrackingDetection.Shapes(plan.Face).Where(IsBlink), StringComparer.Ordinal);
-            var index = FaceTrackingNames.Index(FaceTrackingDetection.Shapes(plan.Face));
-            foreach (string name in new[] { "EyeClosedLeft", "EyeClosedRight" }) { var shape = FaceTrackingNames.Resolve(name, index); if (shape != null) blinks.Add(shape); }
+            fx.Parameter(ExpressionsDisabled, AnimatorControllerParameterType.Bool);
+            var eye = fx.Parameter(EyeTracking, AnimatorControllerParameterType.Float);
+            var blinks = new HashSet<string>(plan.Shapes.Where(IsBlink), StringComparer.Ordinal);
+            foreach (string name in new[] { "EyeClosedLeft", "EyeClosedRight" }) { var shape = FaceTrackingNames.Resolve(name, plan.Index); if (shape != null) blinks.Add(shape); }
             // The shapes face tracking drives: gestures that move other shapes of the face mesh (ears, feathers) keep working.
-            var tracked = new HashSet<string>(fx.layers.Where(l => l.stateMachine != null && IsTracking(l.stateMachine))
-                .SelectMany(l => States(l.stateMachine)).SelectMany(s => Shapes(s.motion, plan.FacePath)), StringComparer.Ordinal);
+            var tracked = new HashSet<string>(fx.Machines.Where(l => l.Tracking)
+                .SelectMany(l => l.States).SelectMany(s => Shapes(s.motion, plan.FacePath)), StringComparer.Ordinal);
             int gated = 0;
             var resting = new HashSet<AnimatorStateMachine>();
             // The avatar's own Bool "EyeTrackingActive" is the template's Float once merged: its If and IfNot read it as over or
             // under a half, in every layer (eye props and eye bones too, not only the face's).
             if (eye.type == AnimatorControllerParameterType.Float)
-                foreach (var layer in fx.layers.Where(l => l.stateMachine != null))
-                    foreach (var transition in Transitions(layer.stateMachine).Where(t => t.conditions.Any(c => c.parameter == EyeTracking && (c.mode == AnimatorConditionMode.If || c.mode == AnimatorConditionMode.IfNot))))
+                foreach (var layer in fx.Machines)
+                    foreach (var transition in layer.Transitions.Where(t => t.conditions.Any(c => c.parameter == EyeTracking && (c.mode == AnimatorConditionMode.If || c.mode == AnimatorConditionMode.IfNot))))
                         transition.conditions = transition.conditions.Select(c => c.parameter != EyeTracking || c.mode != AnimatorConditionMode.If && c.mode != AnimatorConditionMode.IfNot ? c
                             : new AnimatorCondition { parameter = EyeTracking, mode = c.mode == AnimatorConditionMode.If ? AnimatorConditionMode.Greater : AnimatorConditionMode.Less, threshold = .5f }).ToArray();
-            foreach (var layer in fx.layers)
+            foreach (var layer in fx.Machines)
             {
-                var machine = layer.stateMachine;
-                if (machine == null || IsTracking(machine)) continue;
-                var states = States(machine).ToList();
-                var transitions = Transitions(machine).ToList();
+                var machine = layer.Machine;
+                if (layer.Tracking) continue;
+                var states = layer.States;
+                var transitions = layer.Transitions;
                 var shapes = new HashSet<string>(states.SelectMany(s => Shapes(s.motion, plan.FacePath)), StringComparer.Ordinal);
                 if (shapes.Count == 0) continue;
                 // Expressions: the face's shapes tracking drives, or its own expression shapes ("smile", "furrow"), not a body
@@ -295,7 +401,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     foreach (var transition in transitions)
                         if (transition.destinationState != rest && !transition.conditions.Any(c => c.parameter == ExpressionsDisabled))
                             Require(transition, AnimatorConditionMode.IfNot, 0, ExpressionsDisabled);
-                    var back = Keep(fx, new AnimatorStateTransition
+                    var back = Keep(fx.Controller, new AnimatorStateTransition
                     {
                         destinationState = rest, hasExitTime = false, hasFixedDuration = true, duration = .1f, canTransitionToSelf = false,
                         conditions = new[] { new AnimatorCondition { mode = AnimatorConditionMode.If, parameter = ExpressionsDisabled } },
@@ -338,9 +444,9 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 .Any(w => BodyParts.Contains(w) || w.Length > 3 && w.EndsWith("s", StringComparison.Ordinal) && BodyParts.Contains(w.Substring(0, w.Length - 1)));
 
         // The template's own layers read VRCFaceTracking's parameters.
-        private static bool IsTracking(AnimatorStateMachine machine) =>
-            Transitions(machine).SelectMany(t => t.conditions).Select(c => c.parameter)
-                .Concat(States(machine).SelectMany(s => TreeParameters(s.motion)))
+        private static bool IsTracking(FxLayers.Layer layer) =>
+            layer.Transitions.SelectMany(t => t.conditions).Select(c => c.parameter)
+                .Concat(layer.States.SelectMany(s => TreeParameters(s.motion)))
                 .Any(p => p != null && (p.Contains("v2/") || p.StartsWith("OSCm/", StringComparison.Ordinal) || p.StartsWith("FT/", StringComparison.Ordinal)));
 
         private static IEnumerable<string> TreeParameters(Motion motion)
@@ -374,15 +480,6 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     .Select(b => b.propertyName.Substring(11));
             if (motion is BlendTree tree) return tree.children.SelectMany(c => Shapes(c.motion, facePath));
             return Enumerable.Empty<string>();
-        }
-
-        private static AnimatorControllerParameter Parameter(AnimatorController fx, string name, AnimatorControllerParameterType type)
-        {
-            var existing = fx.parameters.FirstOrDefault(p => p.name == name);
-            if (existing != null) return existing;
-            var parameter = new AnimatorControllerParameter { name = name, type = type };
-            fx.parameters = fx.parameters.Append(parameter).ToArray();
-            return parameter;
         }
 
         private static IEnumerable<AnimatorState> States(AnimatorStateMachine machine)

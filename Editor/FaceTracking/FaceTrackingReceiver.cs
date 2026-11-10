@@ -293,8 +293,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             try
             {
                 listener.Client = new UdpClient(new IPEndPoint(IPAddress.Any, port)) { Client = { ReceiveTimeout = 500 } };
-                // Windows reports an unreachable phone as a reset on the next receive: ignore it.
-                try { listener.Client.Client.IOControl(SioUdpConnReset, new byte[] { 0 }, null); } catch (Exception) { }
+                // Windows reports an unreachable phone as a reset on the next receive: ignore it (other systems lack the setting).
+                try { listener.Client.Client.IOControl(SioUdpConnReset, new byte[] { 0 }, null); } catch (Exception ex) when (ex is SocketException || ex is PlatformNotSupportedException || ex is NotSupportedException) { }
             }
             catch (SocketException ex)
             {
@@ -372,7 +372,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             foreach (var listener in new[] { iFacialMocap, liveLink })
             {
                 if (listener == null) continue;
-                try { listener.Client?.Close(); } catch (Exception) { }
+                try { listener.Client?.Close(); } catch (Exception ex) when (ex is SocketException || ex is ObjectDisposedException) { }
                 listener.Thread?.Join(1000);
             }
             iFacialMocap = liveLink = null;

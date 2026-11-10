@@ -67,16 +67,18 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private sealed class Job
         {
             public string Key;
+            /// <summary>What each part of the estimate depends on (see <see cref="Cached"/>).</summary>
+            public PartKeys Parts;
             public MyAvatar Avatar;
             public OptimizationPasses Passes;
             public Result Result = new Result();
             public int Step;
             /// <summary>The upload's texture copies, for PC and for mobile.</summary>
             public TextureOptimization.Plan PcTextures, QuestTextures;
-            /// <summary>Textures whose download is measured first, one per editor frame (null: not listed yet).</summary>
+            /// <summary>Textures whose download is measured first, a few per editor frame (null: not listed yet).</summary>
             public Queue<(Texture Texture, TextureOptimization.TexturePlan Planned)> Unmeasured;
-            /// <summary>The texture being compressed on another thread for its measure.</summary>
-            public (string Key, Task<long> Deflate, string Name)? Measuring;
+            /// <summary>The measures it waits for, compressing on other threads (<see cref="DownloadSize.Measure"/>), by key.</summary>
+            public readonly HashSet<string> Waiting = new HashSet<string>(StringComparer.Ordinal);
             /// <summary>The hidden copy being put through the upload's changes, a few of them per editor frame.</summary>
             public Copying Copying;
             public readonly List<Action> Ready = new List<Action>();
@@ -104,7 +106,37 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public readonly Dictionary<int, List<(string Key, Result Result)>> Earlier = new Dictionary<int, List<(string, Result)>>();
             // Until when the editor frames skip the jobs: each one waited on live edits when last asked.
             public double PausedUntil;
+            // The parts of each avatar's last estimate, each kept while what it depends on stays.
+            public readonly Dictionary<int, Cached> Parts = new Dictionary<int, Cached>();
+            // Hidden copies made (diagnostics, tests).
+            public int Copies;
         }
+
+        /// <summary>
+        /// The parts of an avatar's last estimate, each with the key of what it depends on: a change redoes only the parts it
+        /// touches. The avatar as it is (<see cref="Now"/>) changes with the avatar only; the textures' plans with the
+        /// textures, what shows them and the texture settings; the hidden copy's measure (<see cref="Upload"/>) with the
+        /// avatar and the other settings. A snapshot is a fold of a measure and the plans (<see cref="Fold"/>): moving the
+        /// texture slider plans the textures again and copies nothing; moving the polygon budget copies the avatar again
+        /// and plans no texture.
+        /// </summary>
+        private sealed class Cached
+        {
+            public string NowKey, TexturesKey, StructureKey;
+            public Measured Now, Upload;
+            public TextureOptimization.Plan PcTextures, QuestTextures;
+            /// <summary>What the structure and material steps did to the copy (the textures' count aside).</summary>
+            public UploadOptimizer.Report Report;
+        }
+
+        private static Cached CacheOf(int id)
+        {
+            if (!state.Parts.TryGetValue(id, out var cached)) state.Parts[id] = cached = new Cached();
+            return cached;
+        }
+
+        /// <summary>The hidden copies the estimates made so far (tests: a texture setting changed makes none).</summary>
+        internal static int CopiesMade => state.Copies;
 
         private static State state = Restore();
 
@@ -191,7 +223,11 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             {
                 // Measuring the avatar as it was is no use any more.
                 job?.Abandon();
-                state.Running[id] = job = new Job { Key = key, Avatar = avatar, Passes = passes };
+                state.Running[id] = job = new Job
+                {
+                    Key = key, Avatar = avatar, Passes = passes,
+                    Parts = Parts(avatar, passes, avatar.uploadOptimization.PolygonQuality, avatar.uploadOptimization.SharpFrom),
+                };
                 EditorApplication.update -= Tick; EditorApplication.update += Tick;
             }
             if (ready != null && !job.Ready.Contains(ready)) job.Ready.Add(ready);
@@ -235,6 +271,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             state.Done.Clear();
             state.Last.Clear();
             state.Earlier.Clear();
+            state.Parts.Clear();
         }
 
         /// <summary>Makes estimates fail with this message (tests, and captures of the card's failure state).</summary>
@@ -249,7 +286,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         {
             for (int guard = 0; state.Running.Count > 0 && guard < 10000; guard++)
             {
-                foreach (var job in state.Running.Values) job.Measuring?.Deflate.Wait();
+                DownloadSize.FinishCompressing();
                 if (waitForLiveEdits && Next(true, out _) == null) return;
                 Step(waitForLiveEdits);
             }
@@ -262,6 +299,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const int KeptEarlier = 6;
 
         private const double KeepCopyWhilePaused = 5;
+        // The time a frame spends starting textures' measures.
+        private const double MeasureMilliseconds = 12d;
         // While every job waits on live edits, they are asked again this often, not every frame.
         private const double PausedLook = .25;
 
@@ -299,7 +338,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private static void Step(bool waitForLiveEdits)
         {
             var running = state.Running;
-            if (running.Count == 0) { EditorApplication.update -= Tick; return; }
+            // Measures every estimate started land, also those of estimates replaced since (the next ones reuse them).
+            DownloadSize.Collect();
+            if (running.Count == 0)
+            {
+                if (!DownloadSize.AnyCompressing) EditorApplication.update -= Tick;
+                return;
+            }
             var job = Next(waitForLiveEdits, out int id);
             if (job == null) { state.PausedUntil = EditorApplication.timeSinceStartup + PausedLook; return; }
             try
@@ -307,6 +352,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 if (!job.Avatar || EditorApplication.isPlayingOrWillChangePlaymode) { job.Abandon(); running.Remove(id); return; }
                 if (FailWith != null) throw new InvalidOperationException(FailWith);
                 var root = TextureOptimization.AvatarRoot(job.Avatar);
+                var cached = CacheOf(id);
                 // First the textures' downloads for the platform the project builds for, as they stand and as the upload's
                 // copies (made now, the upload reuses them).
                 bool mobile = TextureOptimization.Mobile;
@@ -314,50 +360,88 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 {
                     if ((job.Passes & TextureOptimization.TexturePasses) != 0)
                     {
-                        job.PcTextures = TextureOptimization.Build(job.Avatar, false);
-                        job.QuestTextures = TextureOptimization.Build(job.Avatar, true);
+                        // Planned again only when the textures, what shows them or their settings changed.
+                        if (cached.TexturesKey != job.Parts.Textures)
+                        {
+                            cached.TexturesKey = null;
+                            cached.PcTextures = TextureOptimization.Build(job.Avatar, false);
+                            cached.QuestTextures = TextureOptimization.Build(job.Avatar, true);
+                            cached.TexturesKey = job.Parts.Textures;
+                        }
+                        job.PcTextures = cached.PcTextures;
+                        job.QuestTextures = cached.QuestTextures;
                     }
                     job.Unmeasured = new Queue<(Texture, TextureOptimization.TexturePlan)>(DownloadSize.Unmeasured(root, mobile, mobile ? job.QuestTextures : job.PcTextures));
                     return;
                 }
-                // A texture's data is compressed on another thread: its measure is kept here once it is done.
-                if (job.Measuring != null)
-                {
-                    var (key, deflate, name) = job.Measuring.Value;
-                    if (!deflate.IsCompleted) return;
-                    job.Measuring = null;
-                    if (deflate.Status == TaskStatus.RanToCompletion) DownloadSize.Record(key, deflate.Result);
-                    else Debug.LogWarning("[My Avatar] Optimization: " + name + "'s download is estimated, not measured (" + deflate.Exception?.GetBaseException().Message + ").");
-                    return;
-                }
                 if (job.Unmeasured.Count > 0)
                 {
-                    var (texture, planned) = job.Unmeasured.Dequeue();
-                    if (texture)
-                        try
-                        {
-                            var started = DownloadSize.StartMeasure(texture, mobile, planned);
-                            if (started != null) job.Measuring = (started.Value.Key, started.Value.Deflate, texture.name);
-                        }
-                        catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: " + texture.name + "'s download is estimated, not measured (" + ex.Message + ")."); }
+                    // Several in flight, within the limits every estimate shares, started for a few milliseconds a frame:
+                    // reading a texture's data (and making a copy the upload needs, compressed on this thread: Unity's
+                    // compressor runs nowhere else) is what the frame spends.
+                    var watch = System.Diagnostics.Stopwatch.StartNew();
+                    do
+                    {
+                        var (texture, planned) = job.Unmeasured.Peek();
+                        var started = DownloadSize.Measuring.Done;
+                        string key = null;
+                        if (texture)
+                            try { started = DownloadSize.Measure(texture, mobile, planned, out key); }
+                            catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: " + texture.name + "'s download is estimated, not measured (" + ex.Message + ")."); }
+                        if (started == DownloadSize.Measuring.Full) break;
+                        job.Unmeasured.Dequeue();
+                        if (started == DownloadSize.Measuring.Compressing) job.Waiting.Add(key);
+                    } while (job.Unmeasured.Count > 0 && watch.Elapsed.TotalMilliseconds < MeasureMilliseconds);
                     return;
                 }
+                job.Waiting.RemoveWhere(k => !DownloadSize.IsCompressing(k));
+                if (job.Waiting.Count > 0) return;
                 // Written once for the job's textures.
                 DownloadSize.SaveMeasures();
-                if (job.Step == 0) job.Result.Now = Measure(root, Kept(root, McbPrunes), null, null, facts: job.Avatar);
+                if (job.Step == 0)
+                {
+                    // The avatar as it is: measured again only when it changed, whatever the settings.
+                    if (cached.NowKey != job.Parts.Now)
+                    {
+                        cached.NowKey = null;
+                        cached.Now = Read(root, Kept(root, McbPrunes), facts: job.Avatar);
+                        cached.NowKey = job.Parts.Now;
+                    }
+                    job.Result.Now = Fold(cached.Now, null, null);
+                }
                 // Off: the upload is the avatar as it is, no copy needed.
                 if (job.Step == 1 || job.Passes == OptimizationPasses.None)
                 {
                     if (job.Passes == OptimizationPasses.None) { job.Result.Upload = job.Result.Now; job.Result.Report = new UploadOptimizer.Report(); }
                     else
                     {
-                        // The copy on a frame of its own, then its changes a few per frame: the Inspector stays responsive.
-                        if (job.Copying == null) { job.Copying = new Copying(root, id, job.Passes, job.Avatar.uploadOptimization.PolygonQuality); return; }
+                        if (job.Copying == null && cached.StructureKey == job.Parts.Structure)
+                            // The same changes to the same avatar (only the textures' settings differ): the copy measured
+                            // last time, with the textures' new plans.
+                            job.Result.Report = cached.Report.Copy();
+                        else
+                        {
+                            // The copy on a frame of its own, then its changes a few per frame: the Inspector stays responsive.
+                            if (job.Copying == null)
+                            {
+                                job.Copying = new Copying(root, id, job.Passes, job.Avatar.uploadOptimization.PolygonQuality);
+                                state.Copies++;
+                                return;
+                            }
+                            var measured = job.Copying.Advance(job.Passes);
+                            if (measured == null) return;
+                            job.Result.Report = job.Copying.Report.Copy();
+                            job.Result.Partial = job.Copying.Partial;
+                            // Measured while meshes were still simplifying: measured again once they are, so never kept.
+                            cached.StructureKey = null;
+                            cached.Upload = measured;
+                            cached.Report = job.Copying.Report;
+                            if (!job.Copying.Partial) cached.StructureKey = job.Parts.Structure;
+                            job.Abandon();
+                        }
                         // The textures' copies the upload would get, for each platform: their sizes and formats count.
-                        var upload = job.Copying.Advance(job.Passes, job.PcTextures, job.QuestTextures);
-                        if (upload == null) return;
-                        job.Result.Upload = upload; job.Result.Report = job.Copying.Report; job.Result.Partial = job.Copying.Partial;
-                        job.Abandon();
+                        job.Result.Upload = Fold(cached.Upload, job.PcTextures, job.QuestTextures);
+                        job.Result.Report.ResizedTextures = (TextureOptimization.Mobile ? job.QuestTextures : job.PcTextures)?.changes.Count ?? 0;
                     }
                     Finished(id, job);
                     return;
@@ -388,11 +472,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 if (earlier.Count > KeptEarlier) earlier.RemoveRange(KeptEarlier, earlier.Count - KeptEarlier);
             }
             // Avatars gone since leave the estimates.
-            foreach (int gone in state.Done.Keys.Concat(state.Last.Keys).Concat(state.Earlier.Keys).Where(k => EditorUtility.InstanceIDToObject(k) == null).Distinct().ToList())
+            foreach (int gone in state.Done.Keys.Concat(state.Last.Keys).Concat(state.Earlier.Keys).Concat(state.Parts.Keys).Where(k => EditorUtility.InstanceIDToObject(k) == null).Distinct().ToList())
             {
                 state.Done.Remove(gone);
                 state.Last.Remove(gone);
                 state.Earlier.Remove(gone);
+                state.Parts.Remove(gone);
             }
             foreach (var callback in job.Ready)
                 try { callback(); } catch (Exception ex) { Debug.LogException(ex); }
@@ -451,8 +536,11 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 }
             }
 
-            /// <summary>Runs the next changes; the copy's measure once they all ran (materials and measure on frames of their own), else null.</summary>
-            public Snapshot Advance(OptimizationPasses passes, TextureOptimization.Plan pcTextures, TextureOptimization.Plan questTextures)
+            /// <summary>
+            /// Runs the next changes; the copy's measure once they all ran (materials and measure on frames of their own), else
+            /// null. The copies the upload's textures get are counted from the plans when the measure is folded, not made here.
+            /// </summary>
+            public Measured Advance(OptimizationPasses passes)
             {
                 if (!structured)
                 {
@@ -466,11 +554,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                         }
                     return null;
                 }
-                // The copies the upload's textures get are counted from the plans, not made here.
                 if (!materials)
                 {
                     UploadOptimizer.RunMaterials(copy, passes, Report);
-                    Report.ResizedTextures = (TextureOptimization.Mobile ? questTextures : pcTextures)?.changes.Count ?? 0;
                     materials = true;
                     unsized = new Queue<(Mesh, Mesh)>(copy.GetComponentsInChildren<Renderer>(true)
                         .Select(r => (Mesh: Toolkit.Editor.VRChat.Optimization.MeshOptimization.MeshOf(r), Origin: origins.TryGetValue(r, out var origin) ? origin : null))
@@ -489,15 +575,15 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     }
                     return null;
                 }
-                var snapshot = Measure(copy, kept, pcTextures, questTextures, sizes, source);
+                var measured = Read(copy, kept, sizes, source);
                 if (prunes)
                     foreach (var renderer in copy.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null))
                     {
                         int unused = renderer.sharedMesh.blendShapeCount - kept(renderer).Count;
                         Report.BlendShapes += unused;
-                        snapshot.BlendShapes -= unused;
+                        measured.BlendShapes -= unused;
                     }
-                return snapshot;
+                return measured;
             }
 
             private static bool SameShapes(Mesh mesh, Mesh origin)
@@ -593,16 +679,64 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
         }
 
+        /// <summary>
+        /// What a measure reads of an avatar (the scene's, or a hidden copy put through the upload's changes) whatever its
+        /// textures become: the SDK's counts for each platform, what its download holds, what costs most, its shaders. It
+        /// keeps no object of the avatar (the copy is gone once read), only the textures; <see cref="Fold"/> makes a snapshot
+        /// of it with the textures' plans.
+        /// </summary>
+        private sealed class Measured
+        {
+            /// <summary>The SDK's stats; their texture memory is the build's, set at each fold.</summary>
+            public AvatarPerformanceStats Pc, Mobile;
+            public int BlendShapes;
+            /// <summary>Every texture the renderers' materials point at, as VRChat counts texture memory.</summary>
+            public HashSet<Texture> Textures;
+            public DownloadSize.Contents Contents;
+            public RankContributors Contributors;
+            public int DesktopShaderMaterials;
+            public List<string> DesktopShaders;
+            public RankFacts Facts;
+        }
+
+        // A copy is read with the avatar it was copied from (sceneRoot): what the copy no longer says (which item an object
+        // belongs to) is read there. The avatar as it is also keeps its facts (facts), from the bindings the download reads anyway.
+        private static Measured Read(GameObject root, Func<SkinnedMeshRenderer, ICollection<string>> kept, Dictionary<Mesh, Dictionary<string, long>> sizes = null,
+            GameObject sceneRoot = null, MyAvatar facts = null)
+        {
+            var measured = new Measured
+            {
+                Pc = SdkStats(root, false), Mobile = SdkStats(root, true),
+                BlendShapes = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).Sum(r => r.sharedMesh.blendShapeCount),
+                Textures = new HashSet<Texture>(),
+            };
+            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+                foreach (var material in renderer.sharedMaterials)
+                    if (material != null)
+                        foreach (int id in material.GetTexturePropertyNameIDs())
+                        {
+                            var texture = material.GetTexture(id);
+                            if (texture != null) measured.Textures.Add(texture);
+                        }
+            var bindings = facts ? new List<EditorCurveBinding>() : null;
+            measured.Contents = DownloadSize.Read(root, kept, sizes, sceneRoot, bindings);
+            if (facts) measured.Facts = RankEstimates.Read(root, facts, bindings);
+            // What a rank plan works from: what costs most in each category (read once, textures sized for each platform at the fold).
+            measured.Contributors = RankContributors.Of(root, sceneRoot);
+            var desktop = root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials)
+                .Where(m => m != null && m.shader != null && !QuestParity.QuestShows(m.shader)).Distinct().ToList();
+            measured.DesktopShaderMaterials = desktop.Count;
+            measured.DesktopShaders = desktop.Select(m => QuestParity.DisplayName(m.shader)).Distinct().ToList();
+            return measured;
+        }
+
         // With texture plans, each texture counts as the copy the upload gets. The SDK counts texture memory on what the
         // editor holds (often uncompressed): the rank takes the build's figure instead, the upload's copies included.
-        // A copy is measured with the avatar it was copied from (sceneRoot): what the copy no longer says (which item an
-        // object belongs to) is read there.
-        private static Snapshot Measure(GameObject root, Func<SkinnedMeshRenderer, ICollection<string>> kept, TextureOptimization.Plan pcTextures,
-            TextureOptimization.Plan questTextures, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null, MyAvatar facts = null)
+        private static Snapshot Fold(Measured measured, TextureOptimization.Plan pcTextures, TextureOptimization.Plan questTextures)
         {
-            float pcMegabytes = TextureMegabytes(root, false, pcTextures), mobileMegabytes = TextureMegabytes(root, true, questTextures);
-            var pc = Stats(root, false, pcMegabytes);
-            var mobile = Stats(root, true, mobileMegabytes);
+            float pcMegabytes = TextureMegabytes(measured.Textures, false, pcTextures), mobileMegabytes = TextureMegabytes(measured.Textures, true, questTextures);
+            var pc = Rated(measured.Pc, false, pcMegabytes);
+            var mobile = Rated(measured.Mobile, true, mobileMegabytes);
             var snapshot = new Snapshot
             {
                 Pc = pc.GetPerformanceRatingForCategory(AvatarPerformanceCategory.Overall),
@@ -612,50 +746,33 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 TextureMegabytes = pcMegabytes, QuestTextureMegabytes = mobileMegabytes,
                 PhysBones = pc.physBone?.componentCount ?? 0, PhysBoneTransforms = pc.physBone?.transformCount ?? 0,
                 Colliders = pc.physBone?.colliderCount ?? 0,
-                BlendShapes = root.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).Sum(r => r.sharedMesh.blendShapeCount),
+                BlendShapes = measured.BlendShapes,
+                Facts = measured.Facts,
             };
-            // The avatar as it is also keeps its facts, from the bindings the download reads anyway.
-            var bindings = facts ? new List<EditorCurveBinding>() : null;
-            var pcParts = DownloadSize.Of(root, false, pcTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)pcTextures.For, kept, sizes, sceneRoot, bindings);
-            if (facts) snapshot.Facts = RankEstimates.Read(root, facts, bindings);
-            var questParts = DownloadSize.Of(root, true, questTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)questTextures.For, kept, sizes, sceneRoot);
+            var pcParts = DownloadSize.Fold(measured.Contents, false, pcTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)pcTextures.For);
+            var questParts = DownloadSize.Fold(measured.Contents, true, questTextures == null ? null : (Func<Texture, TextureOptimization.TexturePlan>)questTextures.For);
             snapshot.PcParts = pcParts; snapshot.QuestParts = questParts;
-            // What a rank plan works from: each category of each platform, and what costs most in each (read once, textures
-            // sized for each platform as above).
-            var contributors = RankContributors.Of(root, sceneRoot);
+            // Each category of each platform, and what costs most in each.
             snapshot.PcRank = RankStats.Of(pc, false);
-            contributors.Fill(snapshot.PcRank, t => (pcTextures?.For(t)?.after ?? TextureOptimization.BuildBytes(t, false)) / 1048576f);
+            measured.Contributors.Fill(snapshot.PcRank, t => (pcTextures?.For(t)?.after ?? TextureOptimization.BuildBytes(t, false)) / 1048576f);
             snapshot.MobileRank = RankStats.Of(mobile, true);
-            contributors.Fill(snapshot.MobileRank, t => (questTextures?.For(t)?.after ?? TextureOptimization.BuildBytes(t, true)) / 1048576f);
-            var desktop = root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials)
-                .Where(m => m != null && m.shader != null && !QuestParity.QuestShows(m.shader)).Distinct().ToList();
-            snapshot.DesktopShaderMaterials = desktop.Count;
-            snapshot.DesktopShaders = desktop.Select(m => QuestParity.DisplayName(m.shader)).Distinct().ToList();
+            measured.Contributors.Fill(snapshot.MobileRank, t => (questTextures?.For(t)?.after ?? TextureOptimization.BuildBytes(t, true)) / 1048576f);
+            snapshot.DesktopShaderMaterials = measured.DesktopShaderMaterials;
+            snapshot.DesktopShaders = measured.DesktopShaders.ToList();
             snapshot.Download = pcParts.Total; snapshot.QuestDownload = questParts.Total;
             snapshot.Bundle = pcParts.Bundle; snapshot.QuestBundle = questParts.Bundle;
             snapshot.Unpacked = pcParts.Raw; snapshot.QuestUnpacked = questParts.Raw;
-            snapshot.Load = DownloadSize.LoadSeconds(pcParts, root, false);
-            snapshot.QuestLoad = DownloadSize.LoadSeconds(questParts, root, true);
+            snapshot.Load = DownloadSize.LoadSeconds(pcParts, measured.Contents, false);
+            snapshot.QuestLoad = DownloadSize.LoadSeconds(questParts, measured.Contents, true);
             Limits(pc, snapshot.Pc, snapshot.PcLimits);
             Limits(mobile, snapshot.Mobile, snapshot.MobileLimits);
             return snapshot;
         }
 
-        // Every texture the renderers' materials point at, as VRChat counts them, in the formats the build will have (or as
-        // the upload's copies): the SDK's own figure in the editor counts the uncompressed copies the editor keeps until a build.
-        private static float TextureMegabytes(GameObject root, bool mobile, TextureOptimization.Plan plan)
-        {
-            var textures = new HashSet<Texture>();
-            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
-                foreach (var material in renderer.sharedMaterials)
-                    if (material != null)
-                        foreach (int id in material.GetTexturePropertyNameIDs())
-                        {
-                            var texture = material.GetTexture(id);
-                            if (texture != null) textures.Add(texture);
-                        }
-            return textures.Sum(t => plan?.For(t)?.after ?? TextureOptimization.BuildBytes(t, mobile)) / 1048576f;
-        }
+        // The textures' memory in the formats the build will have (or as the upload's copies): the SDK's own figure in the
+        // editor counts the uncompressed copies the editor keeps until a build.
+        private static float TextureMegabytes(HashSet<Texture> textures, bool mobile, TextureOptimization.Plan plan) =>
+            textures.Where(t => t).Sum(t => plan?.For(t)?.after ?? TextureOptimization.BuildBytes(t, mobile)) / 1048576f;
 
         private static void Limits(AvatarPerformanceStats stats, PerformanceRating overall, List<string> limits)
         {
@@ -692,11 +809,17 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             return value?.ToString("N0", CultureInfo.InvariantCulture);
         }
 
-        // The SDK's stats, its texture memory replaced by the build's and every rating recomputed with it.
-        private static AvatarPerformanceStats Stats(GameObject root, bool mobile, float textureMegabytes)
+        // The SDK's stats of an avatar for a platform.
+        private static AvatarPerformanceStats SdkStats(GameObject root, bool mobile)
         {
             var stats = new AvatarPerformanceStats(mobile);
             AvatarPerformance.CalculatePerformanceStats(root.name, root, stats, mobile);
+            return stats;
+        }
+
+        // The SDK's stats, their texture memory replaced by the build's and every rating recomputed with it.
+        private static AvatarPerformanceStats Rated(AvatarPerformanceStats stats, bool mobile, float textureMegabytes)
+        {
             stats.textureMegabytes = textureMegabytes;
             stats.CalculateAllPerformanceRatings(mobile);
             return stats;
@@ -710,12 +833,27 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const string EditsKey = "Orbiters.MyAvatar.OptimizationEstimate.Edits.";
         private static readonly Dictionary<int, int> edits = new Dictionary<int, int>();
 
-        private static int Edits(GameObject root)
+        // What the estimates of the avatar are keyed by: its components' settings edited, and the animations and meshes edited
+        // anywhere (an asset the avatar may play or show: which avatars use it is not looked up).
+        private static int Edits(GameObject root) => RootEdits(root) + AssetEdits;
+
+        private static int RootEdits(GameObject root)
         {
             int id = root.GetInstanceID();
             if (!edits.TryGetValue(id, out int count)) edits[id] = count = SessionState.GetInt(EditsKey + id, 0);
             return count;
         }
+
+        // Clips, controllers and their states and trees, masks and meshes of the project edited in the editor (the Animation
+        // window, an Inspector, a tool with Undo), saved or not yet: only their import was counted before.
+        private const string AssetEditsKey = "Orbiters.MyAvatar.OptimizationEstimate.AssetEdits";
+        private static int? assetEdits;
+        private static int AssetEdits => assetEdits ??= SessionState.GetInt(AssetEditsKey, 0);
+
+        // A project asset: what builds and estimates make in memory changes no avatar's estimate.
+        private static bool AnimationOrMesh(Object asset) =>
+            asset != null && EditorUtility.IsPersistent(asset) && (asset is Motion || asset is RuntimeAnimatorController || asset is UnityEditor.Animations.AnimatorState || asset is UnityEditor.Animations.AnimatorStateMachine ||
+            asset is UnityEditor.Animations.AnimatorTransitionBase || asset is AvatarMask || asset is Mesh);
 
         [InitializeOnLoadMethod]
         private static void WatchEdits() => ObjectChangeEvents.changesPublished += Published;
@@ -725,17 +863,29 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             HashSet<GameObject> edited = null;
             // Objects whose parents were walked already in this stream.
             var seen = new HashSet<Transform>();
+            bool assets = false;
             for (int i = 0; i < stream.length; i++)
             {
+                if (stream.GetEventType(i) == ObjectChangeKind.ChangeAssetObjectProperties)
+                {
+                    stream.GetChangeAssetObjectPropertiesEvent(i, out var asset);
+                    assets |= AnimationOrMesh(EditorUtility.InstanceIDToObject(asset.instanceId));
+                    continue;
+                }
                 if (stream.GetEventType(i) != ObjectChangeKind.ChangeGameObjectOrComponentProperties) continue;
                 stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var change);
                 if (!(EditorUtility.InstanceIDToObject(change.instanceId) is Component component) || !SettingsMatter(component)) continue;
                 foreach (var root in RootsOf(component.transform, seen)) (edited ??= new HashSet<GameObject>()).Add(root);
             }
+            if (assets)
+            {
+                assetEdits = AssetEdits + 1;
+                SessionState.SetInt(AssetEditsKey, assetEdits.Value);
+            }
             if (edited == null) return;
             foreach (var root in edited)
             {
-                int id = root.GetInstanceID(), count = Edits(root) + 1;
+                int id = root.GetInstanceID(), count = RootEdits(root) + 1;
                 edits[id] = count;
                 SessionState.SetInt(EditsKey + id, count);
             }
@@ -805,6 +955,40 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             string result = key.Append('|').Append(Edits(root)).ToString();
             if (heldKeys != null) heldKeys[held] = result;
             return result;
+        }
+
+        /// <summary>The keys of what each part of an estimate depends on (<see cref="Cached"/>).</summary>
+        private sealed class PartKeys
+        {
+            /// <summary>The avatar as it is: its objects, components (their settings too), meshes, materials and imported assets.</summary>
+            public string Now;
+            /// <summary>The textures' plans: the avatar's renderers and what shows them, the texture settings.</summary>
+            public string Textures;
+            /// <summary>The hidden copy: the avatar as it is and the settings of the changes to objects, meshes and materials.</summary>
+            public string Structure;
+        }
+
+        // Read when an estimate starts, from the same parts as Key: the platform, every component and whether it is on, the
+        // renderers' meshes, scales and materials (ChangeKey) and the settings edited since.
+        private static PartKeys Parts(MyAvatar avatar, OptimizationPasses passes, float polygonQuality, float sharpFrom)
+        {
+            var root = TextureOptimization.AvatarRoot(avatar);
+            var shown = new System.Text.StringBuilder().Append(TextureOptimization.ChangeKey(avatar)).Append('|').Append(TextureOptimization.PlatformName(TextureOptimization.Mobile));
+            foreach (var component in root.GetComponentsInChildren<Component>(true))
+            {
+                if (component == null || TextureOptimization.EditorHelper(component)) continue;
+                shown.Append(',').Append(component.GetInstanceID());
+                if (component is Transform t) shown.Append(t.gameObject.activeSelf ? '+' : '-');
+                else if (component is Behaviour b) shown.Append(b.enabled ? '+' : '-');
+                else if (component is Renderer r) shown.Append(r.enabled ? '+' : '-');
+            }
+            string objects = shown.ToString(), now = objects + "|" + Edits(root);
+            // Texture plans read the renderers, their materials and whether they show, not other components' settings.
+            var texturePasses = passes & (TextureOptimization.TexturePasses | OptimizationPasses.DuplicateTextures);
+            string textures = (int)texturePasses + ((passes & OptimizationPasses.ResizeTextures) != 0 ? "|" + sharpFrom.ToString("R", CultureInfo.InvariantCulture) : "") + "|" + objects;
+            string structure = (int)(passes & ~TextureOptimization.TexturePasses) +
+                               ((passes & OptimizationPasses.FewerPolygons) != 0 ? "|" + polygonQuality.ToString("R", CultureInfo.InvariantCulture) : "") + "|" + now;
+            return new PartKeys { Now = now, Textures = textures, Structure = structure };
         }
     }
 }

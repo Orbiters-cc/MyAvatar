@@ -61,15 +61,20 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         /// Tunes the template's layers in <paramref name="fx"/> (VRCFury's copy), after its shapes were renamed: the mouth
         /// <paramref name="slowdown"/> times slower than the eyes, and the Ultirex's mouth when <paramref name="expressive"/>.
         /// </summary>
-        internal static Tuning Tune(AnimatorController fx, string facePath, Mesh face, bool expressive = true, float slowdown = SlowSmoothing)
+        internal static Tuning Tune(AnimatorController fx, string facePath, Mesh face, bool expressive = true, float slowdown = SlowSmoothing) =>
+            Tune(new FxLayers(fx), new Plan { FacePath = facePath, Face = face }, expressive, slowdown);
+
+        private static Tuning Tune(FxLayers layers, Plan plan, bool expressive, float slowdown)
         {
+            var fx = layers.Controller;
+            string facePath = plan.FacePath;
             var result = new Tuning { Expressive = expressive, Slowdown = slowdown };
-            var mesh = new HashSet<string>(FaceTrackingDetection.Shapes(face), StringComparer.Ordinal);
-            var roots = TrackingTrees(fx);
+            var mesh = plan.Shapes;
+            var roots = TrackingTrees(layers);
             var trees = roots.SelectMany(Trees).Distinct().Where(t => Owned(t, fx)).ToList();
             if (expressive)
             {
-                foreach (var side in new[] { "Left", "Right" }) result.Grins += Grin(fx, trees, facePath, mesh, side);
+                foreach (var side in new[] { "Left", "Right" }) result.Grins += Grin(fx, trees, facePath, mesh, plan.Index, side);
                 trees = roots.SelectMany(Trees).Distinct().Where(t => Owned(t, fx)).ToList();
                 result.Gains = Gain(trees);
             }
@@ -79,8 +84,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             return result;
         }
 
-        private static List<BlendTree> TrackingTrees(AnimatorController fx) =>
-            fx.layers.Where(l => l.stateMachine != null && IsTracking(l.stateMachine)).SelectMany(l => States(l.stateMachine))
+        private static List<BlendTree> TrackingTrees(FxLayers fx) =>
+            fx.Machines.Where(l => l.Tracking).SelectMany(l => l.States)
                 .Select(s => s.motion).OfType<BlendTree>().Distinct().ToList();
 
         /// <summary>
@@ -90,7 +95,7 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         internal static int SetMouthSlowdown(AnimatorController fx, float slowdown)
         {
             int changed = 0;
-            foreach (var tree in TrackingTrees(fx).SelectMany(Trees).Distinct().Where(t => t.name.EndsWith(SlowerMouth, StringComparison.Ordinal) && t.children.Length == 2))
+            foreach (var tree in TrackingTrees(new FxLayers(fx)).SelectMany(Trees).Distinct().Where(t => t.name.EndsWith(SlowerMouth, StringComparison.Ordinal) && t.children.Length == 2))
             {
                 var children = tree.children;
                 children[1].threshold = slowdown;
@@ -136,11 +141,10 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         // and raising the lip as well turns it into the face's grin (with 61.4 of the smile, as the grin also smiles).
         // A face without its own grin gets one from its cheek and eye squints, which is what a sculpted grin adds: the full
         // smile with the lip raised lifts the cheeks and the lower lids.
-        private static int Grin(AnimatorController fx, List<BlendTree> trees, string facePath, HashSet<string> mesh, string side)
+        private static int Grin(AnimatorController fx, List<BlendTree> trees, string facePath, HashSet<string> mesh, Dictionary<string, string> index, string side)
         {
             string grin = "Grin_" + side[0];
             bool sculpted = mesh.Contains(grin);
-            var index = FaceTrackingNames.Index(mesh);
             string cheek = sculpted ? null : FaceTrackingNames.Resolve("CheekSquint" + side, index);
             string squint = sculpted ? null : FaceTrackingNames.Resolve("EyeSquint" + side, index);
             if (!sculpted && cheek == null && squint == null) return 0;
@@ -228,20 +232,27 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         /// </summary>
         internal static string Pace(AnimatorController fx, FaceTrackingSmoothing smoothing)
         {
+            var layers = new FxLayers(fx);
+            string paced = Pace(layers, smoothing);
+            layers.WriteParameters();
+            return paced;
+        }
+
+        private static string Pace(FxLayers layers, FaceTrackingSmoothing smoothing)
+        {
+            var fx = layers.Controller;
             float scaler = smoothing == FaceTrackingSmoothing.Responsive ? 15f : smoothing == FaceTrackingSmoothing.Smooth ? 7f : 9f;
             float mod = smoothing == FaceTrackingSmoothing.Responsive ? .05f : 0f;
-            var parameters = fx.parameters;
             int remote = 0;
-            foreach (var parameter in parameters)
+            foreach (var parameter in layers.Parameters)
             {
                 if (parameter.type != AnimatorControllerParameterType.Float) continue;
                 if (parameter.name == RemoteFloatScaler || parameter.name == RemoteBinaryScaler) { parameter.defaultFloat = scaler; remote++; }
                 else if (parameter.name == RemoteFloatMod || parameter.name == RemoteBinaryMod) { parameter.defaultFloat = mod; remote++; }
             }
-            if (remote > 0) fx.parameters = parameters;
+            if (remote > 0) layers.ParametersChanged();
             int cutoffs = 0;
-            foreach (var tree in fx.layers.Where(l => l.stateMachine != null && IsTracking(l.stateMachine)).SelectMany(l => States(l.stateMachine))
-                         .Select(s => s.motion).OfType<BlendTree>().SelectMany(Trees).Distinct()
+            foreach (var tree in TrackingTrees(layers).SelectMany(Trees).Distinct()
                          .Where(t => t.blendType == BlendTreeType.Simple1D && t.blendParameter == "OSCm/FrameTime" && t.children.Length == 2 && Owned(t, fx)))
             {
                 var children = tree.children;
@@ -323,18 +334,22 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             int eased = 0;
             foreach (var clip in clips)
             {
-                bool changed = false;
+                var bindings = new List<EditorCurveBinding>();
+                var curves = new List<AnimationCurve>();
                 foreach (var binding in AnimationUtility.GetCurveBindings(clip))
                 {
                     if (binding.path != facePath || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
                     string shape = binding.propertyName.Substring(11);
                     float factor = IrisShrink(shape) ? 0f : WideEye(shape) ? WideEyes : 1f;
                     if (factor == 1f) continue;
-                    AnimationUtility.SetEditorCurve(clip, binding, Scaled(AnimationUtility.GetEditorCurve(clip, binding), factor));
-                    changed = true;
+                    bindings.Add(binding);
+                    curves.Add(Scaled(AnimationUtility.GetEditorCurve(clip, binding), factor));
                     eased++;
                 }
-                if (changed) EditorUtility.SetDirty(clip);
+                if (bindings.Count == 0) continue;
+                // At once: set one by one, each curve rebuilds the clip.
+                AnimationUtility.SetEditorCurves(clip, bindings.ToArray(), curves.ToArray());
+                EditorUtility.SetDirty(clip);
             }
             return eased;
         }
@@ -349,17 +364,25 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                 var bindings = AnimationUtility.GetCurveBindings(clip);
                 var animated = new HashSet<string>(bindings.Where(b => b.path == facePath && b.type == typeof(SkinnedMeshRenderer)).Select(b => b.propertyName));
                 bool changed = false;
+                // Collected and set at once (each curve set alone rebuilds the clip). A shape moved along is never one the
+                // clip animates, nor one with a rule: each curve read is the clip's own.
+                var set = new List<EditorCurveBinding>();
+                var curves = new List<AnimationCurve>();
                 foreach (var binding in bindings)
                 {
                     if (binding.path != facePath || binding.type != typeof(SkinnedMeshRenderer) || !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
                     if (!Rules.TryGetValue(binding.propertyName.Substring(11), out var rule)) continue;
                     var curve = AnimationUtility.GetEditorCurve(clip, binding);
                     if (rule.with != null && mesh.Contains(rule.with) && animated.Add("blendShape." + rule.with))
-                        AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve(facePath, typeof(SkinnedMeshRenderer), "blendShape." + rule.with), Scaled(curve, rule.factor));
-                    if (rule.scale != 1f) AnimationUtility.SetEditorCurve(clip, binding, Scaled(curve, rule.scale));
+                    {
+                        set.Add(EditorCurveBinding.FloatCurve(facePath, typeof(SkinnedMeshRenderer), "blendShape." + rule.with));
+                        curves.Add(Scaled(curve, rule.factor));
+                    }
+                    if (rule.scale != 1f) { set.Add(binding); curves.Add(Scaled(curve, rule.scale)); }
                     changed = true;
                     weighed++;
                 }
+                if (set.Count > 0) AnimationUtility.SetEditorCurves(clip, set.ToArray(), curves.ToArray());
                 if (changed) EditorUtility.SetDirty(clip);
             }
             return weighed;
