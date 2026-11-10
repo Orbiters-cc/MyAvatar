@@ -442,6 +442,35 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
+        // Meshes an avatar shows changed in place by a tool that says so (Toolkit's AvatarMeshEdits: Mixer's working meshes
+        // and commits, MCB applying a Blender export), per avatar root: the same mesh object keeps its counts, so its layout
+        // in the key can't tell. Kept across script reloads like the import counter: a key from before an edit must never
+        // match again after one. Reading a mesh (an estimate's measure) raises nothing.
+        private const string MeshEditsKey = "Orbiters.MyAvatar.TextureOptimization.MeshEdits.";
+        private static readonly Dictionary<int, int> meshEdits = new Dictionary<int, int>();
+
+        private static int MeshEdits(Transform root)
+        {
+            int id = root.GetInstanceID();
+            if (!meshEdits.TryGetValue(id, out int count)) meshEdits[id] = count = SessionState.GetInt(MeshEditsKey + id, 0);
+            return count;
+        }
+
+        [InitializeOnLoadMethod]
+        private static void FollowMeshEdits()
+        {
+            Toolkit.Editor.Meshes.AvatarMeshEdits.Applied += MeshEdited;
+            Toolkit.Editor.Meshes.AvatarMeshEdits.Previewed += MeshEdited;
+        }
+
+        internal static void MeshEdited(Transform root)
+        {
+            if (root == null) return;
+            int count = MeshEdits(root) + 1;
+            meshEdits[root.GetInstanceID()] = count;
+            SessionState.SetInt(MeshEditsKey + root.GetInstanceID(), count);
+        }
+
         /// <summary>The distance textures stay sharp from at upload, in meters: the level's, or the slider's under Custom.</summary>
         internal static float SharpFrom(MyAvatar avatar) => TextureDensity.Clamp(avatar.uploadOptimization.SharpFrom);
 
@@ -452,6 +481,10 @@ namespace Orbiters.MyAvatar.Editor
         internal static string ChangeKey(MyAvatar avatar)
         {
             var key = new System.Text.StringBuilder().Append(Imports);
+            // Edits tools announced for the avatar (its root, or an object above it a tool calls its root).
+            int edits = 0;
+            for (var t = AvatarRoot(avatar).transform; t != null; t = t.parent) edits += MeshEdits(t);
+            key.Append('^').Append(edits);
             void Scale(Transform transform)
             {
                 if (!transform) return;
@@ -466,9 +499,10 @@ namespace Orbiters.MyAvatar.Editor
                 key.Append('|').Append(renderer.GetInstanceID());
                 var mesh = MeshOptimization.MeshOf(renderer);
                 // The mesh, its layout and, for an asset, its edits (an edit marks it dirty: its vertices and UVs decide the
-                // texture density). A mesh in memory is keyed by its layout only: Unity raises its dirty count when merely read
-                // or copied (an estimate's hidden copy made its avatar's key change while measuring), and a tool replacing
-                // its content gives the renderer a new mesh or changes its layout.
+                // texture density). A mesh in memory is keyed by its layout and the edits announced above: Unity raises its
+                // dirty count when merely read or copied (an estimate's hidden copy made its avatar's key change while
+                // measuring). A tool rewriting an in-memory mesh in place without announcing it and without changing its
+                // counts is seen at the next change the key holds, as before round 1.
                 if (mesh)
                 {
                     key.Append('#').Append(mesh.GetInstanceID()).Append(':').Append(mesh.vertexCount).Append(':').Append(mesh.subMeshCount).Append(':').Append(mesh.blendShapeCount);

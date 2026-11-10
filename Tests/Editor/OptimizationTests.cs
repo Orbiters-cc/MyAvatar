@@ -1172,6 +1172,32 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(State(), Is.EqualTo(before), "the avatar's meshes, materials, textures and renderers as they were, none marked changed");
         }
 
+        // A tool that edits the avatar's meshes in place (Mixer's working mesh: the same object, the same counts) says so, and the
+        // estimate is measured again; another avatar's edits leave it as it is.
+        [Test] public void AnnouncedMeshEditsMeasureTheEstimateAgain()
+        {
+            Skinned("Body");
+            settings.uploadOptimization.level = OptimizationLevel.Small;
+            var otherRoot = new GameObject("Other avatar");
+            SceneManager.MoveGameObjectToScene(otherRoot, scene);
+            otherRoot.AddComponent<VRCAvatarDescriptor>();
+            OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+            FinishKeepingTheKey();
+            var measured = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+            Assert.That(measured, Is.Not.Null);
+            string key = OptimizationEstimate.KeyOf(settings);
+
+            Toolkit.Editor.Meshes.AvatarMeshEdits.NotifyApplied(otherRoot.transform);
+            Assert.That(OptimizationEstimate.KeyOf(settings), Is.EqualTo(key), "another avatar's meshes");
+            Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.SameAs(measured));
+
+            Toolkit.Editor.Meshes.AvatarMeshEdits.NotifyPreviewed(root.transform);
+            Assert.That(OptimizationEstimate.KeyOf(settings), Is.Not.EqualTo(key), "its own meshes, edited in place");
+            Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null, "measured again");
+            FinishKeepingTheKey();
+            Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null)?.Error, Is.Null);
+        }
+
         // Finishes the estimates, and fails saying what changed when measuring changed what the avatar's estimate is keyed by
         // (Get would then never find the result: it measures the avatar again).
         private void FinishKeepingTheKey()
