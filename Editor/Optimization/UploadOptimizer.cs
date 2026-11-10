@@ -146,7 +146,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         /// <summary>
         /// The material step: in the build's SaveBuildData phase, after Poiyomi locks its materials (100), before Toolkit writes
-        /// the build's in-memory assets (its BuildCopyAssetsHook, which the phase runs after this by type name).
+        /// the build's in-memory assets (its BuildCopyAssetsHook). That type is internal to Toolkit, so this step cannot name
+        /// it in Before: inside the phase it runs first by type name (pinned by TheOptimizerStepsRunWhereItsCallbacksRan),
+        /// until Toolkit's Materials phase (before SaveBuildData) lands and this step moves there.
         /// </summary>
         internal sealed class Materials : BuildStep
         {

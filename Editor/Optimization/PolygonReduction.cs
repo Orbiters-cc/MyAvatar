@@ -39,12 +39,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const int Capacity = 16;
 
         /// <summary>
-        /// Which simplifier Fewer polygons runs: false (the default) runs <see cref="SimplificationRun"/> once per mesh and
-        /// picks the most collapses whose surface stays within the budget among its prefixes; true runs the Meshia-derived
-        /// <see cref="MeshSimplifier"/> again for each try, as before (kept to compare the two on a real avatar before the fork
-        /// goes). Part of every cached result's key.
+        /// Which simplifier Fewer polygons runs: true (the default, until the two are compared on real avatars in Unity) runs
+        /// the Meshia-derived <see cref="MeshSimplifier"/> again for each try, as before; false runs one
+        /// <see cref="SimplificationRun"/> per mesh and picks the most collapses whose surface stays within the budget among
+        /// its prefixes. Part of every cached result's key.
         /// </summary>
-        internal static bool UseOldMeshiaSimplifier = false;
+        internal static bool UseOldMeshiaSimplifier = true;
 
         private sealed class Request
         {
