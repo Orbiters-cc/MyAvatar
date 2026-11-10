@@ -456,7 +456,8 @@ namespace Orbiters.MyAvatar.Editor
                 if (EditorHelper(renderer)) continue;
                 key.Append('|').Append(renderer.GetInstanceID());
                 var mesh = MeshOptimization.MeshOf(renderer);
-                if (mesh) key.Append('#').Append(mesh.GetInstanceID());
+                // The mesh and its edits (an edit marks it dirty: its vertices and UVs decide the texture density).
+                if (mesh) key.Append('#').Append(mesh.GetInstanceID()).Append('.').Append(EditorUtility.GetDirtyCount(mesh));
                 Scale(renderer.transform);
                 if (renderer is SkinnedMeshRenderer skinned)
                 {

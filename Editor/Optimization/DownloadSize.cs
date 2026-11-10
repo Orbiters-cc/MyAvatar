@@ -533,8 +533,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
 
         // ---- Meshes ----
 
-        // Offsets per blendshape, counted once per mesh asset: a sculpted body holds hundreds of shapes.
-        private static readonly Dictionary<int, (int Vertices, Dictionary<string, long> Shapes)> ShapeCache = new Dictionary<int, (int, Dictionary<string, long>)>();
+        // Offsets per blendshape, counted once per mesh asset and edit of it (an edit marks the mesh dirty: offsets changed in
+        // place keep its vertex and shape counts): a sculpted body holds hundreds of shapes.
+        private static readonly Dictionary<int, (int Vertices, int Dirty, Dictionary<string, long> Shapes)> ShapeCache = new Dictionary<int, (int, int, Dictionary<string, long>)>();
 
         /// <summary>A mesh's stored vertices, triangles and bind poses.</summary>
         internal static long VertexBytes(Mesh mesh)
@@ -561,7 +562,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             if (mesh.blendShapeCount == 0) return result;
             if (sizes != null && sizes.TryGetValue(mesh, out var sized)) return sized;
             int id = mesh.GetInstanceID();
-            if (ShapeCache.TryGetValue(id, out var known) && known.Vertices == mesh.vertexCount && known.Shapes.Count == mesh.blendShapeCount) return known.Shapes;
+            int dirty = EditorUtility.GetDirtyCount(mesh);
+            if (ShapeCache.TryGetValue(id, out var known) && known.Vertices == mesh.vertexCount && known.Dirty == dirty && known.Shapes.Count == mesh.blendShapeCount) return known.Shapes;
             // Meshes unloaded since leave it.
             if (ShapeCache.Count >= 256)
                 foreach (int gone in ShapeCache.Keys.Where(k => EditorUtility.InstanceIDToObject(k) == null).ToList()) ShapeCache.Remove(gone);
@@ -580,7 +582,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 }
                 result[mesh.GetBlendShapeName(shape)] = bytes;
             }
-            if (EditorUtility.IsPersistent(mesh)) ShapeCache[id] = (mesh.vertexCount, result);
+            if (EditorUtility.IsPersistent(mesh)) ShapeCache[id] = (mesh.vertexCount, dirty, result);
             else if (sizes != null) sizes[mesh] = result;
             return result;
         }

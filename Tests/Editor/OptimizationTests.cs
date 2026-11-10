@@ -765,6 +765,49 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(kept.Upload.Skinned, Is.EqualTo(2), "The hidden mesh uploads now.");
         }
 
+        // A mesh asset edited in place (not imported again) is measured again: the textures' density on it and the
+        // estimate's plans, and its blendshapes' download when their offsets change but not their count.
+        [Test] public void AMeshEditedInPlaceIsMeasuredAgain()
+        {
+            string folder = Folder();
+            var material = Own(new Material(Shader.Find("Standard")));
+            material.SetTexture("_MainTex", Image(folder, "Board_BaseColor", 1024));
+            var filter = Board(material).GetComponent<MeshFilter>();
+            var mesh = Object.Instantiate(filter.sharedMesh);
+            AssetDatabase.CreateAsset(mesh, folder + "/Board.asset");
+            filter.sharedMesh = mesh;
+            settings.uploadOptimization.level = OptimizationLevel.Custom;
+            settings.uploadOptimization.custom = OptimizationPasses.ResizeTextures;
+            settings.uploadOptimization.sharpFrom = 8f;
+            float Megabytes()
+            {
+                OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                OptimizationEstimate.Finish();
+                var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                Assert.That(result?.Error, Is.Null);
+                return result.Upload.TextureMegabytes;
+            }
+
+            float small = Megabytes();
+            // Eight times as wide and tall: the texture covers more surface, so it keeps more texels from 8 m.
+            mesh.vertices = mesh.vertices.Select(v => v * 8f).ToArray();
+            EditorUtility.SetDirty(mesh);
+            Assert.That(Megabytes(), Is.GreaterThan(small), "The density is measured on the mesh as it is now.");
+
+            var shapes = Object.Instantiate(Skinned("Body").sharedMesh);
+            AssetDatabase.CreateAsset(shapes, folder + "/Shapes.asset");
+            var deltas = new Vector3[shapes.vertexCount];
+            deltas[0] = Vector3.up;
+            shapes.ClearBlendShapes();
+            shapes.AddBlendShapeFrame("Moving", 100, deltas, null, null);
+            long one = DownloadSize.ShapeBytes(shapes)["Moving"];
+            for (int i = 0; i < deltas.Length; i++) deltas[i] = Vector3.up;
+            shapes.ClearBlendShapes();
+            shapes.AddBlendShapeFrame("Moving", 100, deltas, null, null);
+            EditorUtility.SetDirty(shapes);
+            Assert.That(DownloadSize.ShapeBytes(shapes)["Moving"], Is.GreaterThan(one), "The same shape, moving more vertices.");
+        }
+
         // A mesh two skinned renderers show uploads with the blendshapes either of them keeps.
         [Test] public void AMeshTwoRenderersShowKeepsTheShapesEitherKeeps()
         {
