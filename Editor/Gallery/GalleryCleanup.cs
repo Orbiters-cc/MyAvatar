@@ -38,6 +38,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             public long KeptBytes => Kept.Sum(i => i.bytes);
             /// <summary>Installations whose files are all reclaimed: the ledger forgets them.</summary>
             public readonly List<string> Finished = new List<string>();
+            /// <summary>The scan this report was decided from: asked once more right before anything is moved.</summary>
+            internal ProjectReferences References;
         }
 
         internal sealed class Batch
@@ -116,6 +118,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 try
                 {
                     var references = await ProjectReferences.ScanAsync((value, text) => progress?.Invoke(0.1f + value * 0.8f, text), cancellation);
+                    report.References = references;
                     var usedInScenes = new HashSet<string>(OpenSceneDependencies(), StringComparer.OrdinalIgnoreCase);
                     retained = Retained(open.ToDictionary(i => i.path, i => i, StringComparer.OrdinalIgnoreCase),
                         path => references.UsersOf(path), path => usedInScenes.Contains(path));
@@ -233,8 +236,21 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             stayed?.AddRange(now.Kept.Where(i => offered.Contains(i.guid)));
             stayed?.AddRange(shown.Reclaim.Where(i => !free.Contains(i.guid) && !now.Kept.Any(k => string.Equals(k.guid, i.guid, StringComparison.OrdinalIgnoreCase)))
                 .Select(i => new Item { guid = i.guid, path = i.path, from = i.from, bytes = i.bytes, reason = "It is not in the project any more." }));
+            // From here to the moves in one synchronous step: the scan is asked once more which of these files nothing
+            // uses now (a reference added while the batch was prepared keeps its file), and answers none when it cannot
+            // check the project again. Without a scan nothing moves.
+            var openUses = new HashSet<string>(OpenSceneDependencies(), StringComparer.OrdinalIgnoreCase);
+            string uncertain = null;
+            var removable = now.References == null ? new List<string>()
+                : now.References.Removable(still.Select(i => i.path), openUses.Contains, out uncertain);
+            var go = new HashSet<string>(removable, StringComparer.OrdinalIgnoreCase);
+            stayed?.AddRange(still.Where(i => !go.Contains(i.path)).Select(i => new Item
+            {
+                guid = i.guid, path = i.path, from = i.from, bytes = i.bytes, hash = i.hash,
+                reason = uncertain != null ? "What uses it could not be checked again: " + uncertain : "Something uses it now.",
+            }));
             var report = new Report();
-            report.Reclaim.AddRange(still);
+            report.Reclaim.AddRange(still.Where(i => go.Contains(i.path)));
             report.Finished.AddRange(now.Finished);
             return Quarantine(report, stayed);
         }
