@@ -1,7 +1,7 @@
 {
   "name": "orbiters.myavatar",
   "displayName": "My Avatar",
-  "version": "0.9.25",
+  "version": "0.10.0",
   "unity": "2022.3",
   "description": "Apply texture sets to your avatar and optimize them in one click, put on clothes and accessories from their packages and fit them to your custom base (alpha), create its VRChat thumbnail, edit its VRChat menu as it will look in game, pose it with symmetry and a clothing preview, and set who can grab, pose and stretch its hair, tail and toes. Save also records a Mixer Git checkpoint when Mixer is installed.",
   "author": {
@@ -13,7 +13,7 @@
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "vpmDependencies": {
-    "orbiters.toolkit": ">=0.4.17 <0.5.0",
+    "orbiters.toolkit": ">=0.5.0 <0.6.0",
     "com.vrchat.avatars": ">=3.7.0 <4.0.0"
   },
   "orbiters": {
@@ -92,7 +92,7 @@
         "reason": "Merges meshes that use different materials at build time by rewriting their shaders, after My Avatar's own optimization."
       },
       "orbiters.refit": {
-        "version": ">=0.5.3 <1.0.0",
+        "version": ">=0.8.0 <1.0.0",
         "displayName": "ReFit",
         "reason": "Fits clothing and accessories to your avatar's custom base and gives them its blendshapes, so they flex and move with your body."
       },
@@ -101,12 +101,12 @@
         "reason": "Tests gestures, the expression menu and animations of the avatar in Play Mode."
       },
       "orbiters.mixer": {
-        "version": ">=0.2.0 <0.3.0",
+        "version": ">=0.3.0 <0.4.0",
         "displayName": "Mixer",
         "reason": "Mixer Git keeps checkpoints and the history of the project; Save also records one."
       },
       "orbiters.mcb": {
-        "version": ">=1.10.4 <2.0.0",
+        "version": ">=1.13.0 <2.0.0",
         "displayName": "MCB",
         "reason": "My Custom Base: shape the avatar's body and publish it as a custom base."
       },
