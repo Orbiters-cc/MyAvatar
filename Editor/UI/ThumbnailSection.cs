@@ -32,7 +32,13 @@ namespace Orbiters.MyAvatar.Editor
             VrcAvatarCardSdk.FollowSignedInUser(card);
             cardStage = new VrcCardStage(card); Add(cardStage);
             // The performance rank walks the whole avatar; it is measured once the Inspector has drawn.
-            schedule.Execute(() => { if (avatar) VrcAvatarCardSdk.ShowPerformance(card, avatar.gameObject); });
+            schedule.Execute(() =>
+            {
+                if (!avatar) return;
+                bool mobile = EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android || EditorUserBuildSettings.activeBuildTarget == BuildTarget.iOS;
+                var now = Optimization.OptimizationEstimate.Known(avatar, avatar.uploadOptimization)?.Now;
+                VrcAvatarCardSdk.ShowPerformance(card, avatar.gameObject, now == null ? (VRC.SDKBase.Validation.Performance.PerformanceRating?)null : mobile ? now.Mobile : now.Pc);
+            });
             // Same rhythm as the texture actions above: the secondary button, then the primary one taking two thirds.
             actions = new VisualElement(); actions.AddToClassList("thumbnail-actions"); Add(actions);
             openSdk = MyAvatarEditor.Button("Open in VRChat SDK", () => VrcSdkThumbnail.Open(avatar));

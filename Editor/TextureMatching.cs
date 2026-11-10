@@ -729,7 +729,7 @@ namespace Orbiters.MyAvatar.Editor
                 foreach (var (other, indexB) in b.parts)
                 {
                     if (renderer != other) continue;
-                    var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.GetComponent<MeshFilter>()?.sharedMesh;
+                    var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : (renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null);
                     if (!mesh || indexA >= mesh.subMeshCount || indexB >= mesh.subMeshCount) continue;
                     bool[] first = Grid(mesh, indexA), second = Grid(mesh, indexB);
                     int both = 0, countA = 0, countB = 0;

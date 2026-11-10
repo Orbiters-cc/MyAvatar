@@ -36,7 +36,7 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
             {
                 if (renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer || Helper(renderer.transform, root.transform)) continue;
-                var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : renderer.GetComponent<MeshFilter>()?.sharedMesh;
+                var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : (renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null);
                 var materials = renderer.sharedMaterials;
                 for (int i = 0; i < materials.Length; i++)
                 {

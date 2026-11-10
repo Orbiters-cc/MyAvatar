@@ -73,6 +73,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
             progress?.Invoke(0.05f, "Reading what the gallery installed…");
             var candidates = new Dictionary<string, Item>(StringComparer.OrdinalIgnoreCase);
+            // Files whose content decides: hashed together off the main thread once all are known.
+            var unhashed = new List<Item>();
             foreach (var entry in removed)
                 foreach (var file in entry.files)
                 {
@@ -86,15 +88,24 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                     else if (!path.StartsWith("Assets/", StringComparison.Ordinal)) reason = "It belongs to a package.";
                     else if (Owner(root, path) is string owner) reason = "It belongs to " + owner + ".";
                     else if (CodeContent.IsCode(path)) reason = "It is code: other tools may depend on it.";
-                    else
-                    {
-                        item.hash = await Task.Run(() => UnityPackageFiles.FileHash(Path.Combine(root, path)), cancellation);
-                        if (!installedHashes.TryGetValue(file.guid, out var known) || !known.Contains(item.hash)) reason = "It was changed since it was installed.";
-                    }
+                    else unhashed.Add(item);
                     item.reason = reason;
                     candidates[file.guid] = item;
-                    if (reason != null) report.Kept.Add(item);
                 }
+            await Task.Run(() =>
+            {
+                try
+                {
+                    Parallel.ForEach(unhashed, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellation },
+                        item => item.hash = UnityPackageFiles.FileHash(Path.Combine(root, item.path)));
+                }
+                // As one file's failure did before: its own exception, not the loop's.
+                catch (AggregateException ex) { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerExceptions[0]).Throw(); }
+            }, cancellation);
+            foreach (var item in unhashed)
+                if (!installedHashes.TryGetValue(item.guid, out var known) || !known.Contains(item.hash)) item.reason = "It was changed since it was installed.";
+            // In the order the files were read, as before.
+            foreach (var item in candidates.Values) if (item.reason != null) report.Kept.Add(item);
 
             var open = candidates.Values.Where(i => i.reason == null).ToList();
             if (open.Count > 0)

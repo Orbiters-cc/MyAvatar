@@ -120,6 +120,12 @@ namespace Orbiters.MyAvatar.Editor
             ShowHero(AccessoriesSection.Feature);
             Orbiters.Toolkit.Editor.OrbitersFeatures.Changed += ShowHero;
             hero.RegisterCallback<DetachFromPanelEvent>(_ => Orbiters.Toolkit.Editor.OrbitersFeatures.Changed -= ShowHero);
+            // Docked again without a rebuild: it follows the switch again, as it is now.
+            hero.RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                Orbiters.Toolkit.Editor.OrbitersFeatures.Changed -= ShowHero; Orbiters.Toolkit.Editor.OrbitersFeatures.Changed += ShowHero;
+                ShowHero(AccessoriesSection.Feature);
+            });
             accessories = new AccessoriesSection(avatar, new AccessoriesSection.Host
             {
                 Run = work => Run(work),

@@ -23,10 +23,12 @@ namespace Orbiters.MyAvatar.Editor
             card.SetPlatforms(true, EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android);
 
         // VRChat shows a warning badge on Poor and Very Poor avatars; the rating is the SDK's own, for the build target.
-        internal static void ShowPerformance(VrcAvatarCard card, GameObject avatar)
+        // known: the rating the Optimization card's estimate measured for the avatar as it is (the SDK's too), which
+        // spares walking the whole avatar again.
+        internal static void ShowPerformance(VrcAvatarCard card, GameObject avatar, PerformanceRating? known = null)
         {
-            var rating = PerformanceRating.None;
-            if (avatar)
+            var rating = known ?? PerformanceRating.None;
+            if (known == null && avatar)
             {
                 bool mobile = EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android || EditorUserBuildSettings.activeBuildTarget == BuildTarget.iOS;
                 var stats = new AvatarPerformanceStats(mobile);
