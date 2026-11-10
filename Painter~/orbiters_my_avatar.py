@@ -277,19 +277,26 @@ def keep_newest(kept, folder, stem, path, newest=3):
     """
     Only the newest few live images of a channel stay (Unity reads each one as it arrives). The images written are kept
     in order in kept (stem -> paths): the folder is listed once per channel (for images an earlier load of the plugin
-    wrote), not after every image.
+    wrote), not after every image. An image that can't be deleted yet (Unity still reading it) is tried again with the
+    next one (kept under (stem, "retry")); one already gone counts as deleted.
     """
     names = kept.get(stem)
     if names is None:
         written = [p for p in glob.glob(os.path.join(folder, stem + "_*.tga")) if not same_path(p, path)]
         names = kept[stem] = deque(sorted(written, key=os.path.getmtime))
     names.append(path)
+    retry = kept.setdefault((stem, "retry"), [])
+    stale = list(retry)
     while len(names) > newest:
-        stale = names.popleft()
+        stale.append(names.popleft())
+    retry[:] = []
+    for old in stale:
         try:
-            os.remove(stale)
-        except OSError:
+            os.remove(old)
+        except FileNotFoundError:
             pass
+        except OSError:
+            retry.append(old)
 
 
 def exportable(maps, has_channel):

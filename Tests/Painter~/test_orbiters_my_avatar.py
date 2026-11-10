@@ -258,6 +258,39 @@ class MappingTests(unittest.TestCase):
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 
+    def test_a_live_image_that_cant_be_deleted_yet_is_tried_again(self):
+        folder = tempfile.mkdtemp(prefix="OrbitersPainterLive-")
+        real_remove = os.remove
+        try:
+            def write(name):
+                path = os.path.join(folder, name).replace("\\", "/")
+                with open(path, "wb") as f:
+                    f.write(b"tga")
+                return path
+            kept = {}
+            busy = set()
+
+            def remove(path):
+                if os.path.basename(path) in busy:
+                    raise PermissionError(path)
+                real_remove(path)
+            plugin.os.remove = remove
+            first = write("99_normal_1.tga")
+            plugin.keep_newest(kept, folder, "99_normal", first, newest=1)
+            busy.add("99_normal_1.tga")
+            plugin.keep_newest(kept, folder, "99_normal", write("99_normal_2.tga"), newest=1)
+            self.assertTrue(os.path.exists(first), "Unity still reads it")
+            busy.clear()
+            plugin.keep_newest(kept, folder, "99_normal", write("99_normal_3.tga"), newest=1)
+            self.assertEqual(sorted(os.listdir(folder)), ["99_normal_3.tga"], "tried again with the next image")
+            # One gone already (deleted by hand) counts as deleted.
+            real_remove(os.path.join(folder, "99_normal_3.tga"))
+            plugin.keep_newest(kept, folder, "99_normal", write("99_normal_4.tga"), newest=1)
+            self.assertEqual(kept[("99_normal", "retry")], [])
+        finally:
+            plugin.os.remove = real_remove
+            shutil.rmtree(folder, ignore_errors=True)
+
     def test_saves_within_a_second_export_to_folders_of_their_own(self):
         folder = tempfile.mkdtemp(prefix="OrbitersPainterExports-")
         try:
