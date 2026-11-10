@@ -81,10 +81,17 @@ namespace Orbiters.MyAvatar.Editor
         // which resizing or block compression breaks.
         internal static bool Compressible(Texture texture, out TextureImporter importer)
         {
-            importer = texture is Texture2D ? AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter : null;
-            return importer != null && (importer.textureType == TextureImporterType.Default || importer.textureType == TextureImporterType.NormalMap) &&
-                importer.filterMode != FilterMode.Point && Exclusion(importer.assetPath, "", "", 512, 512) == null;
+            importer = ImporterOf(texture);
+            return Compressible(importer);
         }
+
+        private static bool Compressible(TextureImporter importer) =>
+            importer != null && (importer.textureType == TextureImporterType.Default || importer.textureType == TextureImporterType.NormalMap) &&
+                importer.filterMode != FilterMode.Point && Exclusion(importer.assetPath, "", "", 512, 512) == null;
+
+        /// <summary>The importer of an imported 2D texture, or null (a render texture, a copy made for an upload).</summary>
+        internal static TextureImporter ImporterOf(Texture texture) =>
+            texture is Texture2D ? AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter : null;
 
         // BC5 keeps both normal channels at full precision; BC1 is half the size of BC7 when alpha is unused.
         internal static TextureFormat Format(bool normalMap, bool alphaUsed) =>
@@ -245,8 +252,10 @@ namespace Orbiters.MyAvatar.Editor
             foreach (var group in slots.Where(s => s.existing).GroupBy(s => s.existing))
             {
                 var texture = group.Key;
-                var state = states[texture] = new TextureState { Before = BuildBytes(texture, mobile), Width = texture.width, Height = texture.height };
-                if (!Compressible(texture, out var importer) ||
+                // Its importer looked up once for its memory, whether it may change and its build format and size.
+                var importer = ImporterOf(texture);
+                var state = states[texture] = new TextureState { Before = BuildBytes(texture, importer, mobile), Width = texture.width, Height = texture.height };
+                if (!Compressible(importer) ||
                     group.Any(s => Exclusion(importer.assetPath, texture.name, s.property + " " + s.description, texture.width, texture.height) != null))
                     continue;
                 state.Changeable = true;
@@ -256,7 +265,7 @@ namespace Orbiters.MyAvatar.Editor
                 state.Surface = group.All(s => TextureDensity.SurfaceMap(s.property + " " + s.description)) || !importer.sRGBTexture && TextureDensity.SurfaceMap(texture.name);
                 // A texture read by direction (a matcap) everywhere it is used has no surface density.
                 state.View = group.All(s => TextureDensity.ViewMapped(s.property + " " + s.description));
-                (state.Format, state.Crunched, state.Quality) = BuildFormat(texture, mobile);
+                (state.Format, state.Crunched, state.Quality) = BuildFormat(texture, importer, mobile);
                 var size = BuildSize(texture, importer, mobile);
                 state.Width = size.x; state.Height = size.y;
                 candidates.Add(((Texture2D)texture, importer));
@@ -482,11 +491,14 @@ namespace Orbiters.MyAvatar.Editor
         // ---- Formats and memory in a build ----------------------------------------------------------------------
 
         /// <summary>Texture memory in a PC or mobile build, from the import settings.</summary>
-        internal static long BuildBytes(Texture texture, bool mobile = false)
+        internal static long BuildBytes(Texture texture, bool mobile = false) => BuildBytes(texture, ImporterOf(texture), mobile);
+
+        /// <summary><see cref="BuildBytes(Texture, bool)"/> with the texture's importer already looked up (<see cref="ImporterOf"/>).</summary>
+        internal static long BuildBytes(Texture texture, TextureImporter importer, bool mobile)
         {
-            if (!(texture is Texture2D) || !(AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) is TextureImporter importer)) return Bytes(texture);
+            if (importer == null) return Bytes(texture);
             var size = BuildSize(texture, importer, mobile);
-            return FormatBytes(BuildFormat(texture, mobile).format, size.x, size.y, importer.mipmapEnabled);
+            return FormatBytes(BuildFormat(texture, importer, mobile).format, size.x, size.y, importer.mipmapEnabled);
         }
 
         /// <summary>
@@ -494,9 +506,12 @@ namespace Orbiters.MyAvatar.Editor
         /// platform, else what Unity picks for its compression setting (the editor may hold it uncompressed meanwhile).
         /// Not an imported image (a render texture, a copy made for an upload): what the editor holds.
         /// </summary>
-        internal static (TextureFormat format, bool crunched, int quality) BuildFormat(Texture texture, bool mobile = false)
+        internal static (TextureFormat format, bool crunched, int quality) BuildFormat(Texture texture, bool mobile = false) => BuildFormat(texture, ImporterOf(texture), mobile);
+
+        /// <summary><see cref="BuildFormat(Texture, bool)"/> with the texture's importer already looked up (<see cref="ImporterOf"/>).</summary>
+        internal static (TextureFormat format, bool crunched, int quality) BuildFormat(Texture texture, TextureImporter importer, bool mobile)
         {
-            if (!(texture is Texture2D) || !(AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) is TextureImporter importer))
+            if (importer == null)
                 return texture is Texture2D own ? (own.format, Crunched(own.format), 100) : (TextureFormat.RGBA32, false, 100);
             var settings = importer.GetPlatformTextureSettings(PlatformName(mobile));
             if (settings.overridden && settings.format != TextureImporterFormat.Automatic)

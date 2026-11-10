@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using Orbiters.Toolkit.Editor;
+using Orbiters.Toolkit.Editor.VRChat;
 using UnityEditor;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor
 {
@@ -25,14 +28,17 @@ namespace Orbiters.MyAvatar.Editor
     }
 
     /// <summary>
-    /// The one change detector of My Avatar's Inspector sections: it listens to the editor once for every section and every
-    /// avatar, works out which avatars a change touches and how, and tells each watcher once things settle (one notification
-    /// for a burst of changes). A change elsewhere in the scene (renaming a light, another avatar's edits) reaches no
-    /// section of this avatar: <see cref="EditorApplication.hierarchyChanged"/>, which says nothing about where, is checked
-    /// against a numeric signature of the avatar's objects, components, renderers and their materials.
-    ///
-    /// Kept behind <see cref="Watch"/> on purpose: Toolkit's avatar snapshot and change bus can back it later without the
-    /// sections changing.
+    /// The one change detector of My Avatar's Inspector sections. It reads Toolkit's <see cref="EditorChangeBus"/> (Unity's
+    /// change streams decoded once for every Orbiters tool), works out which avatars a change touches and how, and tells
+    /// each watcher once things settle (one notification for a burst of changes). A change elsewhere in the scene (renaming
+    /// a light, another avatar's edits) reaches no section of this avatar and does not hold its notifications back.
+    /// <para>
+    /// Changes the editor reports no object for: <see cref="EditorChanges.Hierarchy"/> (Unity's hierarchyChanged, which says
+    /// nothing about where; a script renaming or hiding an object without Undo raises only that) is checked against a
+    /// numeric signature of the avatar's objects, components, renderers and their materials. When the signature moved, the
+    /// avatar's <see cref="AvatarSnapshot"/> is invalidated before the watchers hear: the snapshot only follows changes the
+    /// editor reports, and the sections read their facts from it.
+    /// </para>
     /// </summary>
     internal static class AvatarChanges
     {
@@ -61,10 +67,13 @@ namespace Orbiters.MyAvatar.Editor
             public long signature;
             // When the pending change of this avatar is told (-1: none), and when its burst started.
             public double due = -1, first = -1;
+            // The avatar's root while one bus value is read (its descriptor's object, or the avatar's own).
+            public Transform root;
         }
 
         private static readonly Dictionary<int, Watched> Avatars = new Dictionary<int, Watched>();
-        private static bool hooked, updating;
+        private static bool hooked;
+        private static IDisposable ticking;
 
         /// <summary>
         /// Calls <paramref name="changed"/> with the facets that changed among <paramref name="facets"/>, a moment after the
@@ -75,7 +84,13 @@ namespace Orbiters.MyAvatar.Editor
             if (!avatar || changed == null) return new Subscription(null);
             Hook();
             int id = avatar.GetInstanceID();
-            if (!Avatars.TryGetValue(id, out var watched)) Avatars[id] = watched = new Watched { avatar = avatar, id = id, signature = Signature(avatar) };
+            if (!Avatars.TryGetValue(id, out var watched))
+            {
+                Avatars[id] = watched = new Watched { avatar = avatar, id = id, signature = Signature(avatar) };
+                // Nothing watched the avatar until now: what changed meanwhile without telling the editor (a component
+                // replaced by a script at a constant object count) never reached its snapshot. Its facts are read again.
+                InvalidateSnapshots(avatar);
+            }
             var watcher = new Watcher { watched = watched, facets = facets, changed = changed };
             watched.watchers.Add(watcher);
             return new Subscription(watcher);
@@ -97,23 +112,44 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
+        // Changes nothing reports at all (a material assigned by a script without Undo raises no event, not even
+        // hierarchyChanged): every watched avatar's signature is compared this often, one walk per avatar.
+        internal const double Reconcile = 10;
+        private static IDisposable reconciling;
+
+        // Sections read the snapshot of the avatar's root (its descriptor's object) or of the avatar's own object.
+        private static void InvalidateSnapshots(MyAvatar avatar)
+        {
+            var root = TextureOptimization.AvatarRoot(avatar);
+            AvatarSnapshot.Of(root)?.Invalidate();
+            if (root != avatar.gameObject) AvatarSnapshot.Of(avatar.gameObject)?.Invalidate();
+        }
+
         private static void Hook()
         {
             if (hooked) return;
             hooked = true;
-            EditorApplication.hierarchyChanged += HierarchyChanged;
-            ObjectChangeEvents.changesPublished += Published;
-            Undo.undoRedoPerformed += Undone;
+            EditorChangeBus.Changed += Changed;
+            reconciling = OrbitersEditorHost.Every("MyAvatar.AvatarChanges.Reconcile", Reconcile, Reconciled);
         }
+
+        // Each watched avatar compares its signature at its next flush, as after hierarchyChanged.
+        internal static void Reconciled() => HierarchyChanged();
 
         private static void Unhook()
         {
             if (!hooked) return;
             hooked = false;
-            EditorApplication.hierarchyChanged -= HierarchyChanged;
-            ObjectChangeEvents.changesPublished -= Published;
-            Undo.undoRedoPerformed -= Undone;
-            if (updating) { EditorApplication.update -= Flush; updating = false; }
+            EditorChangeBus.Changed -= Changed;
+            reconciling?.Dispose();
+            reconciling = null;
+            StopTicking();
+        }
+
+        private static void StopTicking()
+        {
+            ticking?.Dispose();
+            ticking = null;
         }
 
         // A change of this avatar moves its own flush: its watchers hear once its burst settles, as the sections' own timers
@@ -123,14 +159,65 @@ namespace Orbiters.MyAvatar.Editor
             double now = Clock();
             if (watched.first < 0) watched.first = now;
             watched.due = now + Delay;
-            if (updating) return;
-            updating = true;
-            EditorApplication.update += Flush;
+            // The host's frame pump also runs while Unity compiles or is in the background (no repaint needed).
+            ticking ??= OrbitersEditorHost.EveryFrame("MyAvatar.AvatarChanges", Tick);
         }
 
+        private static void Tick() => Flush(false);
+
+        // ---- What the bus reports, per avatar ----
+
+        /// <summary>One value of the change bus: each avatar gets the facets of the changes at or below its root.</summary>
+        internal static void Changed(EditorChanges changes)
+        {
+            if (Avatars.Count == 0 || changes == null) return;
+            foreach (var watched in Avatars.Values) watched.root = watched.avatar ? TextureOptimization.AvatarRoot(watched.avatar).transform : null;
+            try
+            {
+                if (changes.UndoRedo) Undone();
+                if (changes.Everything) All(AvatarFacets.Hierarchy);
+                var destroyed = changes.Destroyed as ICollection<int> ?? new HashSet<int>(changes.Destroyed);
+                // A destroyed hierarchy's parent is reported as a changed subtree; the destroyed root itself can't be found.
+                foreach (int id in changes.Structure) if (!destroyed.Contains(id)) Mark(changes.Find(id), AvatarFacets.Hierarchy);
+                foreach (int id in changes.Subtrees) if (!destroyed.Contains(id)) Mark(changes.Find(id), AvatarFacets.Hierarchy);
+                foreach (int id in changes.Properties)
+                {
+                    if (destroyed.Contains(id)) continue;
+                    var edited = changes.Find(id);
+                    Mark(edited, edited is GameObject ? AvatarFacets.Hierarchy : edited is Renderer ? AvatarFacets.Renderers : AvatarFacets.Components);
+                }
+                foreach (string guid in changes.Assets)
+                    if (IsMaterial(guid)) { All(AvatarFacets.Materials); break; }
+                if (Matter(changes.Imported) || Matter(changes.Deleted) || Matter(changes.Moved)) All(AvatarFacets.Imports);
+                if (changes.Hierarchy) HierarchyChanged();
+            }
+            finally { foreach (var watched in Avatars.Values) watched.root = null; }
+        }
+
+        // A material asset edited in the editor (the bus names assets by GUID). Materials are main assets in their .mat.
+        private static bool IsMaterial(string guid)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            return !string.IsNullOrEmpty(path) && AssetDatabase.GetMainAssetTypeAtPath(path) == typeof(Material);
+        }
+
+        private static bool Matter(IReadOnlyList<string> paths)
+        {
+            foreach (string path in paths) if (TextureOptimization.ImportMatters(path)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Unity's hierarchyChanged: every avatar compares its signature at its next flush. One already waiting keeps its
+        /// time (a hierarchy change elsewhere holds no avatar back); one at rest is told after the usual delay.
+        /// </summary>
         internal static void HierarchyChanged()
         {
-            foreach (var watched in Avatars.Values) { watched.check = true; Arm(watched); }
+            foreach (var watched in Avatars.Values)
+            {
+                watched.check = true;
+                if (watched.due < 0) Arm(watched);
+            }
         }
 
         private static void Undone()
@@ -147,75 +234,22 @@ namespace Orbiters.MyAvatar.Editor
         /// An object changed: the avatars holding it get the facet; an object that cannot be found any more may have been
         /// under any of them.
         /// </summary>
-        internal static void Touched(int instanceId, AvatarFacets facet)
+        internal static void Touched(int instanceId, AvatarFacets facet) => Mark(EditorUtility.InstanceIDToObject(instanceId), facet);
+
+        private static void Mark(Object found, AvatarFacets facet)
         {
-            var found = EditorUtility.InstanceIDToObject(instanceId);
             var transform = found is GameObject go ? go.transform : found is Component component ? component.transform : null;
             if (!transform) { All(facet); return; }
             foreach (var watched in Avatars.Values)
-                if (watched.avatar && transform.IsChildOf(TextureOptimization.AvatarRoot(watched.avatar).transform)) { watched.pending |= facet; Arm(watched); }
-        }
-
-        private static void Mark(int instanceId, AvatarFacets facet) => Touched(instanceId, facet);
-
-        private static void Published(ref ObjectChangeEventStream stream)
-        {
-            if (Avatars.Count == 0) return;
-            for (int i = 0; i < stream.length; i++)
             {
-                switch (stream.GetEventType(i))
-                {
-                    case ObjectChangeKind.CreateGameObjectHierarchy:
-                        stream.GetCreateGameObjectHierarchyEvent(i, out var created); Mark(created.instanceId, AvatarFacets.Hierarchy); break;
-                    case ObjectChangeKind.DestroyGameObjectHierarchy:
-                        stream.GetDestroyGameObjectHierarchyEvent(i, out var destroyed);
-                        if (destroyed.parentInstanceId != 0) Mark(destroyed.parentInstanceId, AvatarFacets.Hierarchy);
-                        else All(AvatarFacets.Hierarchy);
-                        break;
-                    case ObjectChangeKind.ChangeGameObjectStructureHierarchy:
-                        stream.GetChangeGameObjectStructureHierarchyEvent(i, out var structureHierarchy); Mark(structureHierarchy.instanceId, AvatarFacets.Hierarchy); break;
-                    case ObjectChangeKind.ChangeGameObjectStructure:
-                        stream.GetChangeGameObjectStructureEvent(i, out var structure); Mark(structure.instanceId, AvatarFacets.Hierarchy); break;
-                    case ObjectChangeKind.ChangeGameObjectParent:
-                        stream.GetChangeGameObjectParentEvent(i, out var parent);
-                        Mark(parent.instanceId, AvatarFacets.Hierarchy);
-                        if (parent.previousParentInstanceId != 0) Mark(parent.previousParentInstanceId, AvatarFacets.Hierarchy);
-                        break;
-                    case ObjectChangeKind.ChangeGameObjectOrComponentProperties:
-                        stream.GetChangeGameObjectOrComponentPropertiesEvent(i, out var properties);
-                        var edited = EditorUtility.InstanceIDToObject(properties.instanceId);
-                        Mark(properties.instanceId, edited is GameObject ? AvatarFacets.Hierarchy : edited is Renderer ? AvatarFacets.Renderers : AvatarFacets.Components);
-                        break;
-                    case ObjectChangeKind.ChangeAssetObjectProperties:
-                        stream.GetChangeAssetObjectPropertiesEvent(i, out var asset);
-                        if (EditorUtility.InstanceIDToObject(asset.instanceId) is Material) All(AvatarFacets.Materials);
-                        break;
-                    case ObjectChangeKind.UpdatePrefabInstances:
-                        stream.GetUpdatePrefabInstancesEvent(i, out var prefabs);
-                        foreach (int id in prefabs.instanceIds) Mark(id, AvatarFacets.Hierarchy);
-                        break;
-                    case ObjectChangeKind.ChangeScene:
-                        All(AvatarFacets.Hierarchy); break;
-                }
-            }
-        }
-
-        /// <summary>Imports that may change what an avatar shows (see <see cref="TextureOptimization.ImportMatters"/>).</summary>
-        internal sealed class ImportWatcher : AssetPostprocessor
-        {
-            private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom)
-            {
-                if (Avatars.Count == 0) return;
-                if (!Array.Exists(imported, TextureOptimization.ImportMatters) && !Array.Exists(deleted, TextureOptimization.ImportMatters) &&
-                    !Array.Exists(moved, TextureOptimization.ImportMatters)) return;
-                All(AvatarFacets.Imports);
+                if (!watched.avatar) continue;
+                var root = watched.root ? watched.root : TextureOptimization.AvatarRoot(watched.avatar).transform;
+                if (transform.IsChildOf(root)) { watched.pending |= facet; Arm(watched); }
             }
         }
 
         private static readonly List<Watcher> Calling = new List<Watcher>();
         private static readonly List<Watched> Flushing = new List<Watched>();
-
-        private static void Flush() => Flush(false);
 
         /// <summary>
         /// Tells the watchers of each avatar whose burst settled or went on for MaxLatency; of every avatar with a pending
@@ -232,7 +266,7 @@ namespace Orbiters.MyAvatar.Editor
                 if (now || time >= watched.due || time - watched.first >= MaxLatency) Flushing.Add(watched);
                 else waiting = true;
             }
-            if (!waiting && updating) { EditorApplication.update -= Flush; updating = false; }
+            if (!waiting) StopTicking();
             foreach (var watched in Flushing)
             {
                 watched.due = watched.first = -1;
@@ -241,7 +275,13 @@ namespace Orbiters.MyAvatar.Editor
                 {
                     watched.check = false;
                     long signature = Signature(watched.avatar);
-                    if (signature != watched.signature) { watched.signature = signature; watched.pending |= AvatarFacets.Hierarchy; }
+                    if (signature != watched.signature)
+                    {
+                        watched.signature = signature;
+                        watched.pending |= AvatarFacets.Hierarchy;
+                        // A change the bus may not have reported (made without Undo): the snapshot's facts go too.
+                        InvalidateSnapshots(watched.avatar);
+                    }
                 }
                 var pending = watched.pending;
                 watched.pending = AvatarFacets.None;

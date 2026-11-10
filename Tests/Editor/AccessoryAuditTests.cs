@@ -418,10 +418,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
             section.Token = () => token;
             try
             {
-                const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-                int revision = (int)typeof(AccessoriesSection).GetField("revision", Private).GetValue(section);
+                int revision = section.revision;
                 var outcome = new AccessoryService.Outcome { attachment = attachment, plan = plan, docs = new List<AccessoryImport.Doc>() };
-                var ask = (Task)typeof(AccessoriesSection).GetMethod("AskAiAsync", Private).Invoke(section, new object[] { new List<AccessoryService.Outcome> { outcome }, revision });
+                var ask = section.AskAiAsync(new List<AccessoryService.Outcome> { outcome }, revision);
                 if (action == "moved") attachment.parent = chest;
                 if (action == "ai-off") ai = false;
                 if (action == "account") token = "another account";

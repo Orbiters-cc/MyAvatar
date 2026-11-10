@@ -27,7 +27,7 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (namedInstalled || !host.AiOn() || string.IsNullOrEmpty(Token())) return;
             namedInstalled = true;
-            _ = NameAsync(AttachmentInstaller.Installed(avatar.transform));
+            _ = NameAsync(Installed());
         }
 
         /// <summary>The AI's name for an offered item once known, else its file name.</summary>

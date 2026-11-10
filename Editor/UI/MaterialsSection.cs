@@ -14,11 +14,12 @@ namespace Orbiters.MyAvatar.Editor
     internal sealed class MaterialsSection : VisualElement
     {
         internal const string AutoFix = "MyAvatar.AutoFixOpenSurfaces";
-        // Per avatar: whether the user opened the card. Open surfaces already tried this session are not fixed again.
+        // Per avatar: whether the user opened the card. Open surfaces already tried this session are not fixed again, also
+        // after a script reload (an auto-fix the user undid stays undone).
         private static readonly Dictionary<int, bool> Folds = new Dictionary<int, bool>();
-        private static readonly HashSet<int> Tried = new HashSet<int>();
+        private static readonly SessionSet Tried = new SessionSet("Orbiters.MyAvatar.Materials.Tried");
         // Avatars whose card opened by itself for materials that don't render: once per session, then the user decides.
-        private static readonly HashSet<int> Opened = new HashSet<int>();
+        private static readonly SessionSet Opened = new SessionSet("Orbiters.MyAvatar.Materials.Opened");
 
         private readonly MyAvatar avatar;
         private readonly VisualElement body, list;
@@ -115,17 +116,17 @@ namespace Orbiters.MyAvatar.Editor
 
         private List<BrokenMaterial> Broken(GameObject root)
         {
-            string key = BrokenMaterials.Key(root);
+            string key = BrokenMaterials.Key(root, fromSnapshot: true);
             if (key == brokenKey && !projectChanged) return broken;
             brokenKey = key; projectChanged = false;
-            return broken = key.Length == 0 ? new List<BrokenMaterial>() : BrokenMaterials.Inspect(root);
+            return broken = key.Length == 0 ? new List<BrokenMaterial>() : BrokenMaterials.Inspect(root, fromSnapshot: true);
         }
 
         private void Refresh()
         {
             var root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
-            var advice = AvatarMaterials.Inspect(root);
-            if (AutoFixOpenSurfaces(advice)) advice = AvatarMaterials.Inspect(root);
+            var advice = AvatarMaterials.Inspect(root, fromSnapshot: true);
+            if (AutoFixOpenSurfaces(advice)) advice = AvatarMaterials.Inspect(root, fromSnapshot: true);
             var broken = Broken(root);
             // Undone: what the last fix made render doesn't again, the note saying it does goes.
             if (brokenText != null && broken.Any(b => fixedBroken.Contains(b.Material.GetInstanceID())))

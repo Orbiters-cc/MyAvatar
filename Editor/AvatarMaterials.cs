@@ -29,12 +29,17 @@ namespace Orbiters.MyAvatar.Editor
     {
         internal const string Folder = "Assets/Orbiters/MyAvatar/MaterialEdits";
 
-        internal static List<MaterialAdvice> Inspect(GameObject root)
+        /// <summary>
+        /// What is worth changing in the materials below <paramref name="root"/>. <paramref name="fromSnapshot"/>: the renderers
+        /// come from the avatar's live snapshot (the Materials card) instead of a fresh walk.
+        /// </summary>
+        internal static List<MaterialAdvice> Inspect(GameObject root, bool fromSnapshot = false)
         {
             var advice = new Dictionary<Material, MaterialAdvice>();
             if (root == null) return new List<MaterialAdvice>();
-            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+            foreach (var renderer in Renderers(root, fromSnapshot))
             {
+                if (!renderer) continue;
                 if (renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer || Helper(renderer.transform, root.transform)) continue;
                 var mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh : (renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null);
                 var materials = renderer.sharedMaterials;
@@ -57,6 +62,13 @@ namespace Orbiters.MyAvatar.Editor
             }
             return advice.Values.OrderBy(a => a.Material.name, StringComparer.OrdinalIgnoreCase).ToList();
         }
+
+        /// <summary>
+        /// Every renderer below <paramref name="root"/>, inactive ones included: from its live snapshot (shared by the
+        /// Inspector's sections, kept up to date by the change bus and AvatarChanges' signature), or walked now.
+        /// </summary>
+        internal static IReadOnlyList<Renderer> Renderers(GameObject root, bool fromSnapshot) =>
+            fromSnapshot ? Orbiters.Toolkit.Editor.VRChat.AvatarSnapshot.Of(root).All<Renderer>() : root.GetComponentsInChildren<Renderer>(true);
 
         // Editor helpers drawn on the avatar (gizmo overlays, hidden previews) are not its materials.
         internal static bool Helper(Transform transform, Transform root)

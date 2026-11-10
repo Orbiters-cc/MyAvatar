@@ -125,7 +125,7 @@ namespace Orbiters.MyAvatar.Editor
             finally { Object.DestroyImmediate(sheet); }
         }
 
-        private void Assign(Texture2D image)
+        internal void Assign(Texture2D image)
         {
             Undo.RecordObject(avatar, "My Avatar: thumbnail");
             if (image == null) avatar.thumbnail = null;

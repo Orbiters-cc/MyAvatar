@@ -57,8 +57,9 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly PropertyInfo LegacyBlendShapeNormals =
             typeof(ModelImporter).GetProperty("legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes", BindingFlags.Instance | BindingFlags.NonPublic);
 
-        // Files a fix was tried on this session: one that didn't take (a locked file) is not tried again and again.
-        private static readonly HashSet<string> Tried = new HashSet<string>();
+        // Files a fix was tried on this session: one that didn't take (a locked file) is not tried again and again, also
+        // after a script reload.
+        private static readonly SessionSet Tried = new SessionSet("Orbiters.MyAvatar.ImportSettings.Tried");
         // Per avatar (instance id): what was fixed by itself this session, for its card to say.
         internal static readonly Dictionary<int, string> FixedNotes = new Dictionary<int, string>();
         internal static event Action<int> Fixed;
@@ -192,11 +193,24 @@ namespace Orbiters.MyAvatar.Editor
         // The avatar VRChat's SDK panel shows, looked at every few seconds: one My Avatar looks after is fixed before the
         // panel lists its alerts (it checks them again as it draws).
         private static double nextWatch;
+        // The avatar last looked at, when, and whether the editor reported a change since (Toolkit's change bus): an avatar
+        // found fine is looked at again after a change, or after LookAgain seconds for changes nothing reported (a script
+        // without Undo). What a fix does is still decided from a fresh Inspect.
+        private const double LookAgain = 10;
+        private static int lookedAt;
+        private static double lookedWhen;
+        private static bool changedSince = true, listening;
+
         private static void Watch()
         {
             double now = EditorApplication.timeSinceStartup;
             if (now < nextWatch) return;
             nextWatch = now + 2;
+            if (!listening)
+            {
+                listening = true;
+                Orbiters.Toolkit.Editor.EditorChangeBus.Changed += changes => changedSince = true;
+            }
             try
             {
                 if (VRCSdkControlPanel.window == null || !OrbitersFeatures.IsEnabled(Feature) ||
@@ -205,6 +219,9 @@ namespace Orbiters.MyAvatar.Editor
                 if (selected == null) return;
                 var avatar = selected.GetComponentInChildren<MyAvatar>(true);
                 if (!avatar) return;
+                Orbiters.Toolkit.Editor.EditorChangeBus.Flush();
+                if (!changedSince && lookedAt == avatar.GetInstanceID() && now - lookedWhen < LookAgain) return;
+                changedSince = false; lookedAt = avatar.GetInstanceID(); lookedWhen = now;
                 AutoFix(avatar, selected);
             }
             catch (Exception)

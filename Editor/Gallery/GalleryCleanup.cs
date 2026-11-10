@@ -110,16 +110,22 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             var open = candidates.Values.Where(i => i.reason == null).ToList();
             if (open.Count > 0)
             {
-                ProjectReferences references;
-                try { references = await ProjectReferences.ScanAsync((value, text) => progress?.Invoke(0.1f + value * 0.8f, text), cancellation); }
+                // Any failure of the reference scan, while scanning or while asking it who uses a file (Toolkit's newer scan
+                // throws when it cannot be sure), keeps every candidate: nothing is offered, so nothing is quarantined.
+                List<(Item item, string reason)> retained;
+                try
+                {
+                    var references = await ProjectReferences.ScanAsync((value, text) => progress?.Invoke(0.1f + value * 0.8f, text), cancellation);
+                    var usedInScenes = new HashSet<string>(OpenSceneDependencies(), StringComparer.OrdinalIgnoreCase);
+                    retained = Retained(open.ToDictionary(i => i.path, i => i, StringComparer.OrdinalIgnoreCase),
+                        path => references.UsersOf(path), path => usedInScenes.Contains(path));
+                }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
                 {
                     foreach (var item in open) { item.reason = "What uses it could not be checked: " + ex.Message; report.Kept.Add(item); }
                     return report;
                 }
-                var usedInScenes = new HashSet<string>(OpenSceneDependencies(), StringComparer.OrdinalIgnoreCase);
-                foreach (var (item, reason) in Retained(open.ToDictionary(i => i.path, i => i, StringComparer.OrdinalIgnoreCase),
-                             path => references.UsersOf(path), path => usedInScenes.Contains(path)))
+                foreach (var (item, reason) in retained)
                 {
                     item.reason = reason;
                     report.Kept.Add(item);

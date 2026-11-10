@@ -1,8 +1,12 @@
+using System.Collections;
 using System.Collections.Generic;
 using NUnit.Framework;
+using Orbiters.Toolkit.Editor.VRChat;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
 
 namespace Orbiters.MyAvatar.Editor.Tests
 {
@@ -118,6 +122,87 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
             Assert.AreEqual(1, heard.Count, "a burst that goes on is told");
             Assert.That(heard[0].Item1 - 200, Is.InRange(AvatarChanges.MaxLatency - .01, AvatarChanges.MaxLatency + .11));
+        }
+        // A rename made without Undo is reported only as hierarchyChanged: the signature sees it, and the avatar's snapshot
+        // (which follows reported changes only) gives the new path once the watchers hear.
+        [Test] public void AChangeOnlyTheSignatureSeesRefreshesTheSnapshot()
+        {
+            var avatar = Avatar("A");
+            var hair = avatar.transform.Find("Hair");
+            var snapshot = AvatarSnapshot.Of(avatar.gameObject);
+            Assert.AreEqual("Hair", snapshot.PathOf(hair));
+            var heard = new List<AvatarFacets>();
+            watches.Add(AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, heard.Add));
+            hair.name = "Long hair";
+            AvatarChanges.HierarchyChanged();
+            AvatarChanges.Flush(now: true);
+            CollectionAssert.AreEqual(new[] { AvatarFacets.Hierarchy }, heard);
+            Assert.AreEqual("Long hair", AvatarSnapshot.Of(avatar.gameObject).PathOf(hair));
+        }
+
+        // Review of MAC-2: a component replaced without Undo at a constant object count while no section watched the avatar
+        // (its Inspector closed) is seen once one watches again: what the sections read is what a fresh snapshot reads.
+        [Test] public void AChangeWhileNothingWatchedIsSeenOnReopening()
+        {
+            var avatar = Avatar("A");
+            var root = avatar.gameObject;
+            var watch = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, _ => { });
+            CollectionAssert.AreEquivalent(AvatarSnapshot.Take(root).All<Renderer>(), AvatarMaterials.Renderers(root, fromSnapshot: true));
+            watch.Dispose();
+            var hair = avatar.transform.Find("Hair").gameObject;
+            Object.DestroyImmediate(hair.GetComponent<MeshRenderer>());
+            hair.AddComponent<SkinnedMeshRenderer>();
+            watches.Add(AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, _ => { }));
+            var read = AvatarMaterials.Renderers(root, fromSnapshot: true);
+            CollectionAssert.AreEquivalent(AvatarSnapshot.Take(root).All<Renderer>(), read);
+            Assert.That(read, Has.Some.InstanceOf<SkinnedMeshRenderer>());
+        }
+
+        // Changes that raise no event at all are caught by the periodic signature check.
+        [Test] public void AChangeNothingReportsIsCaughtByReconciling()
+        {
+            var avatar = Avatar("A");
+            var heard = new List<AvatarFacets>();
+            watches.Add(AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, heard.Add));
+            avatar.transform.Find("Hair").GetComponent<MeshRenderer>().sharedMaterial = new Material(Shader.Find("Standard"));
+            AvatarChanges.Reconciled();
+            AvatarChanges.Flush(now: true);
+            CollectionAssert.AreEqual(new[] { AvatarFacets.Hierarchy }, heard);
+        }
+
+        // A hierarchy change somewhere does not move the time an avatar already waiting is told at.
+        [Test] public void HierarchyChangesElsewhereDoNotHoldAnAvatarBack()
+        {
+            double time = 100;
+            AvatarChanges.Clock = () => time;
+            var avatar = Avatar("A");
+            var heard = new List<double>();
+            watches.Add(AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, _ => heard.Add(time)));
+            AvatarChanges.Touched(avatar.transform.Find("Hair").gameObject.GetInstanceID(), AvatarFacets.Hierarchy);
+            for (int step = 1; step <= 10 && heard.Count == 0; step++)
+            {
+                time = 100 + step * .1;
+                AvatarChanges.HierarchyChanged();
+                AvatarChanges.Flush(now: false);
+            }
+            Assert.AreEqual(1, heard.Count);
+            Assert.That(heard[0], Is.InRange(100.3, 100.41));
+        }
+
+        // Through the editor itself: an edit with Undo reaches the change bus and the sections of its avatar only.
+        [UnityTest] public IEnumerator AnEditWithUndoReachesItsAvatarThroughTheBus()
+        {
+            MyAvatar a = Avatar("A"), b = Avatar("B");
+            var heard = new List<(string, AvatarFacets)>();
+            watches.Add(AvatarChanges.Watch(a, AvatarFacets.Components | AvatarFacets.Renderers, f => heard.Add(("A", f))));
+            watches.Add(AvatarChanges.Watch(b, AvatarFacets.Components | AvatarFacets.Renderers, f => heard.Add(("B", f))));
+            var renderer = b.transform.Find("Hair").GetComponent<MeshRenderer>();
+            Undo.RecordObject(renderer, "test");
+            renderer.enabled = false;
+            Undo.FlushUndoRecordObjects();
+            double until = EditorApplication.timeSinceStartup + 5;
+            while (heard.Count == 0 && EditorApplication.timeSinceStartup < until) yield return null;
+            CollectionAssert.AreEqual(new[] { ("B", AvatarFacets.Renderers) }, heard);
         }
     }
 }

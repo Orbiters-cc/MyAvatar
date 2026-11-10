@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Orbiters.Toolkit;
 using Orbiters.Toolkit.Editor.Net;
 
 namespace Orbiters.MyAvatar.Editor.Gallery
@@ -57,28 +58,24 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         /// <summary>The website's license key redemption (POST /assets): (added, already owned, creators to pick from, error).</summary>
         internal static async Task<RedeemResult> RedeemAsync(string licenseKey, int? creatorId, CancellationToken cancellation)
         {
-            using (var request = new HttpRequestMessage(HttpMethod.Post, OrbitersEnvironment.ApiUrl("assets")))
+            object payload = creatorId.HasValue ? (object)new { licenseKey, creatorId = creatorId.Value } : new { licenseKey };
+            RedeemAnswer answer;
+            try { answer = await OrbitersHttp.JsonAsync<RedeemAnswer>(HttpMethod.Post, OrbitersEnvironment.ApiUrl("assets"), payload, Token, cancellation, Failure); }
+            // No answer (offline, timed out) is thrown as before; an error answer is a result.
+            catch (OrbitersHttpException ex) when (ex.StatusCode > 0 && !ex.TimedOut)
             {
-                string token = Token;
-                if (!string.IsNullOrEmpty(token)) request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-                object payload = creatorId.HasValue ? (object)new { licenseKey, creatorId = creatorId.Value } : new { licenseKey };
-                request.Content = new StringContent(JsonConvert.SerializeObject(payload), System.Text.Encoding.UTF8, "application/json");
-                using (var response = await Http.SendAsync(request, cancellation))
-                {
-                    string body = await response.Content.ReadAsStringAsync();
-                    var answer = Parse<RedeemAnswer>(body) ?? new RedeemAnswer();
-                    int status = (int)response.StatusCode;
-                    if (status == 208) return new RedeemResult { Success = true, Message = "You already own this asset." };
-                    if (response.IsSuccessStatusCode) return new RedeemResult { Success = true, Message = "Asset added to your library." };
-                    if (status == 404 && answer.needsCreatorHint && answer.creators?.Count > 0) return new RedeemResult { Creators = answer.creators };
-                    return new RedeemResult { Message = answer.error ?? string.Format(Failure, status) };
-                }
+                var error = Parse<RedeemAnswer>(ex.Body) ?? new RedeemAnswer();
+                if (ex.StatusCode == 404 && error.needsCreatorHint && error.creators?.Count > 0) return new RedeemResult { Creators = error.creators };
+                return new RedeemResult { Message = error.error ?? string.Format(Failure, ex.StatusCode) };
             }
+            // The server says "added" with success, and "already owned" (HTTP 208) without it.
+            return answer != null && answer.success
+                ? new RedeemResult { Success = true, Message = "Asset added to your library." }
+                : new RedeemResult { Success = true, Message = "You already own this asset." };
         }
 
-        private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
         private static T Parse<T>(string body) where T : class { try { return string.IsNullOrWhiteSpace(body) ? null : JsonConvert.DeserializeObject<T>(body); } catch (JsonException) { return null; } }
-        private sealed class RedeemAnswer { public string error; public bool needsCreatorHint; public List<RedeemCreator> creators; }
+        private sealed class RedeemAnswer { public string error; public bool success, needsCreatorHint; public List<RedeemCreator> creators; }
 
         internal sealed class RedeemResult
         {
