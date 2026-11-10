@@ -94,7 +94,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             share.Add(post);
             status = GalleryUI.Text("", "creator-message", share);
             status.style.display = DisplayStyle.None;
-            RegisterCallback<DetachFromPanelEvent>(_ => { turn?.Pause(); previewDelay?.Pause(); });
+            RegisterCallback<DetachFromPanelEvent>(_ => { turn?.Pause(); previewDelay?.Pause(); ReleaseThumbnail(); });
+            // Shown again (docked anew): the draft's thumbnail comes back. One still being drawn when the form left was dropped
+            // (DrawThumbnailAsync draws nothing off screen).
+            RegisterCallback<AttachToPanelEvent>(_ => { if (thumbnail.image == null && draft.Thumbnail != null) ShowThumbnail(draft.Thumbnail); });
             // The item shows the variant the draft starts from: only its thumbnail is drawn until something changes.
             Check();
             schedule.Execute(() => _ = DrawThumbnailAsync(previewing));
@@ -102,17 +105,30 @@ namespace Orbiters.MyAvatar.Editor.Gallery
 
         private string thumbnailKey;
 
+        // One texture per form: the thumbnail it replaces is shown nowhere else.
+        private void ShowThumbnail(byte[] png)
+        {
+            string key = "form-thumbnail|" + PartVariant.Hash(png);
+            thumbnail.image = PartVariants.Picture(key, () => png);
+            if (thumbnailKey != key) PartVariants.ForgetPicture(thumbnailKey);
+            thumbnailKey = key;
+        }
+
+        // The form's own texture goes with it.
+        private void ReleaseThumbnail()
+        {
+            thumbnail.image = null;
+            PartVariants.ForgetPicture(thumbnailKey);
+            thumbnailKey = null;
+        }
+
         private async Task DrawThumbnailAsync(int ticket)
         {
             if (placed.Item == null) return;
             var png = await ItemParts.ThumbnailAsync(placed.Item, placed.Definition, placed.PrefabPath, placed.PartsPath, placed.Part, Previewed());
             if (ticket != previewing || panel == null || png == null) return;
             draft.Thumbnail = png;
-            // One texture per form: the thumbnail it replaces is shown nowhere else.
-            string key = "form-thumbnail|" + PartVariant.Hash(png);
-            thumbnail.image = PartVariants.Picture(key, () => png);
-            if (thumbnailKey != key) PartVariants.ForgetPicture(thumbnailKey);
-            thumbnailKey = key;
+            ShowThumbnail(png);
             UpdatePost();
         }
 
