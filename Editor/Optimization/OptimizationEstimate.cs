@@ -767,9 +767,27 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private static string Key(MyAvatar avatar, OptimizationPasses passes) =>
             Key(avatar, passes, avatar.uploadOptimization.PolygonQuality, avatar.uploadOptimization.SharpFrom);
 
+        // Keys built while the avatar cannot change (KeysHeld).
+        private static Dictionary<(int, OptimizationPasses, float, float), string> heldKeys;
+
+        /// <summary>
+        /// Until disposed, each key is built once: for callers that ask several times while nothing can change the avatar (a
+        /// card's refresh asks for the estimate, the build fingerprint and the levels of a rank plan).
+        /// </summary>
+        internal static IDisposable KeysHeld()
+        {
+            if (heldKeys != null) return null;
+            heldKeys = new Dictionary<(int, OptimizationPasses, float, float), string>();
+            return new Release();
+        }
+
+        private sealed class Release : IDisposable { public void Dispose() => heldKeys = null; }
+
         // The same for settings the avatar may not have (a level a rank plan looks up).
         private static string Key(MyAvatar avatar, OptimizationPasses passes, float polygonQuality, float sharpFrom)
         {
+            var held = (avatar.GetInstanceID(), passes, polygonQuality, sharpFrom);
+            if (heldKeys != null && heldKeys.TryGetValue(held, out var known)) return known;
             var root = TextureOptimization.AvatarRoot(avatar);
             var key = new System.Text.StringBuilder().Append((int)passes).Append('|').Append(TextureOptimization.ChangeKey(avatar));
             if ((passes & OptimizationPasses.FewerPolygons) != 0) key.Append('|').Append(polygonQuality.ToString("R", CultureInfo.InvariantCulture));
@@ -784,7 +802,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 else if (component is Behaviour b) key.Append(b.enabled ? '+' : '-');
                 else if (component is Renderer r) key.Append(r.enabled ? '+' : '-');
             }
-            return key.Append('|').Append(Edits(root)).ToString();
+            string result = key.Append('|').Append(Edits(root)).ToString();
+            if (heldKeys != null) heldKeys[held] = result;
+            return result;
         }
     }
 }

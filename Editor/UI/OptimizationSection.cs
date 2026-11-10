@@ -25,6 +25,9 @@ namespace Orbiters.MyAvatar.Editor
         private readonly MyAvatar avatar;
         private readonly VisualElement hero, estimate, polygons, suggestion;
         private IVisualElementScheduledItem poll, write, polygonWrite;
+        // What the last refresh saw (see Changes).
+        private int seenChanges = -1, seenRepaints = -1, seenWeights;
+        private bool seenQuest;
         private string shown, shownRank, shownEstimate, shownPolygons;
         private float pendingDistance = -1f, ringFill;
         private Label eyebrow;
@@ -114,17 +117,67 @@ namespace Orbiters.MyAvatar.Editor
         private void BuildMeasured() { shownEstimate = null; if (panel != null) Refresh(); }
 
         // The poll looks for changes only while the section can be seen with Unity in front: a covered, scrolled-away or
-        // folded section costs nothing. Clicks and finished estimates refresh it directly.
+        // folded section costs nothing. Clicks and finished estimates refresh it directly. It asks for the estimate (whose
+        // key walks the whole avatar) only after something that may change it: an edit, a hierarchy change, an import, a
+        // platform switch, or blendshape weights moved without Undo (seen when the Scene view repaints).
         private void Poll()
         {
             if (!InternalEditorUtility.isApplicationActive || panel == null || resolvedStyle.display == DisplayStyle.None ||
                 Body.resolvedStyle.display == DisplayStyle.None || !panel.visualTree.worldBound.Overlaps(worldBound)) return;
+            if (!avatar) return;
+            if (seenChanges == changes && seenQuest == Quest && (seenRepaints == repaints || Weights() == seenWeights)) { seenRepaints = repaints; return; }
             Refresh();
+        }
+
+        // Changes anywhere that may change an estimate, counted by events.
+        private static int changes, repaints;
+
+        [InitializeOnLoadMethod]
+        private static void WatchChanges()
+        {
+            ObjectChangeEvents.changesPublished += (ref ObjectChangeEventStream _) => changes++;
+            EditorApplication.hierarchyChanged += () => changes++;
+            Undo.undoRedoPerformed += () => changes++;
+            PolygonReduction.Ready += () => changes++;
+            SceneView.duringSceneGui += _ => repaints++;
+        }
+
+        internal sealed class ImportWatcher : AssetPostprocessor
+        {
+            private static void OnPostprocessAllAssets(string[] imported, string[] deleted, string[] moved, string[] movedFrom)
+            {
+                if (imported.Any(TextureOptimization.ImportMatters) || deleted.Any(TextureOptimization.ImportMatters) || moved.Any(TextureOptimization.ImportMatters)) changes++;
+            }
+        }
+
+        // The skinned meshes whose weights Weights hashes, found again after a change.
+        private SkinnedMeshRenderer[] weighted;
+        private int weightedAt = -1;
+
+        // A hash of the avatar's blendshape weights: reads numbers only.
+        private int Weights()
+        {
+            if (weightedAt != changes || weighted == null) { weighted = TextureOptimization.AvatarRoot(avatar).GetComponentsInChildren<SkinnedMeshRenderer>(true); weightedAt = changes; }
+            int hash = 17;
+            foreach (var skinned in weighted)
+            {
+                if (!skinned) continue;
+                var mesh = skinned.sharedMesh;
+                int count = mesh ? mesh.blendShapeCount : 0;
+                for (int shape = 0; shape < count; shape++) hash = hash * 31 + skinned.GetBlendShapeWeight(shape).GetHashCode();
+            }
+            return hash;
         }
 
         private void Refresh()
         {
             if (!avatar || panel == null && shown != null) return;
+            seenChanges = changes; seenRepaints = repaints; seenQuest = Quest; seenWeights = Weights();
+            using (OptimizationEstimate.KeysHeld()) Show();
+        }
+
+        private void Show()
+        {
             string state = Settings.level + ":" + (int)Settings.custom + ":" + Quest;
             if (state != shown) { shown = state; shownRank = null; ShowHero(); }
             // The estimate, and its key, once per refresh: every part shows the same.
