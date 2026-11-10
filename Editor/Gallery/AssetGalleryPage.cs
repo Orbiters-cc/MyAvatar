@@ -210,7 +210,9 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 if (quiet && fresh.Select(a => a.id).SequenceEqual(assets.Select(a => a.id)) && fresh.All(a => cards.ContainsKey(a.id)))
                 {
                     assets = fresh;
-                    foreach (var asset in fresh) { var card = cards[asset.id]; card.Bind(asset, card.Installed, card.Job); Bind(card); }
+                    var installed = GalleryInstaller.Installed(avatar);
+                    string avatarId = GalleryInstaller.AvatarId(avatar);
+                    foreach (var asset in fresh) { var card = cards[asset.id]; card.Bind(asset, card.Installed, card.Job); Bind(card, installed, avatarId); }
                     return;
                 }
                 assets = fresh;
@@ -230,14 +232,16 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         {
             grid.Clear();
             cards.Clear();
+            // What the avatar wears and its ID once for every card.
             var installed = GalleryInstaller.Installed(avatar);
+            string avatarId = GalleryInstaller.AvatarId(avatar);
             IEnumerable<GalleryAsset> shown = assets;
-            if (filter == 3) shown = shown.Where(a => installed.Any(i => i.receipt.assetId == a.id) || GalleryJournal.For(GalleryInstaller.AvatarId(avatar), a.id) != null);
+            if (filter == 3) shown = shown.Where(a => installed.Any(i => i.receipt.assetId == a.id) || GalleryJournal.For(avatarId, a.id) != null);
             foreach (var asset in shown)
             {
                 var card = new GalleryCard(asset, OpenDetails, Act);
                 cards[asset.id] = card;
-                Bind(card);
+                Bind(card, installed, avatarId);
                 grid.Add(card);
             }
             if (creator && filter != 3) grid.Add(CreateCard());
@@ -306,13 +310,22 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             message.style.display = string.IsNullOrEmpty(text) ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
-        private void Bind(GalleryCard card)
+        // installed, avatarId: GalleryInstaller.Installed(avatar) and AvatarId(avatar), when the caller binds several cards.
+        private void Bind(GalleryCard card, List<(OrbitersAttachment.GalleryReceipt receipt, List<OrbitersAttachment> attachments)> installed = null, string avatarId = null)
         {
-            var receipt = GalleryInstaller.Installed(avatar).Select(i => i.receipt).FirstOrDefault(r => r.assetId == card.Asset.id);
-            card.Bind(card.Asset, receipt, GalleryJournal.For(GalleryInstaller.AvatarId(avatar), card.Asset.id));
+            installed ??= GalleryInstaller.Installed(avatar);
+            avatarId ??= GalleryInstaller.AvatarId(avatar);
+            var receipt = installed.Select(i => i.receipt).FirstOrDefault(r => r.assetId == card.Asset.id);
+            card.Bind(card.Asset, receipt, GalleryJournal.For(avatarId, card.Asset.id));
         }
 
-        private void RefreshCards() { if (avatar) foreach (var card in cards.Values) Bind(card); }
+        private void RefreshCards()
+        {
+            if (!avatar) return;
+            var installed = GalleryInstaller.Installed(avatar);
+            string avatarId = GalleryInstaller.AvatarId(avatar);
+            foreach (var card in cards.Values) Bind(card, installed, avatarId);
+        }
 
         private void JobChanged(GalleryJob job)
         {

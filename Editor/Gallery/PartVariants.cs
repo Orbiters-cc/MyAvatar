@@ -235,6 +235,14 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             return Pictures[key] = picture;
         }
 
+        /// <summary>Frees a picture nothing shows any more (one replaced by a newer one of the same thing).</summary>
+        internal static void ForgetPicture(string key)
+        {
+            if (string.IsNullOrEmpty(key) || !Pictures.TryGetValue(key, out var picture)) return;
+            Pictures.Remove(key);
+            if (picture != null) UnityEngine.Object.DestroyImmediate(picture);
+        }
+
         private static string BaseThumbnailCache => Path.Combine(Folder, "Base thumbnails");
 
         /// <summary>

@@ -88,8 +88,9 @@ namespace Orbiters.MyAvatar.Editor
         {
             var root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
             if (root == null) { style.display = DisplayStyle.None; return; }
-            VrchatImportSettings.AutoFix(avatar, root);
-            plan = VrchatImportSettings.Inspect(root);
+            // Looked at once when there was nothing to fix (most of the time), again after a fix.
+            VrchatImportSettings.AutoFix(avatar, root, out var inspected);
+            plan = inspected ?? VrchatImportSettings.Inspect(root);
             VrchatImportSettings.FixedNotes.TryGetValue(avatar.GetInstanceID(), out string fixedNote);
             bool auto = OrbitersFeatures.IsEnabled(VrchatImportSettings.Feature);
             bool todo = !plan.Empty;

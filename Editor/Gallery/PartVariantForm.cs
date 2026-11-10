@@ -100,13 +100,19 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             schedule.Execute(() => _ = DrawThumbnailAsync(previewing));
         }
 
+        private string thumbnailKey;
+
         private async Task DrawThumbnailAsync(int ticket)
         {
             if (placed.Item == null) return;
             var png = await ItemParts.ThumbnailAsync(placed.Item, placed.Definition, placed.PrefabPath, placed.PartsPath, placed.Part, Previewed());
             if (ticket != previewing || panel == null || png == null) return;
             draft.Thumbnail = png;
-            thumbnail.image = PartVariants.Picture("form-thumbnail|" + PartVariant.Hash(png), () => png);
+            // One texture per form: the thumbnail it replaces is shown nowhere else.
+            string key = "form-thumbnail|" + PartVariant.Hash(png);
+            thumbnail.image = PartVariants.Picture(key, () => png);
+            if (thumbnailKey != key) PartVariants.ForgetPicture(thumbnailKey);
+            thumbnailKey = key;
             UpdatePost();
         }
 
