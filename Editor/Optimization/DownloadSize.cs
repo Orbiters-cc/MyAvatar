@@ -472,7 +472,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// is only measured. Its compression runs on another thread: <see cref="Record"/> keeps the result. Null when there
         /// is nothing to measure.
         /// </summary>
-        internal static (string Key, System.Threading.Tasks.Task<long> Deflate)? StartMeasure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
+        internal static (string Key, System.Threading.Tasks.Task<long> Deflate, long Bytes)? StartMeasure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
         {
             var stored = Stored(texture, mobile, planned);
             if (stored == null) return null;
@@ -484,7 +484,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 : UploadTextures.Data(stored, cache: planned != null);
             // The editor can't give the copy (it holds the texture smaller): estimated, not measured.
             if (data == null) return null;
-            return (key, System.Threading.Tasks.Task.Run(() => Deflated(data)));
+            return (key, System.Threading.Tasks.Task.Run(() => Deflated(data)), data.LongLength);
         }
 
         /// <summary>Keeps a measure <see cref="StartMeasure"/> took (on the editor's thread); written with <see cref="SaveMeasures"/>.</summary>

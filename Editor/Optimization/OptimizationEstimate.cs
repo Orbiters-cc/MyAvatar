@@ -75,10 +75,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public int Step;
             /// <summary>The upload's texture copies, for PC and for mobile.</summary>
             public TextureOptimization.Plan PcTextures, QuestTextures;
-            /// <summary>Textures whose download is measured first, one per editor frame (null: not listed yet).</summary>
+            /// <summary>Textures whose download is measured first, a few per editor frame (null: not listed yet).</summary>
             public Queue<(Texture Texture, TextureOptimization.TexturePlan Planned)> Unmeasured;
-            /// <summary>The texture being compressed on another thread for its measure.</summary>
-            public (string Key, Task<long> Deflate, string Name)? Measuring;
+            /// <summary>The textures being compressed on other threads for their measure, with the bytes each holds meanwhile.</summary>
+            public readonly List<(string Key, Task<long> Deflate, string Name, long Bytes)> Measuring = new List<(string, Task<long>, string, long)>();
             /// <summary>The hidden copy being put through the upload's changes, a few of them per editor frame.</summary>
             public Copying Copying;
             public readonly List<Action> Ready = new List<Action>();
@@ -286,7 +286,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         {
             for (int guard = 0; state.Running.Count > 0 && guard < 10000; guard++)
             {
-                foreach (var job in state.Running.Values) job.Measuring?.Deflate.Wait();
+                // Plain compressions on worker threads: nothing they wait for runs on this one.
+                foreach (var job in state.Running.Values) foreach (var measuring in job.Measuring) measuring.Deflate.Wait();
                 if (waitForLiveEdits && Next(true, out _) == null) return;
                 Step(waitForLiveEdits);
             }
@@ -299,6 +300,10 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const int KeptEarlier = 6;
 
         private const double KeepCopyWhilePaused = 5;
+        // Textures' measures compressing at once, the bytes they may hold meanwhile, and the time a frame spends starting them.
+        private static readonly int InFlight = Math.Max(1, Environment.ProcessorCount - 1);
+        private const long InFlightBytes = 256L << 20;
+        private const double MeasureMilliseconds = 12d;
         // While every job waits on live edits, they are asked again this often, not every frame.
         private const double PausedLook = .25;
 
@@ -366,28 +371,36 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                     job.Unmeasured = new Queue<(Texture, TextureOptimization.TexturePlan)>(DownloadSize.Unmeasured(root, mobile, mobile ? job.QuestTextures : job.PcTextures));
                     return;
                 }
-                // A texture's data is compressed on another thread: its measure is kept here once it is done.
-                if (job.Measuring != null)
+                // Textures' data is compressed on other threads: each measure is kept here once it is done.
+                for (int i = job.Measuring.Count - 1; i >= 0; i--)
                 {
-                    var (key, deflate, name) = job.Measuring.Value;
-                    if (!deflate.IsCompleted) return;
-                    job.Measuring = null;
+                    var (key, deflate, name, _) = job.Measuring[i];
+                    if (!deflate.IsCompleted) continue;
+                    job.Measuring.RemoveAt(i);
                     if (deflate.Status == TaskStatus.RanToCompletion) DownloadSize.Record(key, deflate.Result);
                     else Debug.LogWarning("[My Avatar] Optimization: " + name + "'s download is estimated, not measured (" + deflate.Exception?.GetBaseException().Message + ").");
-                    return;
                 }
                 if (job.Unmeasured.Count > 0)
                 {
-                    var (texture, planned) = job.Unmeasured.Dequeue();
-                    if (texture)
-                        try
-                        {
-                            var started = DownloadSize.StartMeasure(texture, mobile, planned);
-                            if (started != null) job.Measuring = (started.Value.Key, started.Value.Deflate, texture.name);
-                        }
-                        catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: " + texture.name + "'s download is estimated, not measured (" + ex.Message + ")."); }
+                    // Several in flight, on the threads the processor has to spare and within a memory budget, started for a
+                    // few milliseconds a frame: reading a texture's data (and making a copy the upload needs, compressed on
+                    // this thread: Unity's compressor runs nowhere else) is what the frame spends.
+                    var watch = System.Diagnostics.Stopwatch.StartNew();
+                    do
+                    {
+                        if (job.Measuring.Count >= InFlight || job.Measuring.Sum(m => m.Bytes) >= InFlightBytes) break;
+                        var (texture, planned) = job.Unmeasured.Dequeue();
+                        if (texture)
+                            try
+                            {
+                                var started = DownloadSize.StartMeasure(texture, mobile, planned);
+                                if (started != null) job.Measuring.Add((started.Value.Key, started.Value.Deflate, texture.name, started.Value.Bytes));
+                            }
+                            catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: " + texture.name + "'s download is estimated, not measured (" + ex.Message + ")."); }
+                    } while (job.Unmeasured.Count > 0 && watch.Elapsed.TotalMilliseconds < MeasureMilliseconds);
                     return;
                 }
+                if (job.Measuring.Count > 0) return;
                 // Written once for the job's textures.
                 DownloadSize.SaveMeasures();
                 if (job.Step == 0)
