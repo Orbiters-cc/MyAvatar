@@ -135,7 +135,10 @@ namespace Orbiters.MyAvatar.Editor
                         string asset = Path.Combine(root, pair.Value.asset);
                         pair.Value.assetModified = File.GetLastWriteTimeUtc(asset).Ticks; pair.Value.metaModified = File.GetLastWriteTimeUtc(asset + ".meta").Ticks;
                     }
-                    LibraryStore.Write(CacheFile, cache.Skip(Math.Max(0, cache.Count - 2048)).ToDictionary(p => p.Key, p => p.Value));
+                    // The files of this drop last: the oldest entries go first (an updated entry keeps its old place in the dictionary).
+                    var recent = new HashSet<string>(pending.Select(p => p.source));
+                    var ordered = cache.Where(p => !recent.Contains(p.Key)).Concat(cache.Where(p => recent.Contains(p.Key))).ToList();
+                    LibraryStore.Write(CacheFile, ordered.Skip(Math.Max(0, ordered.Count - 2048)).ToDictionary(p => p.Key, p => p.Value));
                 });
                 progress(.7f, pending.Count > 0 ? $"Imported {pending.Count} new texture{(pending.Count == 1 ? "" : "s")}" : "Textures ready");
                 return result;

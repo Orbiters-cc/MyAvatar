@@ -71,7 +71,7 @@ namespace Orbiters.MyAvatar.Editor
             if (done)
             {
                 // Said for a moment, then the card goes.
-                card.schedule.Execute(RefreshNotes).StartingIn((long)(DesktopDoneSeconds * 1000) + 50);
+                card.schedule.Execute(() => RefreshNotes()).StartingIn((long)(DesktopDoneSeconds * 1000) + 50);
                 return;
             }
             var actions = new VisualElement(); actions.AddToClassList("desktop-card__actions"); card.Add(actions);

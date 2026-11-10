@@ -72,13 +72,14 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         private bool detached;
+        private IDisposable changes;
 
         private void Subscribe()
         {
             Unsubscribe();
             AccessoryService.Changed += Changed;
-            EditorApplication.hierarchyChanged += Schedule;
-            Undo.undoRedoPerformed += Schedule;
+            // Changes to this avatar's objects and Undo, told once they settle (AvatarChanges waits as Schedule did).
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy | AvatarFacets.Undo, _ => { pending?.Pause(); Refresh(); });
             OrbitersFeatures.Changed += FeatureChanged;
             CustomBaseDetection.Changed += BaseChanged;
             RefitRecords.Changed += RecordChanged;
@@ -87,7 +88,7 @@ namespace Orbiters.MyAvatar.Editor
 
         private void Unsubscribe()
         {
-            AccessoryService.Changed -= Changed; EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule;
+            AccessoryService.Changed -= Changed; changes?.Dispose(); changes = null;
             OrbitersFeatures.Changed -= FeatureChanged;
             CustomBaseDetection.Changed -= BaseChanged; RefitRecords.Changed -= RecordChanged; RefitEngine.Changed -= Schedule;
         }
@@ -263,7 +264,8 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (!avatar || !Enabled) { style.display = DisplayStyle.None; return; }
             // Keep an active drop's choices reachable, but leave no empty heading on an avatar.
-            bool hasContent = AttachmentInstaller.Installed(avatar.transform).Count > 0 ||
+            var installed = AttachmentInstaller.Installed(avatar.transform);
+            bool hasContent = installed.Count > 0 ||
                 AccessoryService.PendingOptions(avatar, out _).Count > 0 || VrcLens.AwaitsManager(avatar);
             style.display = hasContent ? DisplayStyle.Flex : DisplayStyle.None;
             if (AccessoryService.Busy(avatar)) return;
@@ -274,8 +276,8 @@ namespace Orbiters.MyAvatar.Editor
                 else zone.ShowDone(avatar.accessoryStatus, avatar.accessoryWarning);
             }
             RefreshChoice();
-            RefreshNotes();
-            RefreshList();
+            RefreshNotes(installed);
+            RefreshList(installed);
             RefreshFit();
             RefreshNames();
         }
@@ -355,10 +357,10 @@ namespace Orbiters.MyAvatar.Editor
         }
 
         // Notes about an accessory on the avatar go in its entry of the list; the rest (refused files, errors) stay here.
-        private void RefreshNotes()
+        private void RefreshNotes(List<OrbitersAttachment> installed = null)
         {
             notes.Clear();
-            var installed = AttachmentInstaller.Installed(avatar.transform);
+            installed ??= AttachmentInstaller.Installed(avatar.transform);
             // A note about an accessory or an object on the avatar goes once that is gone (removed, undone), and a fit
             // question once its accessory is no longer attached.
             if (avatar.accessoryNotes.RemoveAll(n => Gone(n.accessory) || Gone(n.target) ||
@@ -410,11 +412,13 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
-        private void RefreshList()
+        private void RefreshList(List<OrbitersAttachment> installed = null)
         {
             list.Clear();
-            var installed = AttachmentInstaller.Installed(avatar.transform);
+            installed ??= AttachmentInstaller.Installed(avatar.transform);
             if (installed.Count == 0) return;
+            // The avatar's slots once for every accessory's texture card.
+            List<TextureSlot> slots = null;
             var title = new Label("On this avatar"); title.AddToClassList("accessory-list__title"); list.Add(title);
             foreach (var attachment in installed)
             {
@@ -469,7 +473,7 @@ namespace Orbiters.MyAvatar.Editor
                     AccessoryService.Status(avatar, avatar.accessoryStatus, avatar.accessoryWarning, avatar.accessoryNotes.Where(n => n.accessory != item).ToList());
                 }));
                 // Gallery assets come set up by their creator, VRCLens by its own setup: no texture slots or material repair to offer.
-                if ((item.gallery == null || !item.gallery.Installed) && !lens) TextureCard(entry, item);
+                if ((item.gallery == null || !item.gallery.Installed) && !lens) TextureCard(entry, item, slots ??= TextureMatching.Slots(avatar, includeAll: true));
                 var own = avatar.accessoryNotes.Where(n => n.accessory == item).ToList();
                 if (!own.Any(n => !string.IsNullOrEmpty(n.fit)))
                 {

@@ -418,26 +418,19 @@ namespace Orbiters.MyAvatar.Editor
                 notes.Add(new MyAvatar.AccessoryNote { target = worn, text = candidate.name + " looks like “" + worn.name + "”, already on this avatar.", duplicate = candidate.path });
                 return null;
             }
-            GameObject instance = worn;
-            if (instance == null)
-            {
-                instance = (GameObject)PrefabUtility.InstantiatePrefab(candidate.asset, avatar.transform);
-                Undo.RegisterCreatedObjectUndo(instance, "Add " + candidate.name);
-            }
-            AttachmentHooks.Prepare(instance, avatar.transform);
-            var plan = AttachmentPlanner.Analyze(instance, avatar.transform);
-            if (plan.Kind == AttachmentKind.Empty)
+            var instance = worn ?? AccessoryPlacement.Instantiate(candidate.asset, avatar.transform, candidate.name);
+            // A copy taken over counts as placed by My Avatar: dropping the item again handed it over, and Remove takes it off.
+            var attachment = AccessoryPlacement.Install(instance, avatar.transform, guid, candidate.path, out var plan);
+            if (attachment == null)
             {
                 if (worn == null) Undo.DestroyObjectImmediate(instance);
                 notes.Add(new MyAvatar.AccessoryNote { text = candidate.name + " has nothing to show on the avatar.", warning = true });
                 return null;
             }
-            // A copy taken over counts as placed by My Avatar: dropping the item again handed it over, and Remove takes it off.
-            var attachment = AttachmentInstaller.Install(plan, new AttachmentOptions { Created = true, Source = guid, Variant = candidate.path });
             // Clothing made for another body (its hips at the avatar's chest, another height): resized and moved onto this
             // avatar's armature (its original base's, over the body, on a custom base that moved its bones), said in its
             // entry with a way back. One put on by hand stays where its owner placed it.
-            if (worn == null && (plan.Kind == AttachmentKind.Clothing || plan.Kind == AttachmentKind.Configured) &&
+            if (worn == null && AccessoryPlacement.Fitted(plan) &&
                 AttachmentFit.Fit(attachment, avatar.transform) is AttachmentFit.Measure fit)
                 notes.Add(new MyAvatar.AccessoryNote { accessory = attachment, armatureFit = true, text = FitText(candidate.name, fit) });
             foreach (var note in plan.Notes)

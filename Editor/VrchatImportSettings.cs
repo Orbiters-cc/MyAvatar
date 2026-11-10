@@ -167,12 +167,17 @@ namespace Orbiters.MyAvatar.Editor
         /// Fixes what the avatar's files lack by themselves (when the feature is on), once per file and session; records
         /// what changed for the avatar's card. Returns what changed.
         /// </summary>
-        internal static Plan AutoFix(MyAvatar avatar, GameObject root)
+        internal static Plan AutoFix(MyAvatar avatar, GameObject root) => AutoFix(avatar, root, out _);
+
+        /// <summary><paramref name="inspected"/>: what Inspect finds now when nothing was fixed (the files are as they were), else null.</summary>
+        internal static Plan AutoFix(MyAvatar avatar, GameObject root, out Plan inspected)
         {
+            inspected = null;
             var none = new Plan();
             if (!avatar || root == null || !OrbitersFeatures.IsEnabled(Feature) || EditorApplication.isPlayingOrWillChangePlaymode ||
                 EditorApplication.isCompiling || EditorApplication.isUpdating || EditorUtility.IsPersistent(root)) return none;
             var plan = Inspect(root);
+            if (plan.Empty) { inspected = plan; return none; }
             plan.ReadWrite.RemoveAll(Tried.Contains); plan.BlendShapeNormals.RemoveAll(Tried.Contains); plan.StreamingMips.RemoveAll(Tried.Contains);
             if (plan.Empty) return none;
             var done = Fix(plan);

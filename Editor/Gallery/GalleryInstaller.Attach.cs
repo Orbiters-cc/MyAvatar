@@ -183,14 +183,11 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             {
                 foreach (var (item, asset) in prefabs)
                 {
-                    var instance = (GameObject)PrefabUtility.InstantiatePrefab(asset, avatar.transform);
-                    Undo.RegisterCreatedObjectUndo(instance, "Add " + item.name);
-                    AttachmentHooks.Prepare(instance, avatar.transform);
-                    var plan = AttachmentPlanner.Analyze(instance, avatar.transform);
-                    if (plan.Kind == AttachmentKind.Empty) { Undo.DestroyObjectImmediate(instance); throw new InvalidOperationException(item.name + " has nothing to show on the avatar."); }
-                    var attachment = AttachmentInstaller.Install(plan, new AttachmentOptions { Created = true, Source = item.guid, Variant = AssetDatabase.GetAssetPath(asset) });
+                    var instance = AccessoryPlacement.Instantiate(asset, avatar.transform, item.name);
+                    var attachment = AccessoryPlacement.Install(instance, avatar.transform, item.guid, AssetDatabase.GetAssetPath(asset), out var plan);
+                    if (attachment == null) { Undo.DestroyObjectImmediate(instance); throw new InvalidOperationException(item.name + " has nothing to show on the avatar."); }
                     if (bones.TryGetValue(item, out var target)) AttachmentInstaller.Retarget(attachment, target, snap: false);
-                    else if ((plan.Kind == AttachmentKind.Clothing || plan.Kind == AttachmentKind.Configured) && item.attach?.mode != "configured")
+                    else if (AccessoryPlacement.Fitted(plan) && item.attach?.mode != "configured")
                         AttachmentFit.Fit(attachment, avatar.transform);
                     attachment.gallery = Receipt(job, setup);
                     // Its creator says it is not worn on the body, or it is a prop this Toolkit fits itself (N4N0, the drawing

@@ -92,6 +92,8 @@ namespace Orbiters.MyAvatar.Editor
             if (Cache.TryGetValue(id, out var cached) && cached.Key == key) return cached.Meters;
             var result = new Dictionary<Texture, float>();
             var geometry = new Dictionary<Renderer, (List<Vector3> World, List<Vector2> Uv, Mesh Mesh)>();
+            // Each submesh is measured once, whatever number of slots show it.
+            var areas = new Dictionary<(Renderer, int), (float World, float Uv)>();
             try
             {
                 foreach (var slot in slots.Where(s => s.existing && !ViewMapped(s.property + " " + s.description)))
@@ -104,7 +106,8 @@ namespace Orbiters.MyAvatar.Editor
                         if (!renderer) continue;
                         if (!geometry.TryGetValue(renderer, out var shape)) geometry[renderer] = shape = Geometry(renderer);
                         if (shape.Mesh == null || index >= shape.Mesh.subMeshCount || shape.Uv.Count != shape.World.Count) continue;
-                        var (world, uv) = Areas(shape.Mesh, index, shape.World, shape.Uv);
+                        if (!areas.TryGetValue((renderer, index), out var area)) areas[(renderer, index)] = area = Areas(shape.Mesh, index, shape.World, shape.Uv);
+                        var (world, uv) = area;
                         if (world <= 1e-8f || uv <= 1e-8f) continue;
                         float meters = Mathf.Sqrt(world / (uv * repeat));
                         if (!result.TryGetValue(slot.existing, out float most) || meters > most) result[slot.existing] = meters;

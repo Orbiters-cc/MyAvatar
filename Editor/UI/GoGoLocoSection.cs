@@ -31,20 +31,25 @@ namespace Orbiters.MyAvatar.Editor
             note = new Label(); note.AddToClassList("ft-note"); note.style.display = DisplayStyle.None; Body.Add(note);
             ToolHero.Credit(Body, "Locomotion by", "Franada’s GoGoLoco", GoGoLoco.Author,
                 GoGoLoco.Author + "\nGoGoLoco is Franada’s: credit it on your store or product page when you sell an avatar that uses it.");
-            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); Schedule(); });
+            // The constructor just looked: only a later attach (docked again) catches up on what changed meanwhile.
+            RegisterCallback<AttachToPanelEvent>(_ => { Subscribe(); if (attached) Schedule(); attached = true; });
             RegisterCallback<DetachFromPanelEvent>(_ => Unsubscribe());
             Refresh();
         }
 
+        private bool attached;
+        private System.IDisposable changes;
+
         private void Subscribe()
         {
             Unsubscribe();
-            EditorApplication.hierarchyChanged += Schedule; Undo.undoRedoPerformed += Schedule; PackageSetup.Finished += SetupFinished;
+            changes = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy | AvatarFacets.Undo, _ => { pending?.Pause(); Refresh(); });
+            PackageSetup.Finished += SetupFinished;
         }
 
         private void Unsubscribe()
         {
-            EditorApplication.hierarchyChanged -= Schedule; Undo.undoRedoPerformed -= Schedule; PackageSetup.Finished -= SetupFinished;
+            changes?.Dispose(); changes = null; PackageSetup.Finished -= SetupFinished;
         }
 
         private void SetupFinished(int id) { if (avatar && id == avatar.GetInstanceID()) Schedule(); }

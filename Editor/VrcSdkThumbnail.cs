@@ -30,7 +30,8 @@ namespace Orbiters.MyAvatar.Editor
         private static readonly Dictionary<string, DateTime> remoteRequested = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         private static GameObject lastSelected, pendingSelection;
         private static string offered;
-        private static double selectedAt;
+        private static double selectedAt, nextLook;
+        private static MyAvatar selectedAvatar;
         private static int revision;
 #if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
         // The picture Offer gave the SDK's thumbnail block (its block exists from SDK 3.7.6).
@@ -57,18 +58,24 @@ namespace Orbiters.MyAvatar.Editor
             var selected = Selected(builder);
             if (selected != lastSelected)
             {
-                lastSelected = selected; offered = null; selectedAt = EditorApplication.timeSinceStartup; revision++;
+                lastSelected = selected; offered = null; selectedAt = EditorApplication.timeSinceStartup; revision++; nextLook = 0;
+                selectedAvatar = !selected ? null : selected.TryGetComponent(out MyAvatar own) ? own : selected.GetComponentInChildren<MyAvatar>(true);
 #if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
                 offeredImage = null;
 #endif
             }
             if (!selected) return;
             if (builder.BuildState == SdkBuildState.Building || builder.UploadState == SdkUploadState.Uploading) return;
+            // What follows reads files and components: twice a second is soon enough (selection changes are seen every frame).
+            if (EditorApplication.timeSinceStartup < nextLook) return;
+            nextLook = EditorApplication.timeSinceStartup + .5;
             // Whatever thumbnail waits in the SDK, VRChat's copy is known ahead of Build & Publish (VrcSdkThumbnailCheck).
             string id = BlueprintId(selected);
             if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(Pending(builder))) RefreshRemote(id);
-            var avatar = selected.GetComponent<MyAvatar>();
-            if (!avatar) avatar = selected.GetComponentInChildren<MyAvatar>(true);
+            // My Avatar added or removed since the selection: looked up again.
+            if (!selectedAvatar || !selectedAvatar.transform.IsChildOf(selected.transform))
+                selectedAvatar = selected.TryGetComponent(out MyAvatar own) ? own : selected.GetComponentInChildren<MyAvatar>(true);
+            var avatar = selectedAvatar;
             string path = avatar ? AvatarThumbnail.FullPath(avatar.thumbnail) : null;
             // A new capture overwrites the same file, so the write time is part of what was offered. So is the blueprint
             // ID: the SDK clears it when VRChat doesn't answer for the avatar, then keeps a thumbnail offered meanwhile
@@ -93,7 +100,8 @@ namespace Orbiters.MyAvatar.Editor
             catch (MissingReferenceException) { return null; }
         }
 
-        private static string BlueprintId(GameObject avatar) => avatar ? avatar.GetComponent<VRC.Core.PipelineManager>()?.blueprintId?.Trim() : null;
+        // TryGetComponent: GetComponent's missing-component stand-in is not null to `?.` in the editor.
+        private static string BlueprintId(GameObject avatar) => avatar && avatar.TryGetComponent(out VRC.Core.PipelineManager pipeline) ? pipeline.blueprintId?.Trim() : null;
 
 #if MYAVATAR_VRCSDK_3_7_6_OR_NEWER
         // The builder's thumbnail block (VRChat SDK 3.7.6 and newer): before, the thumbnail is chosen in the SDK only.

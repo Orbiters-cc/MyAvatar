@@ -22,16 +22,27 @@ namespace Orbiters.MyAvatar.Editor
         internal static void ShowBuildTarget(VrcAvatarCard card) =>
             card.SetPlatforms(true, EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android);
 
-        // VRChat shows a warning badge on Poor and Very Poor avatars; the rating is the SDK's own, for the build target.
-        internal static void ShowPerformance(VrcAvatarCard card, GameObject avatar)
+        // VRChat shows a warning badge on Poor and Very Poor avatars; the rating is the SDK's own, for the build target. It
+        // walks the whole avatar, so it is kept for the session while the avatar stays as it is (owner: the My Avatar whose
+        // optimization estimate key says so; null measures every time).
+        internal static void ShowPerformance(VrcAvatarCard card, GameObject avatar, MyAvatar owner = null)
         {
             var rating = PerformanceRating.None;
             if (avatar)
             {
                 bool mobile = EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android || EditorUserBuildSettings.activeBuildTarget == BuildTarget.iOS;
-                var stats = new AvatarPerformanceStats(mobile);
-                AvatarPerformance.CalculatePerformanceStats(avatar.name, avatar, stats, mobile);
-                rating = stats.GetPerformanceRatingForCategory(AvatarPerformanceCategory.Overall);
+                string key = "Orbiters.MyAvatar.CardRating." + avatar.GetInstanceID();
+                string state = owner ? Optimization.OptimizationEstimate.Fingerprint(owner) + "|" + mobile + "|" : null;
+                string kept = state != null ? SessionState.GetString(key, "") : "";
+                if (state != null && kept.StartsWith(state, System.StringComparison.Ordinal) && int.TryParse(kept.Substring(state.Length), out int known))
+                    rating = (PerformanceRating)known;
+                else
+                {
+                    var stats = new AvatarPerformanceStats(mobile);
+                    AvatarPerformance.CalculatePerformanceStats(avatar.name, avatar, stats, mobile);
+                    rating = stats.GetPerformanceRatingForCategory(AvatarPerformanceCategory.Overall);
+                    if (state != null) SessionState.SetString(key, state + (int)rating);
+                }
             }
             card.SetPerformance(rating == PerformanceRating.VeryPoor ? VrcPerformanceWarning.VeryPoor
                 : rating == PerformanceRating.Poor ? VrcPerformanceWarning.Poor : VrcPerformanceWarning.None);
