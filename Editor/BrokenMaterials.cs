@@ -153,10 +153,14 @@ namespace Orbiters.MyAvatar.Editor
             return descriptor ? descriptor.gameObject : target;
         }
 
-        /// <summary>The materials below <paramref name="root"/> that do not render, each with its plan.</summary>
-        internal static List<BrokenMaterial> Inspect(GameObject root, ShaderCatalog catalog = null)
+        /// <summary>
+        /// The materials below <paramref name="root"/> that do not render, each with its plan. <paramref name="fromSnapshot"/>:
+        /// the renderers come from the avatar's live <see cref="Orbiters.Toolkit.Editor.VRChat.AvatarSnapshot"/> (the Materials
+        /// card, between edits) instead of a fresh walk (tools acting right after their own changes).
+        /// </summary>
+        internal static List<BrokenMaterial> Inspect(GameObject root, ShaderCatalog catalog = null, bool fromSnapshot = false)
         {
-            var found = Find(root);
+            var found = Find(root, fromSnapshot);
             catalog ??= new ShaderCatalog();
             foreach (var entry in found)
             {
@@ -177,17 +181,18 @@ namespace Orbiters.MyAvatar.Editor
         /// What does not render below <paramref name="root"/> as a short key (each material, why, and its renderers), without
         /// reading the materials' files or planning: what <see cref="Inspect"/> finds changed when the key changed.
         /// </summary>
-        internal static string Key(GameObject root) =>
-            string.Join("|", Find(root).Select(e => e.Material.GetInstanceID() + ":" + e.Problem + ":" + string.Join(",", e.Renderers.Select(r => r.GetInstanceID()))));
+        internal static string Key(GameObject root, bool fromSnapshot = false) =>
+            string.Join("|", Find(root, fromSnapshot).Select(e => e.Material.GetInstanceID() + ":" + e.Problem + ":" + string.Join(",", e.Renderers.Select(r => r.GetInstanceID()))));
 
-        private static List<BrokenMaterial> Find(GameObject root)
+        private static List<BrokenMaterial> Find(GameObject root, bool fromSnapshot)
         {
             var found = new Dictionary<Material, BrokenMaterial>();
             if (!root) return new List<BrokenMaterial>();
             var fine = new HashSet<Material>();
-            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+            // Materials are read as they are now, whichever list the renderers come from.
+            foreach (var renderer in AvatarMaterials.Renderers(root, fromSnapshot))
             {
-                if (AvatarMaterials.Helper(renderer.transform, root.transform)) continue;
+                if (!renderer || AvatarMaterials.Helper(renderer.transform, root.transform)) continue;
                 foreach (var material in renderer.sharedMaterials)
                 {
                     if (!material || fine.Contains(material)) continue;

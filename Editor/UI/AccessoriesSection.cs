@@ -108,7 +108,23 @@ namespace Orbiters.MyAvatar.Editor
             Refresh();
         }
 
-        private void Changed(MyAvatar changed) { if (changed == avatar) Refresh(); }
+        // An operation on the avatar just ended (a drop, an installation, a removal), maybe in this very frame: its objects
+        // are read again, not from the snapshot, which may not have heard of them yet.
+        private void Changed(MyAvatar changed)
+        {
+            if (changed != avatar) return;
+            AvatarSnapshot.Of(avatar.gameObject)?.Invalidate();
+            Refresh();
+        }
+
+        // The accessories on the avatar, from its snapshot (shared with the other sections, kept up to date by the change
+        // bus and AvatarChanges' signature).
+        private List<OrbitersAttachment> Installed()
+        {
+            var found = new List<OrbitersAttachment>();
+            foreach (var attachment in AvatarSnapshot.Of(avatar.gameObject).All<OrbitersAttachment>()) if (attachment) found.Add(attachment);
+            return found;
+        }
 
         private IVisualElementScheduledItem pending;
         private void Schedule() { pending?.Pause(); pending = schedule.Execute(Refresh).StartingIn(300); }
@@ -264,7 +280,7 @@ namespace Orbiters.MyAvatar.Editor
         {
             if (!avatar || !Enabled) { style.display = DisplayStyle.None; return; }
             // Keep an active drop's choices reachable, but leave no empty heading on an avatar.
-            var installed = AttachmentInstaller.Installed(avatar.transform);
+            var installed = Installed();
             bool hasContent = installed.Count > 0 ||
                 AccessoryService.PendingOptions(avatar, out _).Count > 0 || VrcLens.AwaitsManager(avatar);
             style.display = hasContent ? DisplayStyle.Flex : DisplayStyle.None;
@@ -360,7 +376,7 @@ namespace Orbiters.MyAvatar.Editor
         private void RefreshNotes(List<OrbitersAttachment> installed = null)
         {
             notes.Clear();
-            installed ??= AttachmentInstaller.Installed(avatar.transform);
+            installed ??= Installed();
             // A note about an accessory or an object on the avatar goes once that is gone (removed, undone), and a fit
             // question once its accessory is no longer attached.
             if (avatar.accessoryNotes.RemoveAll(n => Gone(n.accessory) || Gone(n.target) ||
@@ -415,7 +431,7 @@ namespace Orbiters.MyAvatar.Editor
         private void RefreshList(List<OrbitersAttachment> installed = null)
         {
             list.Clear();
-            installed ??= AttachmentInstaller.Installed(avatar.transform);
+            installed ??= Installed();
             if (installed.Count == 0) return;
             // The avatar's slots once for every accessory's texture card.
             List<TextureSlot> slots = null;

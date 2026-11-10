@@ -115,17 +115,17 @@ namespace Orbiters.MyAvatar.Editor
 
         private List<BrokenMaterial> Broken(GameObject root)
         {
-            string key = BrokenMaterials.Key(root);
+            string key = BrokenMaterials.Key(root, fromSnapshot: true);
             if (key == brokenKey && !projectChanged) return broken;
             brokenKey = key; projectChanged = false;
-            return broken = key.Length == 0 ? new List<BrokenMaterial>() : BrokenMaterials.Inspect(root);
+            return broken = key.Length == 0 ? new List<BrokenMaterial>() : BrokenMaterials.Inspect(root, fromSnapshot: true);
         }
 
         private void Refresh()
         {
             var root = avatar ? TextureOptimization.AvatarRoot(avatar) : null;
-            var advice = AvatarMaterials.Inspect(root);
-            if (AutoFixOpenSurfaces(advice)) advice = AvatarMaterials.Inspect(root);
+            var advice = AvatarMaterials.Inspect(root, fromSnapshot: true);
+            if (AutoFixOpenSurfaces(advice)) advice = AvatarMaterials.Inspect(root, fromSnapshot: true);
             var broken = Broken(root);
             // Undone: what the last fix made render doesn't again, the note saying it does goes.
             if (brokenText != null && broken.Any(b => fixedBroken.Contains(b.Material.GetInstanceID())))

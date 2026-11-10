@@ -246,7 +246,8 @@ namespace Orbiters.MyAvatar.Editor
 
         private static string Lower(string text) => string.IsNullOrEmpty(text) ? text : char.ToLowerInvariant(text[0]) + text.Substring(1);
 
-        private static bool UsesMToon(GameObject root) =>
-            root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials).Any(m => m != null && m.shader != null && m.shader.name.IndexOf("MToon", StringComparison.OrdinalIgnoreCase) >= 0);
+        // The renderers from the avatar's snapshot, shared with the other sections.
+        private static bool UsesMToon(GameObject root) => root &&
+            Orbiters.Toolkit.Editor.VRChat.AvatarSnapshot.Of(root).All<Renderer>().Where(r => r).SelectMany(r => r.sharedMaterials).Any(m => m != null && m.shader != null && m.shader.name.IndexOf("MToon", StringComparison.OrdinalIgnoreCase) >= 0);
     }
 }
