@@ -72,9 +72,8 @@ namespace Orbiters.MyAvatar.Editor
         internal static Func<UntrustedCodeDialog.Request, bool> ConfirmCode = UntrustedCodeDialog.Confirm;
         /// <summary>Asks before a package replaces files the project has with other content; replaced in tests.</summary>
         internal static Func<UntrustedCodeDialog.Request, bool> ConfirmReplace = UntrustedCodeDialog.Confirm;
-        private static readonly HashSet<int> Running = new HashSet<int>();
-
-        internal static bool Busy(MyAvatar avatar) => avatar && (Running.Contains(avatar.GetInstanceID()) || Gallery.GalleryInstaller.Busy(avatar));
+        /// <summary>Whether an accessory drop or a gallery installation is adding something to the avatar (<see cref="AvatarWork"/>).</summary>
+        internal static bool Busy(MyAvatar avatar) => AvatarWork.Installing(avatar);
 
         /// <summary>Tells Inspectors the avatar's accessories changed (a gallery installation finished or was removed).</summary>
         internal static void NotifyChanged(MyAvatar avatar) { if (avatar) Changed?.Invoke(avatar); }
@@ -222,10 +221,10 @@ namespace Orbiters.MyAvatar.Editor
         // One job per avatar at a time; drops on other avatars run on their own.
         internal static async Task<List<Outcome>> Locked(MyAvatar avatar, Func<Task<List<Outcome>>> work)
         {
-            int id = avatar.GetInstanceID();
-            if (!Running.Add(id)) throw new InvalidOperationException("My Avatar is still adding an accessory to this avatar. Try again when it is done.");
+            var hold = AvatarWork.TryEnter(avatar, AvatarWork.Kind.Accessory) ??
+                       throw new InvalidOperationException("My Avatar is still adding an accessory to this avatar. Try again when it is done.");
             try { return await work(); }
-            finally { Running.Remove(id); Changed?.Invoke(avatar); }
+            finally { hold.Dispose(); Changed?.Invoke(avatar); }
         }
 
         private static async Task<List<Outcome>> RunAsync(MyAvatar avatar, Job job, Action<float, string> progress, CancellationToken cancellation)

@@ -13,7 +13,6 @@ namespace Orbiters.MyAvatar.Editor
     [CustomEditor(typeof(MyAvatar))]
     public sealed class MyAvatarEditor : UnityEditor.Editor
     {
-        private static readonly HashSet<int> Running = new HashSet<int>();
         private MyAvatar avatar;
         private VisualElement root, content, results, page;
         private DropZone zone;
@@ -232,7 +231,7 @@ namespace Orbiters.MyAvatar.Editor
         private void Drop(string[] paths)
         {
             if (!active || !avatar || paths == null || paths.Length == 0) return;
-            if (busy || Running.Contains(avatar.GetInstanceID()) || AccessoryService.Busy(avatar))
+            if (busy || AvatarWork.Busy(avatar))
             {
                 queuedDrop = paths;
                 zone.SetQueued("Next: " + DropName(paths) + ", once this is done");
@@ -246,7 +245,7 @@ namespace Orbiters.MyAvatar.Editor
         private void StartQueuedDrop()
         {
             if (queuedDrop == null || !active || !avatar) { queuedPoll?.Pause(); queuedPoll = null; return; }
-            if (busy || Running.Contains(avatar.GetInstanceID()) || AccessoryService.Busy(avatar)) return;
+            if (busy || AvatarWork.Busy(avatar)) return;
             var paths = queuedDrop; queuedDrop = null;
             queuedPoll?.Pause(); queuedPoll = null;
             zone.SetQueued(null);
@@ -272,59 +271,18 @@ namespace Orbiters.MyAvatar.Editor
             await Import(paths);
         }
 
-        // Scope: only the materials of these objects (the accessories an accessory drop just added). Tail: the drop's Undo
-        // step, which the textures join when nothing else was done while they were read.
+        // The drop itself is TextureDrops' (no UI): this shows its progress, then offers its AI follow-up. Scope: only the
+        // materials of these objects (the accessories an accessory drop just added). Tail: the drop's Undo step, which the
+        // textures join when nothing else was done while they were read.
         private async Task Import(string[] paths, Transform[] scope = null, UndoTail tail = null)
         {
             var cancellation = operation.Token;
             int started = revision;
             note = null; results.Clear();
-            zone.ShowProgress(.04f, "Finding textures…");
-            var physical = TextureImport.Physical(paths);
-            var files = await Orbiters.Toolkit.Editor.DedicatedTask.Run(() => TextureImport.Expand(physical), cancellation);
-            cancellation.ThrowIfCancellationRequested();
-            var scoped = scope?.Where(t => t).ToList() ?? new List<Transform>();
-            var slots = TextureChanges.Scoped(TextureMatching.Slots(avatar), scoped);
-            foreach (var slot in slots) slot.fillOnly = scoped.Count > 0;
-            if (slots.Count == 0) throw new InvalidOperationException("No editable texture slots were found below this avatar.");
-            string folder = "Assets/Orbiters/MyAvatar/" + Guid.NewGuid().ToString("N");
-            var entries = await TextureImport.ImportAsync(files, folder, (value, text) => { if (active) zone.ShowProgress(value, text); }, cancellation);
-            cancellation.ThrowIfCancellationRequested();
-            if (!avatar) return;
-            zone.ShowProgress(.78f, "Matching " + entries.Count + " textures…");
-            await Task.Yield();
-            cancellation.ThrowIfCancellationRequested();
-            var stats = TextureAnalysis.Measure(entries.Select(e => e.texture));
-            TextureMatching.Match(entries, slots, stats, TextureMemory.Load(avatar));
-            string token = AuthenticationService.GetAuth()?.token;
-            // Only unresolved textures are sent: measured on DeepSeek, adding resolved ones never produced a
-            // useful correction and made fast (non-reasoning) answers less accurate.
-            // A texture whose set already has a home that lacks the slot needs a shader change, not a guess elsewhere.
-            var unmatched = entries.Where(e => !e.material && !(e.reason ?? "").StartsWith(TextureMatching.MissingSlotReason, StringComparison.Ordinal)).ToList();
-            // Slots filled by this drop's local matches are left out, so an answer cannot displace them. Effect renderers
-            // (particles, trails) and secondary layers (detail, matcap, rim...) stay available in the manual slot menu only.
-            var open = slots.Where(s => !s.secondary && s.rendererKind != "effect" && unmatched.Any(e => TextureMatching.Compatible(e.role, s) && TextureMatching.CanAutoAssign(e, s)) &&
-                !entries.Any(e => e.material == s.material && e.property == s.property)).ToList();
-            bool ask = unmatched.Count > 0 && open.Count > 0 && !string.IsNullOrEmpty(token) && aiEnabled;
-            // A request carries a bounded number of slots: the ones most worth asking about.
-            if (ask) open = TextureAi.Relevant(open, entries);
-            object payload = ask ? TextureAi.Payload(unmatched, open, stats) : null;
-            zone.ShowProgress(.9f, "Applying to " + entries.Where(e => e.material).Select(e => e.material).Distinct().Count() + " materials…");
-            await Task.Yield();
-            cancellation.ThrowIfCancellationRequested();
-            int count = 0;
-            void Apply()
-            {
-                Undo.RecordObject(avatar, "My Avatar: texture set");
-                count = TextureChanges.Apply(avatar, entries, folder, scoped);
-                if (count == 0) { avatar.undoMaterials.Clear(); avatar.canRedo = false; }
-                avatar.textures = entries; avatar.batchFolder = folder; avatar.batchScope = scoped; avatar.notice = null;
-                TextureMemory.Record(avatar, entries);
-                TextureChanges.Dirty(avatar);
-            }
-            if (tail != null) tail.Join(Apply); else Apply();
-            zone.ShowProgress(1f, "Done");
-            await FinishImportAsync(ask ? () => ResolveAsync(token, payload, entries, unmatched, open, folder) : (Func<Task>)null,
+            var drop = await TextureDrops.ImportAsync(avatar, paths, scope, tail, () => aiEnabled, (value, text) => { if (active) zone.ShowProgress(value, text); }, cancellation);
+            if (drop == null) return;
+            var ai = drop.Ai;
+            await FinishImportAsync(ai != null ? () => ResolveAsync(ai.Token, ai.Payload, ai.Entries, ai.Sent, ai.Slots, ai.Folder) : (Func<Task>)null,
                 cancellation, started);
         }
 
@@ -342,16 +300,12 @@ namespace Orbiters.MyAvatar.Editor
             background?.Cancel();
             var source = background = new CancellationTokenSource();
             int started = revision;
-            var before = TextureChanges.Capture(avatar, slots);
             SetBackground($"Orbiters AI is placing {sent.Count} more texture{(sent.Count == 1 ? "" : "s")}…");
             try
             {
-                var result = await RequestAi(token, payload, sent, slots, source.Token);
-                while (busy && !source.IsCancellationRequested) await Task.Delay(50, source.Token);
-                source.Token.ThrowIfCancellationRequested();
-                if (!active || !avatar || !aiEnabled || started != revision) return;
-                TextureChanges.Revise(avatar, entries, folder, result.changes, before);
-                TextureMemory.Record(avatar, entries);
+                var request = new TextureDrops.AiRequest { Token = token, Payload = payload, Entries = entries, Sent = sent, Slots = slots, Folder = folder };
+                if (!await TextureDrops.ResolveAsync(avatar, request, (t, p, e, sl, c) => RequestAi(t, p, e, sl, c), () => busy,
+                        () => active && aiEnabled && started == revision, source.Token)) return;
             }
             catch (OperationCanceledException) when (source.IsCancellationRequested) { return; }
             // The request's own timeout is a cancellation too, but nobody cancelled: the textures stay listed to choose by hand.
@@ -387,16 +341,18 @@ namespace Orbiters.MyAvatar.Editor
 
         private async Task Run(Func<Task> work, bool edits = true)
         {
-            if (!active || !avatar || busy || !Running.Add(avatar.GetInstanceID())) return;
+            if (!active || !avatar || busy) return;
+            var hold = AvatarWork.TryEnter(avatar, AvatarWork.Kind.Inspector);
+            if (hold == null) return;
             if (edits) Edited();
-            int id = avatar.GetInstanceID(); busy = true; operation = new CancellationTokenSource();
+            busy = true; operation = new CancellationTokenSource();
             PauseButtons();
             try { await work(); }
             catch (OperationCanceledException) { note = "Cancelled."; noteWarning = false; }
             catch (Exception ex) { note = ex.Message; noteWarning = true; }
             finally
             {
-                Running.Remove(id); busy = false; operation?.Dispose(); operation = null;
+                hold.Dispose(); busy = false; operation?.Dispose(); operation = null;
                 if (active && root != null) { ResumeButtons(); RefreshResults(); }
                 else paused.Clear();
                 var next = pendingAi; pendingAi = null;
@@ -452,8 +408,7 @@ namespace Orbiters.MyAvatar.Editor
             }
             if (!avatar.canRedo) MyAvatarResults.Populate(results, avatar, Edited, () => _ = Run(() => {
                 note = null;
-                TextureChanges.Apply(avatar, avatar.textures, avatar.batchFolder);
-                TextureMemory.Record(avatar, avatar.textures); TextureChanges.Dirty(avatar); return Task.CompletedTask;
+                TextureDrops.ApplyChoices(avatar); return Task.CompletedTask;
             }), RefreshResults);
         }
 

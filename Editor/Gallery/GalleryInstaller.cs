@@ -41,12 +41,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         private static readonly Dictionary<string, DateTime> TrustRead = new Dictionary<string, DateTime>();
         private static readonly TimeSpan TrustLife = TimeSpan.FromMinutes(10);
 
-        internal static bool Busy(MyAvatar avatar)
-        {
-            if (!avatar) return false;
-            string id = AvatarId(avatar);
-            return GalleryJournal.All.Any(j => j.avatar == id && !j.Terminal && !j.Waiting && Running.Contains(j.id));
-        }
+        /// <summary>Whether an installation is running on the avatar (not one waiting for an answer): <see cref="AvatarWork"/>.</summary>
+        internal static bool Busy(MyAvatar avatar) => AvatarWork.Holds(avatar, AvatarWork.Kind.Gallery);
 
         internal static string AvatarId(MyAvatar avatar) => GlobalObjectId.GetGlobalObjectIdSlow(avatar).ToString();
 
@@ -166,12 +162,15 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             if (job == null || job.Terminal || job.Waiting || !Running.Add(job.id)) return;
             var source = new CancellationTokenSource();
             Cancellations[job.id] = source;
+            // Holds its avatar from the moment it is found until the job ends or waits (AvatarWork, shared by installations).
+            IDisposable hold = null;
             try
             {
                 while (!job.Terminal && !job.Waiting)
                 {
                     if (job.cancelRequested && !job.importing) { Finish(job, GalleryJob.Cancelled, CancelledText(job)); break; }
                     var avatar = FindAvatar(job);
+                    if (avatar) hold ??= AvatarWork.TryEnter(avatar, AvatarWork.Kind.Gallery);
                     if (!avatar)
                     {
                         // The avatar's scene is closed: the job waits for it instead of failing.
@@ -197,6 +196,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             }
             finally
             {
+                hold?.Dispose();
                 Running.Remove(job.id);
                 Cancellations.Remove(job.id);
                 source.Dispose();
