@@ -1162,7 +1162,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 .Concat(renderers.SelectMany(r => r.sharedMaterials))
                 .Concat(renderers.SelectMany(r => r.sharedMaterials).Where(m => m != null).SelectMany(m => m.GetTexturePropertyNameIDs().Select(m.GetTexture)))
                 .Where(o => o != null).Distinct().ToList();
-            string State() => string.Join("\n", referenced.Select(o => o.name + " " + EditorUtility.GetDirtyCount(o) + " " + EditorUtility.IsDirty(o) + " " +
+            // A mesh's dirty count and mark are left out: Unity raises them on a skinned mesh each time it is instantiated
+            // (2022.3.22), which a measure does for its hidden copy, with nothing in the mesh changed; its content is compared.
+            string State() => string.Join("\n", referenced.Select(o => o.name + " " + (o is Mesh ? "" : EditorUtility.GetDirtyCount(o) + " " + EditorUtility.IsDirty(o)) + " " +
                 (o is Mesh m ? string.Join(",", m.vertices.Select(v => v.ToString("R"))) + "|" + string.Join(",", m.triangles) : EditorJsonUtility.ToJson(o)))
                 .Concat(renderers.Select(r => EditorJsonUtility.ToJson(r))));
             string before = State();
