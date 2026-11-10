@@ -765,6 +765,32 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(kept.Upload.Skinned, Is.EqualTo(2), "The hidden mesh uploads now.");
         }
 
+        // Textures' measures compress within one set of limits whichever estimate starts them: one more than the limit
+        // waits, the same measure is never compressed twice, and a finished one is reused (also by an estimate replacing
+        // the one that started it).
+        [Test] public void TextureMeasuresShareOneBoundedSchedule()
+        {
+            DownloadSize.FinishCompressing();
+            string folder = Folder();
+            var textures = Enumerable.Range(0, DownloadSize.MaxCompressing + 1)
+                .Select(n => Image(folder, "Measure_" + n, 64, pixel: i => new Color32((byte)(i * 7 + n * 31), (byte)(n * 13), (byte)i, 255))).ToList();
+            var keys = new List<string>();
+            foreach (var texture in textures.Take(DownloadSize.MaxCompressing))
+            {
+                Assert.That(DownloadSize.Measure(texture, false, null, out var key), Is.EqualTo(DownloadSize.Measuring.Compressing));
+                keys.Add(key);
+            }
+            Assert.That(keys.Distinct().Count(), Is.EqualTo(keys.Count), "One key per image.");
+            Assert.That(DownloadSize.Measure(textures.Last(), false, null, out _), Is.EqualTo(DownloadSize.Measuring.Full), "The limit holds.");
+            Assert.That(DownloadSize.Measure(textures[0], false, null, out var again), Is.EqualTo(DownloadSize.Measuring.Compressing), "Already under way: not started twice.");
+            Assert.That(again, Is.EqualTo(keys[0]));
+            DownloadSize.FinishCompressing();
+            Assert.That(DownloadSize.AnyCompressing, Is.False);
+            Assert.That(DownloadSize.Measure(textures[0], false, null, out _), Is.EqualTo(DownloadSize.Measuring.Done), "Measured once, reused.");
+            Assert.That(DownloadSize.Measure(textures.Last(), false, null, out _), Is.EqualTo(DownloadSize.Measuring.Compressing), "Room again.");
+            DownloadSize.FinishCompressing();
+        }
+
         // A mesh asset edited in place (not imported again) is measured again: the textures' density on it and the
         // estimate's plans, and its blendshapes' download when their offsets change but not their count.
         [Test] public void AMeshEditedInPlaceIsMeasuredAgain()

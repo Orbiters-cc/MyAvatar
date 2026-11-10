@@ -465,29 +465,81 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             return result;
         }
 
-        /// <summary>
-        /// Starts measuring a texture's download as the bundle stores it: its imported data when the editor holds it in the
-        /// build's format and size, else a copy made as the upload makes them (read here, on the editor's thread). The
-        /// upload's own copies are kept in Library (the upload reuses them); a copy of a texture the upload keeps as it is
-        /// is only measured. Its compression runs on another thread: <see cref="Record"/> keeps the result. Null when there
-        /// is nothing to measure.
-        /// </summary>
-        internal static (string Key, System.Threading.Tasks.Task<long> Deflate, long Bytes)? StartMeasure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned)
+        /// <summary>What <see cref="Measure"/> did with a texture.</summary>
+        internal enum Measuring
         {
+            /// <summary>Nothing to wait for: measured already, or nothing to measure (it is estimated).</summary>
+            Done,
+            /// <summary>Compressing on another thread under its key (started now, or by another estimate before).</summary>
+            Compressing,
+            /// <summary>As many compressions as the limits allow are under way: ask again on a later frame.</summary>
+            Full,
+        }
+
+        // The texture measures compressing on worker threads, by measure key, whichever estimate started them: the limits
+        // hold for all of them together, a measure an estimate replaced since still lands for the next one (the same key
+        // is never compressed twice), and nothing of it is lost. At most this many at once, holding at most this much data.
+        private static readonly Dictionary<string, (System.Threading.Tasks.Task<long> Deflate, long Bytes, string Name)> compressing =
+            new Dictionary<string, (System.Threading.Tasks.Task<long>, long, string)>();
+        internal static readonly int MaxCompressing = Math.Max(1, Environment.ProcessorCount - 1);
+        internal const long MaxCompressingBytes = 256L << 20;
+
+        /// <summary>Whether texture measures are compressing (<see cref="Collect"/> keeps them once done).</summary>
+        internal static bool AnyCompressing => compressing.Count > 0;
+
+        /// <summary>Whether the measure under this key is still compressing.</summary>
+        internal static bool IsCompressing(string key) => key != null && compressing.ContainsKey(key);
+
+        /// <summary>
+        /// Measures a texture's download as the bundle stores it: its imported data when the editor holds it in the build's
+        /// format and size, else a copy made as the upload makes them (read here, on the editor's thread). The upload's own
+        /// copies are kept in Library (the upload reuses them); a copy of a texture the upload keeps as it is is only
+        /// measured. The data is compressed on another thread under <paramref name="key"/>: <see cref="Collect"/> keeps the
+        /// result.
+        /// </summary>
+        internal static Measuring Measure(Texture texture, bool mobile, TextureOptimization.TexturePlan planned, out string key)
+        {
+            key = null;
             var stored = Stored(texture, mobile, planned);
-            if (stored == null) return null;
+            if (stored == null) return Measuring.Done;
             measured ??= LibraryStore.Read<Dictionary<string, long>>(MeasuredFile);
-            string key = MeasuredKey(stored);
-            if (measured.ContainsKey(key)) return null;
+            key = MeasuredKey(stored);
+            if (measured.ContainsKey(key)) return Measuring.Done;
+            if (compressing.ContainsKey(key)) return Measuring.Compressing;
+            if (compressing.Count >= MaxCompressing || compressing.Values.Sum(c => c.Bytes) >= MaxCompressingBytes) return Measuring.Full;
             var image = stored.texture;
             var data = image.format == stored.format && image.width == stored.width && image.height == stored.height ? image.GetRawTextureData()
                 : UploadTextures.Data(stored, cache: planned != null);
             // The editor can't give the copy (it holds the texture smaller): estimated, not measured.
-            if (data == null) return null;
-            return (key, System.Threading.Tasks.Task.Run(() => Deflated(data)), data.LongLength);
+            if (data == null) return Measuring.Done;
+            compressing[key] = (System.Threading.Tasks.Task.Run(() => Deflated(data)), data.LongLength, texture.name);
+            return Measuring.Compressing;
         }
 
-        /// <summary>Keeps a measure <see cref="StartMeasure"/> took (on the editor's thread); written with <see cref="SaveMeasures"/>.</summary>
+        /// <summary>Keeps the measures done compressing (on the editor's thread); written with <see cref="SaveMeasures"/> once none is left.</summary>
+        internal static void Collect()
+        {
+            if (compressing.Count == 0) return;
+            foreach (var pair in compressing.Where(p => p.Value.Deflate.IsCompleted).ToList())
+            {
+                compressing.Remove(pair.Key);
+                var (deflate, _, name) = pair.Value;
+                if (deflate.Status == System.Threading.Tasks.TaskStatus.RanToCompletion) Record(pair.Key, deflate.Result);
+                else Debug.LogWarning("[My Avatar] Optimization: " + name + "'s download is estimated, not measured (" + deflate.Exception?.GetBaseException().Message + ").");
+            }
+            if (compressing.Count == 0) SaveMeasures();
+        }
+
+        /// <summary>Waits for every compression and keeps its measure (tests, diagnostics: plain work on worker threads, nothing waits for this one).</summary>
+        internal static void FinishCompressing()
+        {
+            foreach (var pending in compressing.Values.ToList())
+                try { pending.Deflate.Wait(); }
+                catch (AggregateException) { }
+            Collect();
+        }
+
+        /// <summary>Keeps a measure (on the editor's thread); written with <see cref="SaveMeasures"/>.</summary>
         internal static void Record(string key, long deflated)
         {
             measured ??= LibraryStore.Read<Dictionary<string, long>>(MeasuredFile);
