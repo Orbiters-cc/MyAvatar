@@ -937,7 +937,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var sad = Tree("Mouth Sad Left Blend", "OSCm/Proxy/FT/v2/SmileSadLeft", (-1f, Clip(("LipTrack_LipFrownLeft", 100f))), (0f, Clip(("LipTrack_LipFrownLeft", 0f))));
             var expressions = Direct("Expressions", (smile, "LipTrackingActive"), (up, "LipTrackingActive"), (sad, "LipTrackingActive"),
                 (Clip(("Jaw_Open", 100f), ("LipTrack_JawOpen", 30f)), "FT/v2/JawOpen"), (Clip(("LipTrack_Pout_Pucker", 100f), ("LipTrack_TongueExtend", 100f)), "OSCm/Proxy/FT/v2/LipPucker"),
-                (Clip(("Blink_L", 100f)), "FT/v2/EyeLidLeft"));
+                (Clip(("Blink_L", 100f)), "FT/v2/EyeLidLeft"), (Shaped("Mouth_Smile_Right"), "OSCm/Proxy/FT/v2/SmileSadRight"));
             var drivers = Direct("Drivers", (Tree("Smile Sad Left Driver", "OSCm/Smooth/FT/v2/SmileSadLeft", (-1f, Clip()), (1f, Clip())), "FT/DirectBlend"), (Clip(), "OSCm/Smooth/FT/v2/JawOpen"));
             var inputs = Direct("Inputs", (Tree("Smile Sad Left Input", "FT/v2/SmileSadLeft", (-1f, Clip()), (1f, Clip())), "FT/DirectBlend"), (Clip(), "FT/v2/JawOpen"));
             var cutoff = Tree("Smoothing Cutoff", "OSCm/FrameTime", (.04f, Clip()), (.041f, Clip()));
@@ -947,10 +947,18 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var hands = Layer(fx, "Expressions");
             var rest = hands.AddState("Rest"); rest.motion = Clip(("LipTrack_LipSmileLeft", 0f)); hands.defaultState = rest;
             var smiling = hands.AddState("Smile"); smiling.motion = Clip(("LipTrack_LipSmileLeft", 100f));
-            rest.AddTransition(smiling).AddCondition(AnimatorConditionMode.Equals, 3, "GestureLeft");
+            // A state with a speed and its parameter, reached through a transition other transitions interrupt.
+            smiling.speed = 1.5f; smiling.speedParameterActive = true; smiling.speedParameter = "GestureRightWeight"; smiling.writeDefaultValues = false;
+            var toSmiling = rest.AddTransition(smiling); toSmiling.AddCondition(AnimatorConditionMode.Equals, 3, "GestureLeft");
+            toSmiling.hasExitTime = true; toSmiling.exitTime = .7f; toSmiling.duration = .2f; toSmiling.offset = .1f;
+            toSmiling.interruptionSource = TransitionInterruptionSource.Destination; toSmiling.orderedInterruption = false;
             hands.AddStateMachine("Hands").AddState("Fist").motion = Clip(("LipTrack_LipSmileLeft", 80f));
 
             var blink = Layer(fx, "Blink");
+            // A masked layer.
+            var mask = new AvatarMask { name = "Face only", transformCount = 1 }; owned.Add(mask);
+            mask.SetTransformPath(0, "Body"); mask.SetTransformActive(0, true);
+            var withMask = fx.layers; withMask[withMask.Length - 1].avatarMask = mask; fx.layers = withMask;
             var open = blink.AddState("Open"); open.motion = Clip(("Blink_L", 0f)); blink.defaultState = open;
             var closed = blink.AddState("Closed"); closed.motion = Clip(("Blink_L", 100f));
             open.AddTransition(closed).hasExitTime = true;
@@ -964,8 +972,22 @@ namespace Orbiters.MyAvatar.Editor.Tests
 
             var pull = Clip(("EarsUp", 100f), ("LipTrack_TongueExtend", 100f));
             AnimationUtility.SetEditorCurve(pull, EditorCurveBinding.FloatCurve("Head/Jaw", typeof(Transform), "m_LocalPosition.y"), AnimationCurve.Constant(0, 1, .1f));
-            Layer(fx, "Ears").AddState("Pull").motion = Tree("Ears Tree", "GestureRightWeight", (0f, Clip(("EarsUp", 0f))), (1f, pull));
+            // A 2D tree: the quiet copy keeps its second parameter and its children's positions.
+            var ears = Tree("Ears Tree", "GestureRightWeight", (0f, Clip(("EarsUp", 0f))), (1f, pull));
+            ears.blendType = BlendTreeType.FreeformCartesian2D; ears.blendParameterY = "GestureRightWeight";
+            var placed = ears.children; placed[0].position = new Vector2(-1, 0); placed[1].position = new Vector2(1, .5f); placed[1].timeScale = .5f; ears.children = placed;
+            Layer(fx, "Ears").AddState("Pull").motion = ears;
             return (fx, avatar);
+        }
+
+        // A clip whose curve has tangents and wrap modes of its own: renamed, it keeps them.
+        private AnimationClip Shaped(string shape)
+        {
+            var clip = new AnimationClip { name = "Shaped " + shape }; owned.Add(clip);
+            var curve = new AnimationCurve(new Keyframe(0, 0, 2f, 3f), new Keyframe(1, 100, -1f, .5f) { weightedMode = WeightedMode.Both, inWeight = .2f, outWeight = .6f })
+                { preWrapMode = WrapMode.Loop, postWrapMode = WrapMode.PingPong };
+            AnimationUtility.SetEditorCurve(clip, EditorCurveBinding.FloatCurve("Body", typeof(SkinnedMeshRenderer), "blendShape." + shape), curve);
+            return clip;
         }
 
         // The objects the build made in a controller (trees, clips, transitions), to destroy them after the test.

@@ -380,6 +380,27 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 // Base's idle state turns the pat layer (index 3) on: once the hat and the material layers go it is layer 1.
                 var control = a.Fx.layers[0].stateMachine.states[0].state.AddStateMachineBehaviour<VRCAnimatorLayerControl>();
                 control.playable = VRC.SDKBase.VRC_AnimatorLayerControl.BlendableLayer.FX; control.layer = 3; control.goalWeight = 1;
+                // What playback reads besides names: a 2D tree with a shaped curve at rest, a masked layer, a state with a
+                // speed and its parameter, and a transition other transitions interrupt.
+                var shaped = Own(new AnimationClip { name = "Shaped" });
+                AnimationUtility.SetEditorCurve(shaped, EditorCurveBinding.FloatCurve("Halo", typeof(Transform), "m_LocalScale.x"),
+                    new AnimationCurve(new Keyframe(0, 1, 2f, 3f), new Keyframe(1, 2, -1f, .5f) { weightedMode = WeightedMode.Both, inWeight = .2f, outWeight = .6f }) { postWrapMode = WrapMode.PingPong });
+                var plane = Own(new BlendTree { name = "Plane", blendType = BlendTreeType.SimpleDirectional2D, blendParameter = "PatContact", blendParameterY = "PatContact", useAutomaticThresholds = false });
+                plane.children = new[]
+                {
+                    new ChildMotion { motion = shaped, position = new Vector2(0, 1), timeScale = .5f },
+                    new ChildMotion { motion = Active("Halo", false), position = new Vector2(1, 0), timeScale = 1f },
+                };
+                a.Fx.layers[0].stateMachine.states[0].state.motion = plane;
+                var mask = Own(new AvatarMask { name = "Halo only", transformCount = 1 });
+                mask.SetTransformPath(0, "Halo"); mask.SetTransformActive(0, true);
+                var layers = a.Fx.layers; layers[3].avatarMask = mask; a.Fx.layers = layers;
+                var pat = a.Fx.layers[3].stateMachine;
+                var patted = pat.states.Single(s => s.state.name == "Patted").state;
+                patted.speed = 2f; patted.speedParameterActive = true; patted.speedParameter = "PatContact"; patted.writeDefaultValues = false;
+                var interrupted = pat.states.Single(s => s.state.name == "Idle").state.transitions[0];
+                interrupted.hasExitTime = true; interrupted.exitTime = .7f; interrupted.duration = .2f; interrupted.offset = .1f;
+                interrupted.interruptionSource = TransitionInterruptionSource.SourceThenDestination; interrupted.orderedInterruption = false;
                 a.Menu.controls.RemoveAll(c => c.name == "Hat" || c.name == "No pat");
                 a.Menu.controls.Single(c => c.name == "Materials").subMenu.controls.RemoveAll(c => c.name == "Blue");
                 return new ParameterFreeze(a.Root, _ => true, batched).Run(new[] { "Hat", "NoPat", "MaterialInt" });
