@@ -69,14 +69,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         private const long RawShader = 150 * 1024, RawMaterial = 20 * 1024, RawComponent = 1024;
 
         /// <summary>
-        /// Seconds from the end of the download until the avatar shows: unpacking (LZMA), loading its assets, setting it up.
-        /// On a desktop PC like the one it was measured on; <paramref name="mobile"/> for a Quest.
+        /// Seconds from the end of the download until the avatar shows: unpacking (LZMA), loading its assets, setting it up
+        /// (the animator layers and PhysBones of <paramref name="contents"/>). On a desktop PC like the one it was measured on;
+        /// <paramref name="mobile"/> for a Quest.
         /// </summary>
-        internal static float LoadSeconds(Parts parts, GameObject root, bool mobile)
+        internal static float LoadSeconds(Parts parts, Contents contents, bool mobile)
         {
-            int layers = AvatarUsage.Controllers(root).OfType<UnityEditor.Animations.AnimatorController>().Sum(c => c.layers.Length);
-            int physBones = root.GetComponentsInChildren<VRC.Dynamics.VRCPhysBoneBase>(true).Length;
-            float seconds = parts.Raw / UnpackPerSecond + parts.Raw / LoadPerSecond + Setup + layers * PerLayer + physBones * PerPhysBone;
+            float seconds = parts.Raw / UnpackPerSecond + parts.Raw / LoadPerSecond + Setup + contents.Layers * PerLayer + contents.PhysBones * PerPhysBone;
             return mobile ? seconds * Quest : seconds;
         }
 
@@ -101,9 +100,33 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// </summary>
         internal static Parts Of(GameObject root, bool mobile = false, Func<Texture, TextureOptimization.TexturePlan> planned = null,
             Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null, GameObject sceneRoot = null,
-            List<EditorCurveBinding> bindings = null)
+            List<EditorCurveBinding> bindings = null) =>
+            Fold(Read(root, kept, sizes, sceneRoot, bindings), mobile, planned);
+
+        /// <summary>
+        /// What the bundle of an avatar holds whatever its textures become and whichever platform it is for: its meshes,
+        /// blendshapes, animations, shaders, sounds, components and materials, and which textures it holds (their size is
+        /// <see cref="Fold"/>ed in for a platform and the textures' plan). Read once per avatar (or estimate's copy) as it
+        /// stands; it keeps no object of it, only the textures.
+        /// </summary>
+        internal sealed class Contents
         {
-            var parts = new Parts();
+            /// <summary>Everything but the textures.</summary>
+            public readonly Parts Rest = new Parts();
+            /// <summary>The pieces of everything but the textures, in the order they were read.</summary>
+            public readonly List<Piece> Pieces = new List<Piece>();
+            /// <summary>The textures it holds, each with where it is first shown (as a piece says it).</summary>
+            public readonly List<(Texture Texture, string Owner, string Item)> Textures = new List<(Texture, string, string)>();
+            /// <summary>What a client sets up once it is loaded: its animator layers and PhysBones.</summary>
+            public int Layers, PhysBones;
+        }
+
+        /// <summary>What <see cref="Of"/> reads of <paramref name="root"/> besides the textures' sizes (see <see cref="Of"/> for the arguments).</summary>
+        internal static Contents Read(GameObject root, Func<SkinnedMeshRenderer, ICollection<string>> kept = null, Dictionary<Mesh, Dictionary<string, long>> sizes = null,
+            GameObject sceneRoot = null, List<EditorCurveBinding> bindings = null)
+        {
+            var contents = new Contents();
+            var parts = contents.Rest;
             var meshes = new Dictionary<Mesh, ICollection<string>>();
             // The first renderer showing each mesh: where its piece points.
             var shownBy = new Dictionary<Mesh, Renderer>();
@@ -114,21 +137,23 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 var mesh = MeshOptimization.MeshOf(renderer);
                 if (mesh == null || meshes.ContainsKey(mesh) && meshes[mesh] == null) continue;
                 if (!shownBy.ContainsKey(mesh)) shownBy[mesh] = renderer;
-                // Null: every shape stays; else the shapes kept.
-                meshes[mesh] = renderer is SkinnedMeshRenderer skinned && kept != null && mesh.blendShapeCount > 0 ? kept(skinned) : null;
+                // Null: every shape stays; else the shapes kept. A mesh two renderers show keeps what either keeps.
+                var shapes = renderer is SkinnedMeshRenderer skinned && kept != null && mesh.blendShapeCount > 0 ? kept(skinned) : null;
+                meshes[mesh] = shapes == null || !meshes.TryGetValue(mesh, out var earlier) ? shapes : new HashSet<string>(earlier.Concat(shapes), StringComparer.Ordinal);
             }
             var materials = Materials(root, clips);
             foreach (var source in root.GetComponentsInChildren<AudioSource>(true))
                 if (source.clip != null && !sounds.ContainsKey(source.clip)) sounds[source.clip] = source;
 
             var items = new Toolkit.Editor.VRChat.Budget.ItemLookup(root, sceneRoot);
-            var pieces = new List<Piece>();
+            var pieces = contents.Pieces;
+            string OwnerOf(Transform owner) => owner != null ? AnimationUtility.CalculateTransformPath(owner, root.transform) : "";
             void Add(PieceKind kind, string name, Transform owner, Object asset, long bytes)
             {
                 if (bytes <= 0) return;
                 pieces.Add(new Piece
                 {
-                    Kind = kind, Name = name, Owner = owner != null ? AnimationUtility.CalculateTransformPath(owner, root.transform) : "",
+                    Kind = kind, Name = name, Owner = OwnerOf(owner),
                     Item = owner != null ? items.Of(owner)?.Name : null, Asset = asset != null && EditorUtility.IsPersistent(asset) ? asset.GetInstanceID() : 0,
                     Bytes = bytes,
                 });
@@ -137,10 +162,8 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             var owners = Owners(root, materials);
             foreach (var texture in Textures(root, materials))
             {
-                long bytes = Texture(texture, mobile, planned?.Invoke(texture), out long raw);
-                parts.Textures += bytes;
-                parts.Raw += raw;
-                Add(PieceKind.Texture, texture.name, owners.TryGetValue(texture, out var shown) ? shown : null, texture, bytes);
+                var owner = owners.TryGetValue(texture, out var shown) ? shown : null;
+                contents.Textures.Add((texture, OwnerOf(owner), owner != null ? items.Of(owner)?.Name : null));
             }
             foreach (var pair in meshes)
             {
@@ -176,6 +199,40 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             parts.Raw += shaders.Count * RawShader + materials.Count * RawMaterial + components * RawComponent + parts.Audio;
             Add(PieceKind.Other, components.ToString("N0", CultureInfo.InvariantCulture) + " components, " + materials.Count.ToString("N0", CultureInfo.InvariantCulture) +
                 (materials.Count == 1 ? " material" : " materials"), null, null, parts.Other);
+            contents.Layers = AvatarUsage.Controllers(root).OfType<UnityEditor.Animations.AnimatorController>().Sum(c => c.layers.Length);
+            contents.PhysBones = root.GetComponentsInChildren<VRC.Dynamics.VRCPhysBoneBase>(true).Length;
+            return contents;
+        }
+
+        /// <summary>
+        /// The download of what <paramref name="contents"/> holds for PC or for Quest (Android), its textures as they stand
+        /// or as <paramref name="planned"/> makes them: the same as <see cref="Of"/> on the avatar it was read from.
+        /// </summary>
+        internal static Parts Fold(Contents contents, bool mobile, Func<Texture, TextureOptimization.TexturePlan> planned = null)
+        {
+            var rest = contents.Rest;
+            var parts = new Parts
+            {
+                Meshes = rest.Meshes, BlendShapes = rest.BlendShapes, Animations = rest.Animations, Shaders = rest.Shaders, Audio = rest.Audio,
+                Other = rest.Other, Raw = rest.Raw,
+            };
+            // The textures' pieces first, as they were read.
+            var pieces = new List<Piece>(contents.Textures.Count + contents.Pieces.Count);
+            foreach (var (texture, owner, item) in contents.Textures)
+            {
+                // A texture made in memory and destroyed since uploads nothing.
+                if (!texture) continue;
+                long bytes = Texture(texture, mobile, planned?.Invoke(texture), out long raw);
+                parts.Textures += bytes;
+                parts.Raw += raw;
+                if (bytes > 0)
+                    pieces.Add(new Piece
+                    {
+                        Kind = PieceKind.Texture, Name = texture.name, Owner = owner, Item = item,
+                        Asset = EditorUtility.IsPersistent(texture) ? texture.GetInstanceID() : 0, Bytes = bytes,
+                    });
+            }
+            pieces.AddRange(contents.Pieces);
             parts.Pieces = Keep(pieces, parts.Bundle);
             return parts;
         }

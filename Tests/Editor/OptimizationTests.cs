@@ -720,6 +720,69 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.That(OptimizationEstimate.Latest(settings), Is.SameAs(result));
         }
 
+        // The estimate is kept in parts, each redone only when what it depends on changes: the texture slider plans the
+        // textures again and measures the same hidden copy with them, without copying the avatar; any other setting copies it
+        // again. Either way the figures are those of an estimate measured from nothing.
+        [Test] public void ATextureSettingRedoesOnlyTheTexturesOfTheEstimate()
+        {
+            string folder = Folder();
+            var material = Own(new Material(Shader.Find("Standard")));
+            material.SetTexture("_MainTex", Image(folder, "Board_BaseColor", 1024));
+            Board(material);
+            Skinned("Body");
+            var hidden = Skinned("Old shirt"); hidden.gameObject.SetActive(false);
+            settings.uploadOptimization.level = OptimizationLevel.Custom;
+            settings.uploadOptimization.custom = OptimizationPasses.ResizeTextures | OptimizationPasses.HiddenObjects;
+            settings.uploadOptimization.sharpFrom = .5f;
+            OptimizationEstimate.Result Measure()
+            {
+                OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                OptimizationEstimate.Finish();
+                var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+                Assert.That(result?.Error, Is.Null);
+                return result;
+            }
+            string Text(OptimizationEstimate.Result result) =>
+                Newtonsoft.Json.JsonConvert.SerializeObject(new object[] { result.Now, result.Upload, result.Report.ToString() });
+
+            var near = Measure();
+            int copies = OptimizationEstimate.CopiesMade;
+            Assert.That(copies, Is.EqualTo(1));
+            settings.uploadOptimization.sharpFrom = 8f;
+            var far = Measure();
+            Assert.That(OptimizationEstimate.CopiesMade, Is.EqualTo(copies), "The texture slider measures the same copy with the textures' new plans.");
+            Assert.That(far.Upload.TextureMegabytes, Is.LessThan(near.Upload.TextureMegabytes), "Sharp from farther: smaller copies.");
+            Assert.That(far.Report.HiddenObjects, Is.EqualTo(1));
+
+            OptimizationEstimate.Clear();
+            var fresh = Measure();
+            Assert.That(OptimizationEstimate.CopiesMade, Is.EqualTo(copies + 1), "Nothing kept: copied again.");
+            Assert.That(Text(fresh), Is.EqualTo(Text(far)), "The parts kept give what a whole new estimate measures.");
+
+            settings.uploadOptimization.custom &= ~OptimizationPasses.HiddenObjects;
+            var kept = Measure();
+            Assert.That(OptimizationEstimate.CopiesMade, Is.EqualTo(copies + 2), "Another change to the objects: copied again.");
+            Assert.That(kept.Upload.Skinned, Is.EqualTo(2), "The hidden mesh uploads now.");
+        }
+
+        // A mesh two skinned renderers show uploads with the blendshapes either of them keeps.
+        [Test] public void AMeshTwoRenderersShowKeepsTheShapesEitherKeeps()
+        {
+            var first = Skinned("Body");
+            var second = Skinned("Body copy");
+            second.sharedMesh = first.sharedMesh;
+            var mesh = first.sharedMesh;
+            Assert.That(mesh.blendShapeCount, Is.GreaterThan(0), "The fixture's mesh has a blendshape.");
+            string shape = mesh.GetBlendShapeName(0);
+            long Shapes(Func<SkinnedMeshRenderer, ICollection<string>> kept) => DownloadSize.Of(root, kept: kept).BlendShapes;
+
+            long all = Shapes(null);
+            Assert.That(all, Is.GreaterThan(0));
+            Assert.That(Shapes(r => r == first ? new HashSet<string> { shape } : new HashSet<string>()), Is.EqualTo(all), "The first renderer keeps it.");
+            Assert.That(Shapes(r => r == second ? new HashSet<string> { shape } : new HashSet<string>()), Is.EqualTo(all), "The second renderer keeps it.");
+            Assert.That(Shapes(r => new HashSet<string>()), Is.EqualTo(0), "Neither does.");
+        }
+
         // A tool editing one avatar's meshes live (Mixer sculpting) holds back that avatar's estimate only, even when it was
         // asked for first.
         [Test] public void AnAvatarEditedLiveHoldsBackOnlyItsOwnEstimate()
