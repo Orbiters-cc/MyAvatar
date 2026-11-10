@@ -219,7 +219,7 @@ namespace Orbiters.MyAvatar.Editor.Vrm
 
         /// <summary>
         /// The blendshapes the VRM's expressions will set, read on the avatar before it is built: the build keeps them
-        /// (<see cref="Toolkit.Editor.VRChat.BlendShapes.BlendShapePruning.Keep"/>), though no VRChat animation may use
+        /// (<see cref="Toolkit.Editor.VRChat.Build.BuildContext.KeepShapes"/>), though no VRChat animation may use
         /// them (perfect sync's shapes on an avatar without face tracking).
         /// </summary>
         internal static HashSet<string> Shapes(GameObject root)
