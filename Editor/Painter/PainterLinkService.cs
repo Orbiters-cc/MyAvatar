@@ -58,7 +58,13 @@ namespace Orbiters.MyAvatar.Editor.Painter
         {
             // Listening again after a script reload: Painter reconnects on its own.
             if (SessionState.GetBool(ActiveKey, false)) EditorApplication.update += StartAfterReload;
+            ObjectChangeEvents.changesPublished += (ref ObjectChangeEventStream stream) => SceneChanges++;
+            Undo.undoRedoPerformed += () => SceneChanges++;
         }
+
+        // Counts the changes published in the editor (objects, components, assets, Undo): what the live images read of an
+        // avatar is read again after one.
+        private static int SceneChanges;
 
         private static void StartAfterReload()
         {
@@ -223,7 +229,7 @@ namespace Orbiters.MyAvatar.Editor.Painter
         {
             Stop();
             SessionState.SetBool(ActiveKey, false);
-            try { File.Delete(EndpointPath); } catch (Exception) { }
+            try { File.Delete(EndpointPath); } catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
         }
 
         private static void Stop()
@@ -452,6 +458,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
             private readonly PainterLivePreview preview = new PainterLivePreview();
             private readonly Dictionary<string, long> decoding = new Dictionary<string, long>(StringComparer.Ordinal);
             private string structureSent;
+            // Where each material's live images go (its slots, and the renderer slots showing it), with the material's dirty
+            // count and the scenes' changes they were read at: Painter streams an image per channel after every stroke, and
+            // reading every renderer and material of the avatar for each one took the editor's thread each time.
+            private readonly Dictionary<Material, (int Dirty, int Changes, PainterTargets Targets, List<(Renderer, int)> Parts)> shownOn =
+                new Dictionary<Material, (int, int, PainterTargets, List<(Renderer, int)>)>();
 
             public Session(Links links, int connection, MyAvatar avatar, PainterLinkProtocol.Hello hello)
             {
@@ -568,10 +579,11 @@ namespace Orbiters.MyAvatar.Editor.Painter
                 try
                 {
                     var material = PainterMapping.Material(Avatar, texture.textureSet);
-                    var targets = material ? PainterTargets.For(material, TextureMatching.Slots(Avatar)) : null;
+                    if (!material) return;
+                    var (targets, parts) = ShownOn(material);
                     if (targets == null) return;
-                    preview.Show(Avatar.transform, texture.textureSet, texture.channel, texture.revision, image, material, targets);
-                    foreach (var (renderer, slot) in PainterLivePreview.Parts(Avatar.transform, material))
+                    preview.Show(texture.textureSet, texture.channel, texture.revision, image, material, targets, parts);
+                    foreach (var (renderer, slot) in parts)
                         AvatarTextureEdits.Notify(new AvatarTextureEdits.Painted { Renderer = renderer, Slot = slot, Channel = texture.channel, Path = texture.path });
                     LiveImages++;
                     if (!Committing && !Error) State = "Live: what you paint shows on the avatar. Save in Painter to apply it.";
@@ -583,6 +595,18 @@ namespace Orbiters.MyAvatar.Editor.Painter
                     Debug.LogException(ex);
                 }
                 Changed?.Invoke();
+            }
+
+            // Read again once the material or anything in the scenes changed (a renderer showing another material, a slot added).
+            private (PainterTargets Targets, List<(Renderer, int)> Parts) ShownOn(Material material)
+            {
+                int dirty = EditorUtility.GetDirtyCount(material);
+                if (shownOn.TryGetValue(material, out var known) && known.Dirty == dirty && known.Changes == SceneChanges && known.Parts.All(p => p.Item1))
+                    return (known.Targets, known.Parts);
+                var targets = PainterTargets.For(material, TextureMatching.Slots(Avatar));
+                var parts = PainterLivePreview.Parts(Avatar.transform, material).ToList();
+                shownOn[material] = (dirty, SceneChanges, targets, parts);
+                return (targets, parts);
             }
 
             public void OnCommitting()

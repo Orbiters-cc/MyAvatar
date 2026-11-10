@@ -236,6 +236,28 @@ class MappingTests(unittest.TestCase):
         more = {"Skin": {"material": "Body#0", "channels": ["basecolor", "roughness", "normal"]}}
         self.assertEqual(plugin.mapping_changes(old, more, 1024, 1024), [("Skin", "normal")], "A channel live for the first time.")
 
+    def test_only_the_newest_live_images_of_a_channel_stay(self):
+        folder = tempfile.mkdtemp(prefix="OrbitersPainterLive-")
+        try:
+            def write(name, age):
+                path = os.path.join(folder, name).replace("\\", "/")
+                with open(path, "wb") as f:
+                    f.write(b"tga")
+                os.utime(path, (time.time() - age, time.time() - age))
+                return path
+            # An earlier load of the plugin left two images of the channel, and one of another channel.
+            write("1234_basecolor_1.tga", 30)
+            write("1234_basecolor_2.tga", 20)
+            other = write("1234_roughness_3.tga", 25)
+            kept = {}
+            for revision in range(4, 8):
+                plugin.keep_newest(kept, folder, "1234_basecolor", write("1234_basecolor_%d.tga" % revision, 8 - revision))
+            self.assertEqual(sorted(os.listdir(folder)), ["1234_basecolor_5.tga", "1234_basecolor_6.tga", "1234_basecolor_7.tga", "1234_roughness_3.tga"])
+            self.assertEqual(len(kept["1234_basecolor"]), 3)
+            self.assertTrue(os.path.exists(other), "another channel's images stay")
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
     def test_saves_within_a_second_export_to_folders_of_their_own(self):
         folder = tempfile.mkdtemp(prefix="OrbitersPainterExports-")
         try:
