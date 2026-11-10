@@ -156,6 +156,65 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public bool Done;
         }
 
+        // An avatar's texture plans, kept with the key they were planned for (MAF-22): after a reload, a change of the other
+        // settings (the polygon budget, a structure pass) plans no texture again. Textures by instance ID (the same for the
+        // editor session); a plan whose texture is gone is planned again.
+        private const string PlansKey = "Orbiters.MyAvatar.OptimizationEstimates.Plans.1";
+
+        private sealed class SavedPlans
+        {
+            public int Id;
+            public string Key;
+            public SavedPlan Pc, Quest;
+        }
+
+        internal sealed class SavedPlan
+        {
+            public long Before, After;
+            public float SharpFrom;
+            public bool Mobile;
+            public List<SavedTexture> Changes = new List<SavedTexture>();
+
+            public static SavedPlan Of(TextureOptimization.Plan plan)
+            {
+                var saved = new SavedPlan { Before = plan.before, After = plan.after, SharpFrom = plan.sharpFrom, Mobile = plan.mobile };
+                foreach (var c in plan.changes)
+                    saved.Changes.Add(new SavedTexture
+                    {
+                        Texture = c.texture != null ? c.texture.GetInstanceID() : 0, Path = c.path, Format = c.format, Width = c.width, Height = c.height,
+                        Quality = c.quality, Before = c.before, After = c.after, Linear = c.linear, Normal = c.normal,
+                    });
+                return saved;
+            }
+
+            // Null when a texture is gone.
+            public TextureOptimization.Plan Plan()
+            {
+                var plan = new TextureOptimization.Plan { before = Before, after = After, sharpFrom = SharpFrom, mobile = Mobile };
+                foreach (var c in Changes)
+                {
+                    var texture = EditorUtility.InstanceIDToObject(c.Texture) as Texture2D;
+                    if (texture == null) return null;
+                    plan.changes.Add(new TextureOptimization.TexturePlan
+                    {
+                        texture = texture, path = c.Path, format = c.Format, width = c.Width, height = c.Height, quality = c.Quality,
+                        before = c.Before, after = c.After, linear = c.Linear, normal = c.Normal,
+                    });
+                }
+                return plan;
+            }
+        }
+
+        internal sealed class SavedTexture
+        {
+            public int Texture;
+            public string Path;
+            public TextureFormat Format;
+            public int Width, Height, Quality;
+            public long Before, After;
+            public bool Linear, Normal;
+        }
+
         private static State Restore()
         {
             var restored = new State();
@@ -173,6 +232,21 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 }
             }
             catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: the estimates are measured again (" + ex.Message + ")."); }
+            try
+            {
+                string json = SessionState.GetString(PlansKey, "");
+                SessionState.EraseString(PlansKey);
+                if (!string.IsNullOrEmpty(json))
+                    foreach (var saved in Newtonsoft.Json.JsonConvert.DeserializeObject<List<SavedPlans>>(json) ?? new List<SavedPlans>())
+                    {
+                        if (saved?.Key == null || saved.Pc == null || saved.Quest == null || EditorUtility.InstanceIDToObject(saved.Id) == null) continue;
+                        var pc = saved.Pc.Plan();
+                        var quest = saved.Quest.Plan();
+                        if (pc == null || quest == null) continue;
+                        restored.Parts[saved.Id] = new Cached { TexturesKey = saved.Key, PcTextures = pc, QuestTextures = quest };
+                    }
+            }
+            catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: the textures are planned again (" + ex.Message + ")."); }
             return restored;
         }
 
@@ -187,6 +261,13 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 SessionState.SetString(SessionKey, Newtonsoft.Json.JsonConvert.SerializeObject(saved));
             }
             catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: the estimates will be measured again after the reload (" + ex.Message + ")."); }
+            try
+            {
+                var plans = state.Parts.Where(p => p.Value.TexturesKey != null && p.Value.PcTextures != null && p.Value.QuestTextures != null)
+                    .Select(p => new SavedPlans { Id = p.Key, Key = p.Value.TexturesKey, Pc = SavedPlan.Of(p.Value.PcTextures), Quest = SavedPlan.Of(p.Value.QuestTextures) }).ToList();
+                SessionState.SetString(PlansKey, Newtonsoft.Json.JsonConvert.SerializeObject(plans));
+            }
+            catch (Exception ex) { Debug.LogWarning("[My Avatar] Optimization: the textures will be planned again after the reload (" + ex.Message + ")."); }
         }
 
         /// <summary>

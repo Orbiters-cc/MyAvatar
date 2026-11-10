@@ -9,6 +9,24 @@ namespace Orbiters.MyAvatar.Editor.Tests
     // sheets, transforms and what editor tools show on the avatar don't.
     public sealed class OptimizationKeyTests
     {
+        // MAF-22: texture plans kept across a script reload come back as they were, and not at all once a texture is gone.
+        [Test] public void TexturePlansKeptAcrossReloadsComeBackWhole()
+        {
+            var texture = new Texture2D(8, 8);
+            try
+            {
+                var plan = new TextureOptimization.Plan { before = 1000, after = 400, sharpFrom = 1.5f, mobile = true };
+                plan.changes.Add(new TextureOptimization.TexturePlan { texture = texture, path = "Assets/A.png", format = TextureFormat.BC7, width = 4, height = 2, quality = 3, before = 900, after = 300, linear = true, normal = true });
+                string json = Newtonsoft.Json.JsonConvert.SerializeObject(Optimization.OptimizationEstimate.SavedPlan.Of(plan));
+                var back = Newtonsoft.Json.JsonConvert.DeserializeObject<Optimization.OptimizationEstimate.SavedPlan>(json).Plan();
+                Assert.That(Newtonsoft.Json.JsonConvert.SerializeObject(Optimization.OptimizationEstimate.SavedPlan.Of(back)), Is.EqualTo(json));
+                Assert.That(back.changes[0].texture, Is.SameAs(texture));
+                Object.DestroyImmediate(texture);
+                Assert.That(Newtonsoft.Json.JsonConvert.DeserializeObject<Optimization.OptimizationEstimate.SavedPlan>(json).Plan(), Is.Null, "its texture is gone");
+            }
+            finally { if (texture != null) Object.DestroyImmediate(texture); }
+        }
+
         [Test] public void PackageUpdatesCountScriptsDoNot()
         {
             Assert.That(TextureOptimization.ImportMatters("Packages/com.vrchat.avatars/package.json"), Is.True);
