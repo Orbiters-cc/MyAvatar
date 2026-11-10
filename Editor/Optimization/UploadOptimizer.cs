@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
 using Orbiters.Toolkit.Editor.VRChat.BlendShapes;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Orbiters.Toolkit.Editor.VRChat.Optimization;
 using UnityEditor;
 using UnityEngine;
-using VRC.SDKBase.Editor.BuildPipeline;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.Optimization
@@ -79,8 +78,12 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             }
         }
 
-        // What the structure step found for the material step: My Avatar's component is editor-only and may be gone by then.
-        private static readonly ConditionalWeakTable<GameObject, Plan> Plans = new ConditionalWeakTable<GameObject, Plan>();
+        // What the structure step found for the material step, kept by the build (My Avatar's component is editor-only and
+        // may be gone by then).
+        private sealed class Planned
+        {
+            public Plan Plan;
+        }
 
         private sealed class Plan
         {
@@ -91,19 +94,26 @@ namespace Orbiters.MyAvatar.Editor.Optimization
             public TextureOptimization.Plan Textures;
         }
 
-        internal sealed class Structure : IVRCSDKPreprocessAvatarCallback
+        /// <summary>
+        /// The structure step: in the build's Structure phase, once every tool that adds animations has run (MCB's last step at
+        /// -8800) and before d4rkAvatarOptimizer and AvatarOptimizer (-1025).
+        /// </summary>
+        internal sealed class Structure : BuildStep
         {
-            public int callbackOrder => -1100;
+            public override BuildPhase Phase => BuildPhase.Structure;
+            public override string Owner => "My Avatar";
 
-            public bool OnPreprocessAvatar(GameObject avatar)
+            public override bool Run(BuildContext context)
             {
-                Plans.Remove(avatar);
+                var avatar = context.Avatar;
+                var planned = context.State<Planned>();
+                planned.Plan = null;
                 var settings = avatar.GetComponentInChildren<MyAvatar>(true);
                 if (settings == null || EditorApplication.isPlayingOrWillChangePlaymode) return true;
                 var passes = settings.uploadOptimization.Passes;
                 if (passes == OptimizationPasses.None) return true;
                 var plan = new Plan { Passes = passes, Level = settings.uploadOptimization.level, Report = new Report() };
-                Plans.Add(avatar, plan);
+                planned.Plan = plan;
                 // Measured on the meshes as they come (before merges and simplification), as the estimate does. Without a
                 // texture pass, every texture uploads as it is.
                 try { if ((passes & TextureOptimization.TexturePasses) != 0) plan.Textures = TextureOptimization.Build(settings); }
@@ -115,7 +125,7 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 catch (PassFailed ex)
                 {
                     // A half-changed avatar never uploads: the build stops, saying which change failed.
-                    Plans.Remove(avatar);
+                    planned.Plan = null;
                     Debug.LogException(ex.InnerException ?? ex);
                     Debug.LogError("[My Avatar] Optimization: " + ex.Message + " The upload stopped instead. Turn that change off under Custom, " +
                                    "or optimization off, to upload.");
@@ -134,16 +144,22 @@ namespace Orbiters.MyAvatar.Editor.Optimization
                 : base(pass + " failed (" + cause.GetBaseException().Message + "): the avatar would upload half changed.", cause) => Pass = pass;
         }
 
-        internal sealed class Materials : IVRCSDKPreprocessAvatarCallback
+        /// <summary>
+        /// The material step: in the build's SaveBuildData phase, after Poiyomi locks its materials (100), before Toolkit writes
+        /// the build's in-memory assets (its BuildCopyAssetsHook, which the phase runs after this by type name).
+        /// </summary>
+        internal sealed class Materials : BuildStep
         {
-            // After Poiyomi's locking (100), before Toolkit keeps the build's in-memory assets (10000).
-            public int callbackOrder => 9000;
+            public override BuildPhase Phase => BuildPhase.SaveBuildData;
+            public override string Owner => "My Avatar";
 
-            public bool OnPreprocessAvatar(GameObject avatar)
+            public override bool Run(BuildContext context)
             {
-                if (!Plans.TryGetValue(avatar, out var plan)) return true;
-                Plans.Remove(avatar);
-                RunMaterials(avatar, plan.Passes, plan.Report, plan.Textures);
+                var planned = context.State<Planned>();
+                var plan = planned.Plan;
+                if (plan == null) return true;
+                planned.Plan = null;
+                RunMaterials(context.Avatar, plan.Passes, plan.Report, plan.Textures);
                 Debug.Log("[My Avatar] Optimization (" + plan.Level + "): " + plan.Report + plan.Report.Took() + ".");
                 return true;
             }

@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using NUnit.Framework;
 using Orbiters.MyAvatar.Editor.Optimization;
 using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
@@ -1090,11 +1091,28 @@ namespace Orbiters.MyAvatar.Editor.Tests
             }
         }
 
-        // Both upload steps, as the SDK calls them.
+        // Both upload steps, as the build runs them, on one build's context.
         private static void Upload(GameObject avatar)
         {
-            new UploadOptimizer.Structure().OnPreprocessAvatar(avatar);
-            new UploadOptimizer.Materials().OnPreprocessAvatar(avatar);
+            var context = BuildContext.For(avatar);
+            new UploadOptimizer.Structure().Run(context);
+            new UploadOptimizer.Materials().Run(context);
+        }
+
+        // MAF-1: the optimizer's steps run where its callbacks ran: structure in the Structure phase (after MCB's -8800,
+        // before NDMF's optimizing -1025), materials after Poiyomi's locks (100) and before the build data is written.
+        [Test] public void TheOptimizerStepsRunWhereItsCallbacksRan()
+        {
+            var steps = AvatarBuildPipeline.Steps.ToList();
+            int structure = steps.FindIndex(s => s is UploadOptimizer.Structure), materials = steps.FindIndex(s => s is UploadOptimizer.Materials);
+            int save = steps.FindIndex(s => s.GetType().FullName == "Orbiters.Toolkit.Editor.VRChat.Attachments.BuildCopyAssetsHook");
+            Assert.That(steps[structure].Phase, Is.EqualTo(BuildPhase.Structure));
+            Assert.That(BuildPhases.Order(BuildPhase.Structure), Is.GreaterThan(-8800).And.LessThan(-1025));
+            Assert.That(steps[materials].Phase, Is.EqualTo(BuildPhase.SaveBuildData));
+            Assert.That(BuildPhases.Order(BuildPhase.SaveBuildData), Is.GreaterThan(100));
+            Assert.That(save, Is.GreaterThan(materials), "the material copies are made before the build data is written");
+            Assert.That(steps.Where(s => s.Phase == BuildPhase.Structure).Select(s => s.GetType()), Is.EqualTo(new[] { typeof(UploadOptimizer.Structure) }),
+                "the optimizer's phase is its own");
         }
 
         // A quad on each of the first two bones (the third lists without weight) with one unused blendshape.
