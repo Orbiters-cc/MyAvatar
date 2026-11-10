@@ -334,6 +334,9 @@ namespace Orbiters.MyAvatar.Editor.Optimization
         /// <summary>A short value that changes when the estimate of the avatar's settings would (a build measured since is out of date).</summary>
         internal static string Fingerprint(MyAvatar avatar) => avatar ? Hash128.Compute(Key(avatar, avatar.uploadOptimization.Passes)).ToString() : "";
 
+        /// <summary>What the estimate of the avatar's own settings is keyed by now (tests: measuring must not change it).</summary>
+        internal static string KeyOf(MyAvatar avatar) => Key(avatar, avatar.uploadOptimization.Passes);
+
         /// <summary>Forgets a failed estimate: the next card measures again.</summary>
         internal static void Retry(MyAvatar avatar)
         {

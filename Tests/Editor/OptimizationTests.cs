@@ -733,7 +733,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             int objects = root.GetComponentsInChildren<Transform>(true).Length;
 
             Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null, "Measured over editor frames.");
-            OptimizationEstimate.Finish();
+            FinishKeepingTheKey();
             var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
 
             Assert.That(result, Is.Not.Null);
@@ -906,7 +906,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
                 Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null), Is.Null, "The avatar edited live waits.");
             }
             finally { Orbiters.Toolkit.Editor.Meshes.AvatarMeshEdits.LiveEditing -= editing; }
-            OptimizationEstimate.Finish();
+            FinishKeepingTheKey();
             var result = OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
             Assert.That(result, Is.Not.Null, "Measured once the live edits are over.");
             Assert.That(result.Error, Is.Null);
@@ -946,7 +946,7 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Skinned("Body");
             settings.uploadOptimization.level = OptimizationLevel.Small;
             OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
-            OptimizationEstimate.Finish();
+            FinishKeepingTheKey();
             foreach (bool quest in new[] { false, true })
             {
                 OptimizationSection.ShowQuest = quest;
@@ -1139,6 +1139,21 @@ namespace Orbiters.MyAvatar.Editor.Tests
             renderer.rootBone = bones[0];
             renderer.sharedMaterial = Own(new Material(Shader.Find("Standard")));
             return renderer;
+        }
+
+        // Finishes the estimates, and fails saying what changed when measuring changed what the avatar's estimate is keyed by
+        // (Get would then never find the result: it measures the avatar again).
+        private void FinishKeepingTheKey()
+        {
+            string before = OptimizationEstimate.KeyOf(settings);
+            OptimizationEstimate.Finish();
+            string after = OptimizationEstimate.KeyOf(settings);
+            if (before == after) return;
+            var was = before.Split('|', ','); var now = after.Split('|', ',');
+            var differ = Enumerable.Range(0, Math.Max(was.Length, now.Length))
+                .Where(i => i >= was.Length || i >= now.Length || was[i] != now[i])
+                .Select(i => "[" + i + "] " + (i < was.Length ? was[i] : "-") + " -> " + (i < now.Length ? now[i] : "-")).Take(8);
+            Assert.Fail("Measuring changed the avatar's estimate key: " + string.Join("; ", differ));
         }
 
         private T Own<T>(T value) where T : Object { if (value != null) owned.Add(value); return value; }
