@@ -26,7 +26,8 @@ namespace Orbiters.MyAvatar.Editor
         private readonly VisualElement hero, estimate, polygons, suggestion;
         private IVisualElementScheduledItem poll, write, polygonWrite;
         // What the last refresh saw (see Changes).
-        private int seenChanges = -1, seenRepaints = -1, seenWeights;
+        private int seenChanges = -1;
+        private long seenSignature;
         private bool seenQuest;
         private string shown, shownRank, shownEstimate, shownPolygons;
         private float pendingDistance = -1f, ringFill;
@@ -118,19 +119,37 @@ namespace Orbiters.MyAvatar.Editor
 
         // The poll looks for changes only while the section can be seen with Unity in front: a covered, scrolled-away or
         // folded section costs nothing. Clicks and finished estimates refresh it directly. It asks for the estimate (whose
-        // key walks the whole avatar) only after something that may change it: an edit, a hierarchy change, an import, a
-        // platform switch, or blendshape weights moved without Undo (seen when the Scene view repaints).
+        // key walks the whole avatar as text) only after something that may change it: an edit, a hierarchy change, an
+        // import or a platform switch, counted by events; and, for what scripts change without Undo (materials, renderers
+        // shown, scale, blendshape weights), a numeric signature of the key's inputs, read every few seconds.
         private void Poll()
         {
             if (!InternalEditorUtility.isApplicationActive || panel == null || resolvedStyle.display == DisplayStyle.None ||
                 Body.resolvedStyle.display == DisplayStyle.None || !panel.visualTree.worldBound.Overlaps(worldBound)) return;
             if (!avatar) return;
-            if (seenChanges == changes && seenQuest == Quest && (seenRepaints == repaints || Weights() == seenWeights)) { seenRepaints = repaints; return; }
+            double now = EditorApplication.timeSinceStartup;
+            if (!ShouldRefresh(seenChanges != changes || seenQuest != Quest, now, ref nextSignature, () => Signature(avatar), seenSignature)) return;
             Refresh();
         }
 
+        // Seconds between two looks at the signature.
+        internal const double SignatureEvery = 4.5;
+        private double nextSignature;
+
+        /// <summary>
+        /// Whether the card should ask for the estimate again: an event said so, or the signature (read at most every
+        /// <see cref="SignatureEvery"/> seconds) moved since the last refresh.
+        /// </summary>
+        internal static bool ShouldRefresh(bool changed, double now, ref double nextSignature, Func<long> signature, long seenSignature)
+        {
+            if (changed) return true;
+            if (now < nextSignature) return false;
+            nextSignature = now + SignatureEvery;
+            return signature() != seenSignature;
+        }
+
         // Changes anywhere that may change an estimate, counted by events.
-        private static int changes, repaints;
+        private static int changes;
 
         [InitializeOnLoadMethod]
         private static void WatchChanges()
@@ -139,7 +158,6 @@ namespace Orbiters.MyAvatar.Editor
             EditorApplication.hierarchyChanged += () => changes++;
             Undo.undoRedoPerformed += () => changes++;
             PolygonReduction.Ready += () => changes++;
-            SceneView.duringSceneGui += _ => repaints++;
         }
 
         internal sealed class ImportWatcher : AssetPostprocessor
@@ -150,29 +168,49 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
-        // The skinned meshes whose weights Weights hashes, found again after a change.
-        private SkinnedMeshRenderer[] weighted;
-        private int weightedAt = -1;
+        private static readonly System.Collections.Generic.List<Component> Components = new System.Collections.Generic.List<Component>();
+        private static readonly System.Collections.Generic.List<Material> Materials = new System.Collections.Generic.List<Material>();
 
-        // A hash of the avatar's blendshape weights: reads numbers only.
-        private int Weights()
+        /// <summary>
+        /// The inputs of the estimate's key as one number: each renderer (shown, mesh, scale and its root bone's, blendshape
+        /// weights, materials and their edits) and each component (shown or enabled). Reads numbers only.
+        /// </summary>
+        internal static long Signature(MyAvatar avatar)
         {
-            if (weightedAt != changes || weighted == null) { weighted = TextureOptimization.AvatarRoot(avatar).GetComponentsInChildren<SkinnedMeshRenderer>(true); weightedAt = changes; }
-            int hash = 17;
-            foreach (var skinned in weighted)
+            ulong hash = 14695981039346656037UL;
+            void Add(long value) { hash = (hash ^ (ulong)value) * 1099511628211UL; hash ^= hash >> 31; }
+            void Scale(Transform t) { if (!t) return; var s = t.lossyScale; Add(s.x.GetHashCode()); Add(s.y.GetHashCode()); Add(s.z.GetHashCode()); }
+            Components.Clear();
+            TextureOptimization.AvatarRoot(avatar).GetComponentsInChildren(true, Components);
+            Add(Components.Count);
+            foreach (var component in Components)
             {
-                if (!skinned) continue;
-                var mesh = skinned.sharedMesh;
-                int count = mesh ? mesh.blendShapeCount : 0;
-                for (int shape = 0; shape < count; shape++) hash = hash * 31 + skinned.GetBlendShapeWeight(shape).GetHashCode();
+                if (component == null) { Add(0); continue; }
+                Add(component.GetInstanceID());
+                if (component is Transform t) Add(t.gameObject.activeSelf ? 1 : 2);
+                else if (component is Behaviour b) Add(b.enabled ? 1 : 2);
+                if (!(component is Renderer renderer)) continue;
+                Add(renderer.enabled ? 1 : 2);
+                var mesh = Orbiters.Toolkit.Editor.VRChat.Optimization.MeshOptimization.MeshOf(renderer);
+                Add(mesh ? mesh.GetInstanceID() : 0);
+                Scale(renderer.transform);
+                if (renderer is SkinnedMeshRenderer skinned)
+                {
+                    Scale(skinned.rootBone);
+                    if (mesh) for (int shape = 0; shape < mesh.blendShapeCount; shape++) Add(skinned.GetBlendShapeWeight(shape).GetHashCode());
+                }
+                Materials.Clear();
+                renderer.GetSharedMaterials(Materials);
+                foreach (var material in Materials) { Add(material ? material.GetInstanceID() : 0); Add(material ? EditorUtility.GetDirtyCount(material) : 0); }
             }
-            return hash;
+            Components.Clear(); Materials.Clear();
+            return (long)hash;
         }
 
         private void Refresh()
         {
             if (!avatar || panel == null && shown != null) return;
-            seenChanges = changes; seenRepaints = repaints; seenQuest = Quest; seenWeights = Weights();
+            seenChanges = changes; seenQuest = Quest; seenSignature = Signature(avatar);
             using (OptimizationEstimate.KeysHeld()) Show();
         }
 
