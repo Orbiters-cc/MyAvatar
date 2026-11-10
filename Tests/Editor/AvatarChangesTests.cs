@@ -140,6 +140,36 @@ namespace Orbiters.MyAvatar.Editor.Tests
             Assert.AreEqual("Long hair", AvatarSnapshot.Of(avatar.gameObject).PathOf(hair));
         }
 
+        // Review of MAC-2: a component replaced without Undo at a constant object count while no section watched the avatar
+        // (its Inspector closed) is seen once one watches again: what the sections read is what a fresh snapshot reads.
+        [Test] public void AChangeWhileNothingWatchedIsSeenOnReopening()
+        {
+            var avatar = Avatar("A");
+            var root = avatar.gameObject;
+            var watch = AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, _ => { });
+            CollectionAssert.AreEquivalent(AvatarSnapshot.Take(root).All<Renderer>(), AvatarMaterials.Renderers(root, fromSnapshot: true));
+            watch.Dispose();
+            var hair = avatar.transform.Find("Hair").gameObject;
+            Object.DestroyImmediate(hair.GetComponent<MeshRenderer>());
+            hair.AddComponent<SkinnedMeshRenderer>();
+            watches.Add(AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, _ => { }));
+            var read = AvatarMaterials.Renderers(root, fromSnapshot: true);
+            CollectionAssert.AreEquivalent(AvatarSnapshot.Take(root).All<Renderer>(), read);
+            Assert.That(read, Has.Some.InstanceOf<SkinnedMeshRenderer>());
+        }
+
+        // Changes that raise no event at all are caught by the periodic signature check.
+        [Test] public void AChangeNothingReportsIsCaughtByReconciling()
+        {
+            var avatar = Avatar("A");
+            var heard = new List<AvatarFacets>();
+            watches.Add(AvatarChanges.Watch(avatar, AvatarFacets.Hierarchy, heard.Add));
+            avatar.transform.Find("Hair").GetComponent<MeshRenderer>().sharedMaterial = new Material(Shader.Find("Standard"));
+            AvatarChanges.Reconciled();
+            AvatarChanges.Flush(now: true);
+            CollectionAssert.AreEqual(new[] { AvatarFacets.Hierarchy }, heard);
+        }
+
         // A hierarchy change somewhere does not move the time an avatar already waiting is told at.
         [Test] public void HierarchyChangesElsewhereDoNotHoldAnAvatarBack()
         {

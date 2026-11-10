@@ -84,7 +84,13 @@ namespace Orbiters.MyAvatar.Editor
             if (!avatar || changed == null) return new Subscription(null);
             Hook();
             int id = avatar.GetInstanceID();
-            if (!Avatars.TryGetValue(id, out var watched)) Avatars[id] = watched = new Watched { avatar = avatar, id = id, signature = Signature(avatar) };
+            if (!Avatars.TryGetValue(id, out var watched))
+            {
+                Avatars[id] = watched = new Watched { avatar = avatar, id = id, signature = Signature(avatar) };
+                // Nothing watched the avatar until now: what changed meanwhile without telling the editor (a component
+                // replaced by a script at a constant object count) never reached its snapshot. Its facts are read again.
+                InvalidateSnapshots(avatar);
+            }
             var watcher = new Watcher { watched = watched, facets = facets, changed = changed };
             watched.watchers.Add(watcher);
             return new Subscription(watcher);
@@ -106,18 +112,37 @@ namespace Orbiters.MyAvatar.Editor
             }
         }
 
+        // Changes nothing reports at all (a material assigned by a script without Undo raises no event, not even
+        // hierarchyChanged): every watched avatar's signature is compared this often, one walk per avatar.
+        internal const double Reconcile = 10;
+        private static IDisposable reconciling;
+
+        // Sections read the snapshot of the avatar's root (its descriptor's object) or of the avatar's own object.
+        private static void InvalidateSnapshots(MyAvatar avatar)
+        {
+            var root = TextureOptimization.AvatarRoot(avatar);
+            AvatarSnapshot.Of(root)?.Invalidate();
+            if (root != avatar.gameObject) AvatarSnapshot.Of(avatar.gameObject)?.Invalidate();
+        }
+
         private static void Hook()
         {
             if (hooked) return;
             hooked = true;
             EditorChangeBus.Changed += Changed;
+            reconciling = OrbitersEditorHost.Every("MyAvatar.AvatarChanges.Reconcile", Reconcile, Reconciled);
         }
+
+        // Each watched avatar compares its signature at its next flush, as after hierarchyChanged.
+        internal static void Reconciled() => HierarchyChanged();
 
         private static void Unhook()
         {
             if (!hooked) return;
             hooked = false;
             EditorChangeBus.Changed -= Changed;
+            reconciling?.Dispose();
+            reconciling = null;
             StopTicking();
         }
 
@@ -255,7 +280,7 @@ namespace Orbiters.MyAvatar.Editor
                         watched.signature = signature;
                         watched.pending |= AvatarFacets.Hierarchy;
                         // A change the bus may not have reported (made without Undo): the snapshot's facts go too.
-                        AvatarSnapshot.Of(TextureOptimization.AvatarRoot(watched.avatar))?.Invalidate();
+                        InvalidateSnapshots(watched.avatar);
                     }
                 }
                 var pending = watched.pending;
