@@ -1167,6 +1167,9 @@ namespace Orbiters.MyAvatar.Editor.Tests
             string State() => string.Join("\n", referenced.Select(o => o.name + " " + (o is Mesh ? "" : EditorUtility.GetDirtyCount(o) + " " + EditorUtility.IsDirty(o)) + " " +
                 (o is Mesh m ? string.Join(",", m.vertices.Select(v => v.ToString("R"))) + "|" + string.Join(",", m.triangles) : EditorJsonUtility.ToJson(o)))
                 .Concat(renderers.Select(r => EditorJsonUtility.ToJson(r))));
+            // What Unity itself does to an avatar when it is copied happens before the comparison (a skinned renderer made by
+            // script gets its bounds the first time it is copied): the comparison is about what the measure's own steps do.
+            Object.DestroyImmediate(Object.Instantiate(root.gameObject));
             string before = State();
 
             OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
