@@ -851,6 +851,8 @@ namespace Orbiters.MyAvatar.Editor.Tests
             // Eight times as wide and tall: the texture covers more surface, so it keeps more texels from 8 m.
             mesh.vertices = mesh.vertices.Select(v => v * 8f).ToArray();
             EditorUtility.SetDirty(mesh);
+            // Saved, as a tool editing a mesh asset in place leaves it: the import that follows is what the key holds.
+            AssetDatabase.SaveAssetIfDirty(mesh);
             Assert.That(Megabytes(), Is.GreaterThan(small), "The density is measured on the mesh as it is now.");
 
             var shapes = Object.Instantiate(Skinned("Body").sharedMesh);

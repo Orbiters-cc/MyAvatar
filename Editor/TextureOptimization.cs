@@ -498,16 +498,14 @@ namespace Orbiters.MyAvatar.Editor
                 if (EditorHelper(renderer)) continue;
                 key.Append('|').Append(renderer.GetInstanceID());
                 var mesh = MeshOptimization.MeshOf(renderer);
-                // The mesh, its layout and, for an asset, its edits (an edit marks it dirty: its vertices and UVs decide the
-                // texture density). A mesh in memory is keyed by its layout and the edits announced above: Unity raises its
-                // dirty count when merely read or copied (an estimate's hidden copy made its avatar's key change while
-                // measuring). A tool rewriting an in-memory mesh in place without announcing it and without changing its
-                // counts is seen at the next change the key holds, as before round 1.
+                // The mesh and its layout; its content through the edits announced above and, for an asset, through the
+                // imports (a saved or reimported mesh). Never its dirty count: Unity raises a skinned mesh's count each time
+                // the mesh is instantiated (checked in 2022.3.22: asset or not, with nothing changed), and an estimate
+                // instantiates the avatar's meshes for its hidden copy, so its own measure would change its key every time.
+                // A tool rewriting a mesh in place without announcing it, saving it or changing its counts is seen at the
+                // next change the key holds.
                 if (mesh)
-                {
                     key.Append('#').Append(mesh.GetInstanceID()).Append(':').Append(mesh.vertexCount).Append(':').Append(mesh.subMeshCount).Append(':').Append(mesh.blendShapeCount);
-                    if (EditorUtility.IsPersistent(mesh)) key.Append('.').Append(EditorUtility.GetDirtyCount(mesh));
-                }
                 Scale(renderer.transform);
                 if (renderer is SkinnedMeshRenderer skinned)
                 {
