@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -9,6 +8,8 @@ using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 using VRC.SDKBase.Editor.BuildPipeline;
 using Orbiters.Toolkit.Editor.Animations;
+using Orbiters.Toolkit.Editor.VRChat.Attachments;
+using Orbiters.Toolkit.Editor.VRChat.Build;
 using Object = UnityEngine.Object;
 
 namespace Orbiters.MyAvatar.Editor.FaceTracking
@@ -131,7 +132,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
         /// <summary>How much slower than the eyes the mouth follows (1: as fast): it keeps 70 % of the last frame at 90 fps, 80 % when smooth.</summary>
         internal static float MouthSlowdown(FaceTrackingSmoothing smoothing) =>
             smoothing == FaceTrackingSmoothing.Responsive ? 1f : smoothing == FaceTrackingSmoothing.Smooth ? SmoothSlowdown : SlowSmoothing;
-        private static readonly ConditionalWeakTable<GameObject, Plan> Plans = new ConditionalWeakTable<GameObject, Plan>();
+        // What the capture found for the apply, kept by the build (BuildContext): a new build of the same object starts empty.
+        private sealed class Planned { public Plan Plan; }
 
         // Before VRCFury (-10000): its components, and the marker's face reference, are still there.
         internal sealed class Capture : IVRCSDKPreprocessAvatarCallback
@@ -141,7 +143,8 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             public bool OnPreprocessAvatar(GameObject avatar)
             {
                 var marker = avatar.GetComponentInChildren<MyAvatarFaceTracking>(true);
-                Plans.Remove(avatar);
+                var planned = BuildContext.For(avatar).State<Planned>();
+                planned.Plan = null;
                 if (marker == null) return true;
                 var face = FaceTrackingSetup.CurrentFace(marker, avatar.transform);
                 if (face == null)
@@ -160,14 +163,14 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
                     Debug.LogWarning("[My Avatar] Face tracking: this template version has no path rewrite to point it at “" + facePath + "”.");
                 var standard = FaceTrackingStandard.Find(marker.standard);
                 if (standard != null)
-                    Plans.Add(avatar, new Plan
+                    planned.Plan = new Plan
                     {
                         Standard = standard, FacePath = facePath, Face = face.sharedMesh, Root = avatar.transform,
                         Smoothing = marker.smoothing, Expressive = marker.expressiveMouth,
                         // A part of the face without its shapes (eyes on a face made for lip tracking) costs no bits.
                         Removed = FaceTrackingFeatureSet.Removed(FaceTrackingFeatureSet.Parameters(marker.gameObject).Select(p => p.name),
                             marker.synced & FaceTrackingDetection.Trackable(standard, face.sharedMesh)),
-                    });
+                    };
                 return true;
             }
         }
@@ -180,14 +183,24 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
 
             public bool OnPreprocessAvatar(GameObject avatar)
             {
-                if (!Plans.TryGetValue(avatar, out var plan)) return true;
-                Plans.Remove(avatar);
+                var context = BuildContext.For(avatar);
+                var planned = context.State<Planned>();
+                var plan = planned.Plan;
+                if (plan == null) return true;
+                planned.Plan = null;
                 var descriptor = avatar.GetComponent<VRCAvatarDescriptor>();
-                var fx = descriptor != null ? descriptor.baseAnimationLayers.FirstOrDefault(l => l.type == VRCAvatarDescriptor.AnimLayerType.FX).animatorController as AnimatorController : null;
+                AnimatorController Fx() => descriptor != null ? descriptor.baseAnimationLayers.FirstOrDefault(l => l.type == VRCAvatarDescriptor.AnimLayerType.FX).animatorController as AnimatorController : null;
+                var fx = Fx();
                 if (fx == null) return true;
+                // An avatar VRCFury did not build: the build's own copies of its controllers, as the menu step takes them (MAF-4).
                 if (!Editable(fx))
                 {
-                    Debug.LogWarning("[My Avatar] Face tracking: the FX controller “" + fx.name + "” is the avatar's own asset (VRCFury did not build this avatar), so its blendshape names and gestures were left as they are.");
+                    _ = context.Animations;
+                    fx = Fx();
+                }
+                if (fx == null || !Editable(fx))
+                {
+                    Debug.LogWarning("[My Avatar] Face tracking: the FX controller “" + (fx != null ? fx.name : "") + "” could not be copied for this build, so its blendshape names and gestures were left as they are.");
                     return true;
                 }
                 var (renamed, gated, quieted, tuned, paced) = Build(fx, plan.Standard, plan.FacePath, plan.Face, plan.Root, plan.Expressive, plan.Smoothing);
@@ -281,15 +294,13 @@ namespace Orbiters.MyAvatar.Editor.FaceTracking
             return count;
         }
 
-        /// <summary>VRCFury's working copies and objects in memory: anything else (the avatar's own assets) is never edited.</summary>
+        /// <summary>Build data (<see cref="AttachmentAnimationBuild.IsBuildData"/>): anything else (the avatar's own assets) is never edited.</summary>
         internal static bool Editable(Object asset) => Owned(asset, null);
 
-        // VRCFury's working copies, and objects made during this build, can be edited; anything else is copied first.
-        private static bool Owned(Object asset, AnimatorController fx)
-        {
-            string path = AssetDatabase.GetAssetPath(asset);
-            return string.IsNullOrEmpty(path) || path.StartsWith("Packages/com.vrcfury.temp/", StringComparison.Ordinal) || (fx != null && path == AssetDatabase.GetAssetPath(fx));
-        }
+        // The build's data (VRCFury's working copies, the build's own copies and what it made) can be edited, and what is
+        // in the controller's own file; anything else is copied first. One definition with the menu step's (MAF-4).
+        private static bool Owned(Object asset, AnimatorController fx) =>
+            AttachmentAnimationBuild.IsBuildData(asset) || (fx != null && AssetDatabase.GetAssetPath(asset) == AssetDatabase.GetAssetPath(fx));
 
         private static T Own<T>(T asset, AnimatorController fx) where T : Object
         {
