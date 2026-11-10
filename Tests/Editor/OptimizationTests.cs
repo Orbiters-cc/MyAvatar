@@ -1141,6 +1141,37 @@ namespace Orbiters.MyAvatar.Editor.Tests
             return renderer;
         }
 
+        // An estimate measures a hidden copy: at every level, nothing the avatar references is changed or marked changed, its
+        // meshes as assets and in memory alike.
+        [Test] public void MeasuringLeavesEverythingTheAvatarShowsUntouched([Values(OptimizationLevel.Small, OptimizationLevel.Big)] OptimizationLevel level)
+        {
+            string folder = Folder();
+            var material = Own(new Material(Shader.Find("Standard")));
+            material.SetTexture("_MainTex", Image(folder, "Board_BaseColor", 256));
+            Board(material);
+            Skinned("Body");
+            var asset = Skinned("Shirt");
+            var mesh = Object.Instantiate(asset.sharedMesh);
+            AssetDatabase.CreateAsset(mesh, folder + "/Shirt.asset");
+            asset.sharedMesh = mesh;
+            settings.uploadOptimization.level = level;
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            var referenced = renderers.Select(Toolkit.Editor.VRChat.Optimization.MeshOptimization.MeshOf).Cast<Object>()
+                .Concat(renderers.SelectMany(r => r.sharedMaterials))
+                .Concat(renderers.SelectMany(r => r.sharedMaterials).Where(m => m != null).SelectMany(m => m.GetTexturePropertyNameIDs().Select(m.GetTexture)))
+                .Where(o => o != null).Distinct().ToList();
+            string State() => string.Join("\n", referenced.Select(o => o.name + " " + EditorUtility.GetDirtyCount(o) + " " + EditorUtility.IsDirty(o) + " " +
+                (o is Mesh m ? string.Join(",", m.vertices.Select(v => v.ToString("R"))) + "|" + string.Join(",", m.triangles) : EditorJsonUtility.ToJson(o)))
+                .Concat(renderers.Select(r => EditorJsonUtility.ToJson(r))));
+            string before = State();
+
+            OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null);
+            FinishKeepingTheKey();
+
+            Assert.That(OptimizationEstimate.Get(settings, settings.uploadOptimization.Passes, null)?.Error, Is.Null);
+            Assert.That(State(), Is.EqualTo(before), "the avatar's meshes, materials, textures and renderers as they were, none marked changed");
+        }
+
         // Finishes the estimates, and fails saying what changed when measuring changed what the avatar's estimate is keyed by
         // (Get would then never find the result: it measures the avatar again).
         private void FinishKeepingTheKey()
