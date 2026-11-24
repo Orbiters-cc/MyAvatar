@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Orbiters.MyAvatar.Editor.Gallery;
+using UnityEditor;
+using UnityEngine;
 
 namespace Orbiters.MyAvatar.Editor.Tests
 {
@@ -34,6 +36,30 @@ namespace Orbiters.MyAvatar.Editor.Tests
             var older = new List<GalleryDependency> { new GalleryDependency { id = "com.vrchat.avatars", range = ">=3.7.2" } };
             GalleryPackager.LowerVrchatSdk(older, "3.10.2");
             Assert.AreEqual(">=3.7.2", older[0].range, "a creator on an older SDK than the floor keeps their range");
+        }
+
+        // A VRChat raycast (the avatar gun's) came with a recent SDK: its item keeps the creator's SDK as its minimum.
+        [Test]
+        public void ARaycastKeepsTheCreatorsSdk()
+        {
+            string folder = "Assets/__OrbitersSdkFloorTest-" + System.Guid.NewGuid().ToString("N");
+            System.IO.Directory.CreateDirectory(folder); AssetDatabase.ImportAsset(folder);
+            var root = new GameObject("Raycast prop");
+            try
+            {
+                root.AddComponent<VRC.SDK3.Avatars.Components.VRCRaycast>();
+                string path = folder + "/Raycast prop.prefab";
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+                Assert.IsNull(GalleryPackager.VrchatSdkFloor(new[] { path }));
+                var dependencies = new List<GalleryDependency> { new GalleryDependency { id = "com.vrchat.avatars", range = ">=3.10.6" } };
+                GalleryPackager.LowerVrchatSdk(dependencies, null);
+                Assert.AreEqual(">=3.10.6", dependencies[0].range);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                AssetDatabase.DeleteAsset(folder);
+            }
         }
     }
 }

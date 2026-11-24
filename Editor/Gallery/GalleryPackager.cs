@@ -264,7 +264,8 @@ namespace Orbiters.MyAvatar.Editor.Gallery
         /// The oldest VRChat SDK the item's content works with, from what it uses: a local-only contact sender needs 3.7.6,
         /// a PhysBone permission filter limited to some content types 3.10.0, a parameter driver's Prevent Repeats 3.10.2.
         /// Else <see cref="OldestVrchatSdk"/>. (The creator's own SDK version used to be the minimum: N4N0 1.0.19, built
-        /// with 3.10.3, refused every older project although it only needs 3.7.6.)
+        /// with 3.10.3, refused every older project although it only needs 3.7.6.) A VRChat raycast (the avatar gun's)
+        /// came with a recent SDK whose oldest version is not known here: null, the creator's own SDK stays the minimum.
         /// </summary>
         internal static string VrchatSdkFloor(IEnumerable<string> paths)
         {
@@ -279,6 +280,7 @@ namespace Orbiters.MyAvatar.Editor.Gallery
                 {
                     if (obj == null) continue;
                     string type = obj.GetType().Name;
+                    if (type == "VRCRaycast") return null;
                     if (type != "VRCContactSender" && type != "VRCPhysBone" && type != "VRCAvatarParameterDriver") continue;
                     var so = new SerializedObject(obj);
                     if (type == "VRCContactSender") localSender |= so.FindProperty("localOnly")?.boolValue == true;
@@ -313,7 +315,10 @@ namespace Orbiters.MyAvatar.Editor.Gallery
             catch (Exception) { return null; }
         }
 
-        /// <summary>The VRChat SDK packages' ranges become "&gt;=<paramref name="floor"/>" (never above what the creator has).</summary>
+        /// <summary>
+        /// The VRChat SDK packages' ranges become "&gt;=<paramref name="floor"/>" (never above what the creator has); a null
+        /// floor leaves them at the creator's.
+        /// </summary>
         internal static void LowerVrchatSdk(List<GalleryDependency> dependencies, string floor)
         {
             foreach (var dependency in dependencies)
